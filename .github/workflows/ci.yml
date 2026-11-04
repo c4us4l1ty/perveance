@@ -109,9 +109,6 @@ jobs:
             wait "$pid"
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
-            if [ -f /tmp/perveance-flipped.png ]; then
-              /usr/bin/python3 -c 'from PIL import Image; import base64,io; im=Image.open("/tmp/perveance-flipped.png").convert("RGB").crop((380,40,1200,420)).quantize(colors=32); b=io.BytesIO(); im.save(b,format="PNG",optimize=True); x=base64.b64encode(b.getvalue()).decode(); [print(f"::notice::SCREENSHOT {i//3000}:"+x[i:i+3000]) for i in range(0,len(x),3000)]'
-            fi
             for file in /tmp/perveance-smoke.log /tmp/perveance-gui.log; do
               if [ -f "$file" ]; then
                 tail -n 12 "$file" | while IFS= read -r line; do

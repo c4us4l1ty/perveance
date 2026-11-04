@@ -30,10 +30,10 @@ assert cleared[0] == cleared[1] == cleared[2] and cleared[0] < 100, cleared
 
 # A duplicated layer is mirrored without moving the original, then cleared and undone.
 original = pixel("/tmp/perveance-flipped.png", (438, 112))
-flipped = pixel("/tmp/perveance-flipped.png", (762, 112))
-cleared_flip = pixel("/tmp/perveance-cleared.png", (762, 112))
+flipped = pixel("/tmp/perveance-flipped.png", (770, 112))
+cleared_flip = pixel("/tmp/perveance-cleared.png", (770, 112))
 original_after_clear = pixel("/tmp/perveance-cleared.png", (438, 112))
-restored = pixel("/tmp/perveance-clear-undone.png", (762, 112))
+restored = pixel("/tmp/perveance-clear-undone.png", (770, 112))
 print("Original:", original, "flipped copy:", flipped, "cleared:", cleared_flip, "undo:", restored)
 assert is_ink(original), original
 assert is_ink(flipped), flipped
