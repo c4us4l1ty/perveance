@@ -144,6 +144,8 @@ pub enum Operation {
     Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
     Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
     Rectangle { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
+    RectangleOutline { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
+    Ellipse { layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4] },
     Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
 }
 
@@ -249,6 +251,54 @@ impl Project {
         Ok(())
     }
 
+    /// Draw a one-pixel rectangle border, including degenerate one-pixel boxes.
+    pub fn rectangle_outline(&mut self, layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4]) -> Result<(), String> {
+        self.check_shape_bounds(layer, x, y, width, height)?;
+        let pixels = &mut self.layers[layer].pixels;
+        let stride = self.width as usize;
+        for dy in 0..height {
+            for dx in 0..width {
+                if dx == 0 || dy == 0 || dx + 1 == width || dy + 1 == height {
+                    pixels[(y + dy) as usize * stride + (x + dx) as usize] = color;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Raster ellipse using pixel centers; outlines are its four-connected edge.
+    pub fn ellipse(&mut self, layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4]) -> Result<(), String> {
+        self.check_shape_bounds(layer, x, y, width, height)?;
+        let (w, h) = (i64::from(width), i64::from(height));
+        let inside = |px: i64, py: i64| -> bool {
+            if px < 0 || py < 0 || px >= w || py >= h { return false; }
+            let dx = 2 * px + 1 - w;
+            let dy = 2 * py + 1 - h;
+            dx * dx * h * h + dy * dy * w * w <= w * w * h * h
+        };
+        let stride = self.width as usize;
+        let pixels = &mut self.layers[layer].pixels;
+        for dy in 0..height {
+            for dx in 0..width {
+                let (px, py) = (i64::from(dx), i64::from(dy));
+                if inside(px, py) && (filled || !inside(px - 1, py) || !inside(px + 1, py) || !inside(px, py - 1) || !inside(px, py + 1)) {
+                    pixels[(y + dy) as usize * stride + (x + dx) as usize] = color;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_shape_bounds(&self, layer: usize, x: u32, y: u32, width: u32, height: u32) -> Result<(), String> {
+        self.validate()?;
+        let right = x.checked_add(width).ok_or("shape out of bounds")?;
+        let bottom = y.checked_add(height).ok_or("shape out of bounds")?;
+        if layer >= self.layers.len() || width == 0 || height == 0 || right > self.width || bottom > self.height {
+            return Err("shape or layer is outside the project".into());
+        }
+        Ok(())
+    }
+
     pub fn set_pixel(&mut self, layer: usize, x: u32, y: u32, color: [u8; 4]) -> Result<(), String> {
         self.validate()?;
         if x >= self.width || y >= self.height { return Err("pixel is outside canvas".into()); }
@@ -327,6 +377,8 @@ impl Project {
                 Operation::Pixel { layer, x, y, color } => candidate.set_pixel(*layer, *x, *y, *color),
                 Operation::Line { layer, from, to, color } => candidate.draw_line(*layer, *from, *to, *color),
                 Operation::Rectangle { layer, x, y, width, height, color } => candidate.rectangle(*layer, *x, *y, *width, *height, *color),
+                Operation::RectangleOutline { layer, x, y, width, height, color } => candidate.rectangle_outline(*layer, *x, *y, *width, *height, *color),
+                Operation::Ellipse { layer, x, y, width, height, filled, color } => candidate.ellipse(*layer, *x, *y, *width, *height, *filled, *color),
                 Operation::Fill { layer, x, y, color } => candidate.fill(*layer, *x, *y, *color),
             };
             result.map_err(|error| format!("operation {index}: {error}"))?;
@@ -590,6 +642,35 @@ mod tests {
         while history.undo(&mut project) { count += 1; }
         assert_eq!(count, 20);
         assert!(history.can_redo());
+    }
+    #[test]
+    fn rectangle_and_ellipse_masks_are_symmetric_and_respect_bounds() {
+        let ink = [1, 2, 3, 255];
+        for width in 1..=10 {
+            for height in 1..=10 {
+                let mut p = Project::new(width, height).unwrap();
+                p.ellipse(0, 0, 0, width, height, true, ink).unwrap();
+                let pixels = &p.layers[0].pixels;
+                for y in 0..height {
+                    for x in 0..width {
+                        let at = |x, y| pixels[(y * width + x) as usize];
+                        assert_eq!(at(x, y), at(width - 1 - x, y));
+                        assert_eq!(at(x, y), at(x, height - 1 - y));
+                    }
+                }
+                assert!(pixels.contains(&ink));
+            }
+        }
+        let mut p = Project::new(5, 5).unwrap();
+        p.ellipse(0, 0, 0, 5, 5, false, ink).unwrap();
+        assert_eq!(p.layers[0].pixels[12], [0; 4]);
+        assert_eq!(p.layers[0].pixels[2], ink);
+        p.rectangle_outline(0, 1, 1, 3, 3, ink).unwrap();
+        assert_eq!(p.layers[0].pixels[12], [0; 4]);
+        let original = p.clone();
+        assert!(p.ellipse(0, 4, 4, 2, 2, true, ink).is_err());
+        assert!(p.rectangle_outline(0, u32::MAX, 0, 2, 1, ink).is_err());
+        assert_eq!(p, original);
     }
     #[test]
     fn project_round_trip_and_png_are_valid() {

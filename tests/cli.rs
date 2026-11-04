@@ -135,3 +135,31 @@ fn example_potion_is_layered_and_transparent() {
     let pixel = (7 * 16 + 6) * 4;
     assert_eq!(&rgba[pixel..pixel + 4], &[239, 204, 245, 255]);
 }
+
+#[test]
+fn raster_shapes_are_discoverable_and_batch_errors_are_atomic() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("base.json");
+    let output = dir.0.join("shapes.json");
+    let bad_output = dir.0.join("bad.json");
+    let operations = dir.0.join("shapes-ops.json");
+    assert!(cli(&["new", "7", "7", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"rectangle_outline","layer":0,"x":1,"y":1,"width":5,"height":5,"color":[255,0,0,255]},
+        {"op":"ellipse","layer":0,"x":2,"y":2,"width":3,"height":3,"filled":true,"color":[0,0,255,255]}
+    ]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), output.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let project = perveance::Project::load(&output).unwrap();
+    assert_eq!(project.layers[0].pixels[8], [255, 0, 0, 255]);
+    assert_eq!(project.layers[0].pixels[24], [0, 0, 255, 255]);
+    fs::write(&operations, r#"[
+        {"op":"rectangle_outline","layer":0,"x":0,"y":0,"width":2,"height":2,"color":[255,0,0,255]},
+        {"op":"ellipse","layer":0,"x":6,"y":6,"width":2,"height":2,"filled":false,"color":[0,0,255,255]}
+    ]"#).unwrap();
+    assert!(!cli(&["apply", initial.to_str().unwrap(), bad_output.to_str().unwrap(), operations.to_str().unwrap()]).status.success());
+    assert!(!bad_output.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap().layers[0].pixels[0], [0; 4]);
+    let value: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "ellipse"));
+}

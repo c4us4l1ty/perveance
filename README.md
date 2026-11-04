@@ -4,7 +4,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 
 ## Current prototype
 
-- A native Linux desktop window with a pixel canvas, pencil, eraser, fill, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
+- A native Linux desktop window with a pixel canvas, pencil, eraser, fill, rectangle and ellipse tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -16,7 +16,7 @@ Use a current stable Rust toolchain and the Linux X11 development dependencies, 
 
 ### Headless batch editing
 
-The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
+The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
 
 ```json
 [
@@ -54,3 +54,5 @@ cargo run --locked --bin perveance-cli -- import-png project.json another-image.
 ```
 
 PNG input is limited to 8 MiB and dimensions of 1–256 pixels on each side. Static RGB, RGBA, grayscale, grayscale-alpha and indexed images are decoded to editable 8-bit RGBA; 16-bit samples are reduced to 8 bits. Animated PNGs are rejected. Metadata, ICC profiles and color management are not preserved or applied, so colors may differ from color-managed applications. Importing does not make a generated image's original objects or layers editable: the PNG is one raster layer. There is no resizing or alignment on layer import.
+
+Rectangle and ellipse tools write raster pixels to the selected layer; they are not editable vector objects. Drag in either direction and choose filled or outlined. Ellipse edges use a deterministic pixel-center rasterization, and outline pixels are the four-connected edge.

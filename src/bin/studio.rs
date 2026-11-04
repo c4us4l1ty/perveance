@@ -3,7 +3,7 @@ use perveance::{History, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Pencil, Eraser, Fill }
+enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse }
 
 fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str) {
     ui.horizontal(|ui| {
@@ -31,6 +31,15 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
                 ui.painter().line_segment([p(9.0, 14.0), p(3.0, 8.0)], stroke);
                 ui.painter().circle_filled(p(15.0, 14.0), 1.5, tint);
             }
+            Tool::Rectangle => {
+                ui.painter().line_segment([p(3.0, 4.0), p(15.0, 4.0)], stroke);
+                ui.painter().line_segment([p(15.0, 4.0), p(15.0, 14.0)], stroke);
+                ui.painter().line_segment([p(15.0, 14.0), p(3.0, 14.0)], stroke);
+                ui.painter().line_segment([p(3.0, 14.0), p(3.0, 4.0)], stroke);
+            }
+            Tool::Ellipse => {
+                ui.painter().add(egui::Shape::ellipse_stroke(p(9.0, 9.0), Vec2::new(6.0, 5.0), stroke));
+            }
         }
         if ui.selectable_label(*current == target, label).clicked() { *current = target; }
     });
@@ -43,6 +52,9 @@ struct Studio {
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
+    shape_start: Option<[u32; 2]>,
+    shape_current: Option<[u32; 2]>,
+    shape_filled: bool,
     path: String,
     png_path: String,
     status: String,
@@ -59,7 +71,7 @@ struct Studio {
 impl Default for Studio {
     fn default() -> Self {
         Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
+            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -81,9 +93,30 @@ impl Studio {
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
     }
+    fn commit_shape(&mut self, start: [u32; 2], end: [u32; 2]) {
+        let (x, y, width, height) = shape_box(start, end);
+        let layer = self.layer;
+        let color = self.color;
+        let filled = self.shape_filled;
+        let tool = self.tool;
+        let result = self.history.apply_with_selection(&mut self.project, layer, |project| match tool {
+            Tool::Rectangle if filled => project.rectangle(layer, x, y, width, height, color),
+            Tool::Rectangle => project.rectangle_outline(layer, x, y, width, height, color),
+            Tool::Ellipse => project.ellipse(layer, x, y, width, height, filled, color),
+            _ => Err("not a shape tool".into()),
+        });
+        if let Err(error) = result { self.status = error; }
+    }
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
     }
+}
+
+/// Inclusive endpoints in either direction produce a positive pixel bounding box.
+fn shape_box(start: [u32; 2], end: [u32; 2]) -> (u32, u32, u32, u32) {
+    let x = start[0].min(end[0]);
+    let y = start[1].min(end[1]);
+    (x, y, start[0].max(end[0]) - x + 1, start[1].max(end[1]) - y + 1)
 }
 
 impl eframe::App for Studio {
@@ -119,6 +152,11 @@ impl eframe::App for Studio {
             tool_button(ui, &mut self.tool, Tool::Pencil, "Pencil");
             tool_button(ui, &mut self.tool, Tool::Eraser, "Eraser");
             tool_button(ui, &mut self.tool, Tool::Fill, "Fill");
+            tool_button(ui, &mut self.tool, Tool::Rectangle, "Rectangle");
+            tool_button(ui, &mut self.tool, Tool::Ellipse, "Ellipse");
+            if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
+                ui.checkbox(&mut self.shape_filled, "Filled shape");
+            }
             ui.separator();
             ui.label("Color");
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
@@ -131,7 +169,7 @@ impl eframe::App for Studio {
             ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
             if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
                 match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
+                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
                     Err(error) => self.status = error,
                 }
             }
@@ -149,7 +187,7 @@ impl eframe::App for Studio {
             }
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
+                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
                     Err(error) => self.status = error,
                 }
             }
@@ -175,6 +213,8 @@ impl eframe::App for Studio {
                         self.project = project;
                         self.layer = 0;
                         self.history.clear();
+                        self.shape_start = None;
+                        self.shape_current = None;
                         self.rename_buffer = self.project.layers[0].name.clone();
                         self.confirm_open = false;
                         self.status = "PNG opened as a new canvas.".into();
@@ -298,6 +338,43 @@ impl eframe::App for Studio {
                     let y = ((pos.y - rect.min.y) / scale) as u32;
                     if x < width && y < height { Some([x, y]) } else { None }
                 };
+                if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
+                    if response.drag_started() {
+                        self.shape_start = ctx.input(|input| input.pointer.press_origin()).and_then(to_pixel);
+                        self.shape_current = self.shape_start;
+                    }
+                    if response.drag_started() || response.dragged() || response.drag_stopped() {
+                        if let Some(pos) = ctx.input(|input| input.pointer.latest_pos()) {
+                            let x = (((pos.x - rect.min.x) / scale).floor() as i32).clamp(0, width as i32 - 1) as u32;
+                            let y = (((pos.y - rect.min.y) / scale).floor() as i32).clamp(0, height as i32 - 1) as u32;
+                            self.shape_current = Some([x, y]);
+                        }
+                    }
+                    if response.clicked() {
+                        if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) { self.commit_shape(point, point); }
+                        self.shape_start = None;
+                        self.shape_current = None;
+                    } else if response.drag_stopped() {
+                        if let (Some(start), Some(end)) = (self.shape_start, self.shape_current) { self.commit_shape(start, end); }
+                        self.shape_start = None;
+                        self.shape_current = None;
+                    }
+                    if let (Some(start), Some(end)) = (self.shape_start, self.shape_current) {
+                        let (x, y, w, h) = shape_box(start, end);
+                        let preview = Rect::from_min_size(Pos2::new(rect.min.x + x as f32 * scale, rect.min.y + y as f32 * scale), Vec2::new(w as f32 * scale, h as f32 * scale));
+                        let stroke = egui::Stroke::new(1.5, Color32::from_rgb(166, 215, 74));
+                        if self.tool == Tool::Ellipse {
+                            ui.painter().add(egui::Shape::ellipse_stroke(preview.center(), preview.size() / 2.0, stroke));
+                        } else {
+                            ui.painter().line_segment([preview.left_top(), preview.right_top()], stroke);
+                            ui.painter().line_segment([preview.right_top(), preview.right_bottom()], stroke);
+                            ui.painter().line_segment([preview.right_bottom(), preview.left_bottom()], stroke);
+                            ui.painter().line_segment([preview.left_bottom(), preview.left_top()], stroke);
+                        }
+                    }
+                } else {
+                    self.shape_start = None;
+                    self.shape_current = None;
                 if response.clicked() || response.drag_started() {
                     self.stroke_recorded = false;
                     self.stroke_last = if response.drag_started() {
@@ -335,6 +412,7 @@ impl eframe::App for Studio {
                     self.stroke_last = None;
                     self.stroke_recorded = false;
                 }
+                }
               });
             });
         });
@@ -360,4 +438,36 @@ fn main() -> eframe::Result<()> {
         cc.egui_ctx.set_style(style);
         Ok(Box::new(Studio::default()))
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn shape_drag_is_reversible_and_uses_inclusive_bounds() {
+        assert_eq!(shape_box([4, 5], [2, 3]), (2, 3, 3, 3));
+        let mut studio = Studio::default();
+        studio.tool = Tool::Rectangle;
+        studio.commit_shape([4, 5], [2, 3]);
+        assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
+        assert_eq!(studio.project.layers[0].pixels[(4 * 32 + 3) as usize], [0; 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], [0; 4]);
+        studio.redo_edit();
+        assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
+    }
+    #[test]
+    fn shape_error_and_noop_preserve_redo() {
+        let mut studio = Studio::default();
+        studio.tool = Tool::Ellipse;
+        studio.shape_filled = true;
+        studio.commit_shape([0, 0], [0, 0]);
+        studio.undo_edit();
+        assert!(studio.history.can_redo());
+        studio.commit_shape([300, 0], [300, 0]);
+        assert!(studio.history.can_redo());
+        studio.color = [0; 4];
+        studio.commit_shape([1, 1], [1, 1]);
+        assert!(studio.history.can_redo());
+    }
 }
