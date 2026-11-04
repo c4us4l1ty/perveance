@@ -29,3 +29,15 @@ The prototype CLI can apply a JSON array of up to 1,024 typed operations in one 
 All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves use exclusive creation but are not yet crash-atomic; an incomplete output may remain after an I/O failure.
 
 The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder or remove layers. Layer edits are undoable. Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. Unsupported project fields are rejected rather than silently discarded.
+
+### Example layered asset
+
+The repository includes [`examples/potion-operations.json`](examples/potion-operations.json), a small editable pixel-art potion. From the repository root, with Rust installed:
+
+```sh
+cargo run --locked --bin perveance-cli -- new 16 16 potion-base.json
+cargo run --locked --bin perveance-cli -- apply potion-base.json potion.json examples/potion-operations.json
+cargo run --locked --bin perveance-cli -- export-png potion.json potion.png
+```
+
+These commands require paths that do not already exist. Open `potion.json` in the GUI to edit its layers. `perveance-cli capabilities` reports example operation objects and their limits in JSON.

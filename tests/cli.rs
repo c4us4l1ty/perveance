@@ -123,3 +123,15 @@ fn discovery_reports_batch_support_and_version() {
     assert_eq!(value["autonomous_execution"], false);
     assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "rectangle"));
 }
+
+#[test]
+fn example_potion_is_layered_and_transparent() {
+    let ops: Vec<perveance::Operation> = serde_json::from_str(include_str!("../examples/potion-operations.json")).unwrap();
+    let mut project = perveance::Project::new(16, 16).unwrap();
+    project.apply_operations(&ops).unwrap();
+    assert_eq!(project.layers.iter().map(|layer| layer.name.as_str()).collect::<Vec<_>>(), ["Background", "Bottle", "Highlights"]);
+    let rgba = project.rgba().unwrap();
+    assert_eq!(&rgba[0..4], &[0, 0, 0, 0]);
+    let pixel = (7 * 16 + 6) * 4;
+    assert_eq!(&rgba[pixel..pixel + 4], &[239, 204, 245, 255]);
+}

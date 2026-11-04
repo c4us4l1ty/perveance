@@ -53,3 +53,6 @@ jobs:
           cargo run --locked --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
           cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
           cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png
+          cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-potion-base.json
+          cargo run --locked --quiet --bin perveance-cli -- apply /tmp/perveance-potion-base.json /tmp/perveance-potion.json examples/potion-operations.json
+          cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-potion.json /tmp/perveance-potion.png

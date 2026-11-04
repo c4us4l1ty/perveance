@@ -11,6 +11,18 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             "operations": ["new", "inspect", "paint", "apply", "export-png"],
             "batch_operations": ["add_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "fill"],
             "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144},
+            "batch_examples": {
+                "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
+                "move_layer": {"op": "move_layer", "from": 0, "to": 1},
+                "remove_layer": {"op": "remove_layer", "layer": 0},
+                "set_visibility": {"op": "set_visibility", "layer": 0, "visible": true},
+                "add_layer": {"op": "add_layer"},
+                "pixel": {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]},
+                "line": {"op": "line", "layer": 0, "from": [0, 0], "to": [1, 1], "color": [255, 0, 0, 255]},
+                "rectangle": {"op": "rectangle", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "color": [255, 0, 0, 255]},
+                "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
+            },
+            "batch_semantics": "Layer indices are bottom-to-top. RGBA channels are straight-alpha bytes. Rectangle dimensions are positive and must fit the canvas. Operations apply in order to a clone; on failure no output is created.",
             "limitations": ["create-new outputs only", "no vector support", "no AI"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;
