@@ -129,3 +129,65 @@ fn bridge_scaled_png_matches_rust_nearest_neighbor() {
     }
     assert_eq!(Project::load(&source).unwrap(), p);
 }
+
+#[test]
+fn bridge_brush_and_shapes_match_rust_on_edges_and_degenerate_bounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let ops = dir.path().join("ops.json");
+    let bridge = dir.path().join("bridge.json");
+    let rust = dir.path().join("rust.json");
+    let mut project = Project::new(96, 80).unwrap();
+    for _ in 0..4 { project.add_layer().unwrap(); }
+    project.save_new(&base).unwrap();
+    let mut batch = vec![];
+    let mut tile = 0;
+    for width in 1..=6 { for height in 1..=6 {
+        for filled in [false, true] {
+            batch.push(serde_json::json!({"op":"ellipse", "layer":0, "x":(tile%12)*8, "y":(tile/12)*8,
+                "width":width, "height":height, "filled":filled, "color":[width*30,height*30,4,128]}));
+            tile += 1;
+        }
+        batch.push(serde_json::json!({"op":"rectangle_outline", "layer":0, "x":(tile%12)*8, "y":(tile/12)*8,
+            "width":width, "height":height, "color":[2,width*30,height*30,255]}));
+        tile += 1;
+    }}
+    for (index, size) in [1, 2, 3, 16].into_iter().enumerate() {
+        batch.push(serde_json::json!({"op":"brush_line", "layer":index+1, "from":[0,79], "to":[95,0], "size":size, "color":[size,3,4,0]}));
+    }
+    std::fs::write(&ops, serde_json::to_vec(&batch).unwrap()).unwrap();
+    python(&["apply", base.to_str().unwrap(), bridge.to_str().unwrap(), ops.to_str().unwrap()]);
+    let exe = env!("CARGO_BIN_EXE_perveance-cli");
+    assert!(Command::new(exe).args(["apply", base.to_str().unwrap(), rust.to_str().unwrap(), ops.to_str().unwrap()]).status().unwrap().success());
+    assert_eq!(Project::load(&bridge).unwrap(), Project::load(&rust).unwrap());
+}
+
+#[test]
+fn bridge_read_region_matches_rust_and_rejects_invalid_regions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("region.json");
+    let mut p = Project::new(70, 70).unwrap();
+    p.set_pixel(0, 2, 3, [100, 20, 30, 128]).unwrap();
+    p.add_layer().unwrap();
+    p.set_pixel(1, 2, 3, [9, 8, 7, 0]).unwrap();
+    p.layers[1].visible = false;
+    p.save_new(&path).unwrap();
+    let path = path.to_str().unwrap();
+    let exe = env!("CARGO_BIN_EXE_perveance-cli");
+    for tail in [vec!["composite"], vec!["layer", "1"]] {
+        let mut args = vec!["read-region", path, "1", "2", "3", "3"];
+        args.extend(tail);
+        let py = Command::new("python3").arg("tools/arena_art.py").args(&args).output().unwrap();
+        let rust = Command::new(exe).args(&args).output().unwrap();
+        assert!(py.status.success(), "{}", String::from_utf8_lossy(&py.stderr));
+        assert!(rust.status.success());
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&py.stdout).unwrap(), serde_json::from_slice::<serde_json::Value>(&rust.stdout).unwrap());
+    }
+    for tail in [vec!["0", "0", "65", "64", "composite"], vec!["69", "0", "2", "1", "composite"],
+        vec!["0", "0", "1", "1", "layer", "2"], vec!["0", "0", "0", "1", "composite"]] {
+        let mut args = vec!["read-region", path]; args.extend(tail);
+        let py = Command::new("python3").arg("tools/arena_art.py").args(&args).output().unwrap();
+        let rust = Command::new(exe).args(&args).output().unwrap();
+        assert!(!py.status.success()); assert!(!rust.status.success());
+    }
+}

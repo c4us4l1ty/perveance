@@ -90,6 +90,37 @@ class ArenaArtTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(output.exists())
 
+    def test_region_exposes_hidden_raw_pixels_and_checks_bounds(self):
+        p = art.create_project(4, 3, [
+            {"op": "add_layer"},
+            {"op": "pixel", "layer": 1, "x": 2, "y": 1, "color": [7, 8, 9, 0]},
+            {"op": "set_visibility", "layer": 1, "visible": False},
+        ])
+        raw = art.read_region(p, 1, 1, 2, 2, 1)
+        visible = art.read_region(p, 1, 1, 2, 2)
+        self.assertEqual(raw["pixels"][0][1], [7, 8, 9, 0])
+        self.assertEqual(visible["pixels"][0][1], [0, 0, 0, 0])
+        self.assertEqual(raw["revision"], visible["revision"])
+        for x, y, width, height, layer in [(3, 0, 2, 1, None), (0, 0, 0, 1, None), (0, 0, 1, 1, 2), (True, 0, 1, 1, None)]:
+            with self.assertRaises(ValueError):
+                art.read_region(p, x, y, width, height, layer)
+        big = art.create_project(128, 128, [])
+        self.assertEqual(len(art.read_region(big, 0, 0, 64, 64)["pixels"]), 64)
+        with self.assertRaises(ValueError):
+            art.read_region(big, 0, 0, 65, 64)
+
+    def test_shape_validation_and_batch_failure_are_atomic(self):
+        p = art.create_project(4, 4, [])
+        before = json.dumps(p)
+        for bad in [
+            {"op": "ellipse", "layer": 0, "x": 0, "y": 0, "width": 2, "height": 2, "filled": 1, "color": [1, 2, 3, 4]},
+            {"op": "brush_line", "layer": 0, "from": [0, 0], "to": [1, 1], "size": 17, "color": [1, 2, 3, 4]},
+            {"op": "rectangle_outline", "layer": 0, "x": 3, "y": 3, "width": 2, "height": 1, "color": [1, 2, 3, 4]},
+        ]:
+            with self.assertRaises(ValueError):
+                art.apply_operations(p, [{"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [5, 6, 7, 8]}, bad])
+            self.assertEqual(json.dumps(p), before)
+
     def test_apply_is_atomic_and_preserves_input_snapshot(self):
         p = art.create_project(2, 2, [])
         before = json.dumps(p)

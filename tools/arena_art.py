@@ -17,6 +17,8 @@ import zlib
 MAX_DIMENSION = 128
 MAX_LAYERS = 16
 MAX_EXPORT_SCALE = 8
+MAX_BRUSH_SIZE = 16
+MAX_REGION_PIXELS = 4096
 MAX_OPERATIONS = 1024
 MAX_BATCH_BYTES = 256 * 1024
 MAX_PROJECT_BYTES = 8 * 1024 * 1024
@@ -109,7 +111,10 @@ def apply_operations(project, operations):
                   "set_visibility": ("op", "layer", "visible"),
                   "pixel": ("op", "layer", "x", "y", "color"),
                   "line": ("op", "layer", "from", "to", "color"),
+                  "brush_line": ("op", "layer", "from", "to", "size", "color"),
                   "rectangle": ("op", "layer", "x", "y", "width", "height", "color"),
+                  "rectangle_outline": ("op", "layer", "x", "y", "width", "height", "color"),
+                  "ellipse": ("op", "layer", "x", "y", "width", "height", "filled", "color"),
                   "fill": ("op", "layer", "x", "y", "color")}
         if name not in fields:
             raise ValueError("operation is not supported by the bridge")
@@ -128,7 +133,8 @@ def apply_operations(project, operations):
             continue
         rgba = color(op["color"])
         pixels = layer["pixels"]
-        if name == "line":
+        if name in ("line", "brush_line"):
+            size = integer(op["size"], 1, MAX_BRUSH_SIZE) if name == "brush_line" else 1
             def point(value):
                 if not isinstance(value, list) or len(value) != 2:
                     raise ValueError("line endpoint must be a pair")
@@ -139,7 +145,10 @@ def apply_operations(project, operations):
             sx, sy = (1 if x < x1 else -1), (1 if y < y1 else -1)
             error = dx + dy
             while True:
-                pixels[y * w + x] = rgba.copy()
+                left, top = x - size // 2, y - size // 2
+                for py in range(max(0, top), min(h, top + size)):
+                    for px in range(max(0, left), min(w, left + size)):
+                        pixels[py * w + px] = rgba.copy()
                 if x == x1 and y == y1:
                     break
                 twice = 2 * error
@@ -153,12 +162,26 @@ def apply_operations(project, operations):
         x, y = integer(op["x"], 0, w - 1), integer(op["y"], 0, h - 1)
         if name == "pixel":
             pixels[y * w + x] = rgba
-        elif name == "rectangle":
+        elif name in ("rectangle", "rectangle_outline", "ellipse"):
             rw = integer(op["width"], 1, w - x)
             rh = integer(op["height"], 1, h - y)
-            for row in range(y, y + rh):
-                for col in range(x, x + rw):
-                    pixels[row * w + col] = rgba.copy()
+            if name == "ellipse" and type(op["filled"]) is not bool:
+                raise ValueError("filled must be boolean")
+            def inside(px, py):
+                if px < 0 or py < 0 or px >= rw or py >= rh:
+                    return False
+                dx, dy = 2 * px + 1 - rw, 2 * py + 1 - rh
+                return dx * dx * rh * rh + dy * dy * rw * rw <= rw * rw * rh * rh
+            for dy in range(rh):
+                for dx in range(rw):
+                    if name == "rectangle":
+                        selected = True
+                    elif name == "rectangle_outline":
+                        selected = dx == 0 or dy == 0 or dx + 1 == rw or dy + 1 == rh
+                    else:
+                        selected = inside(dx, dy) and (op["filled"] or any(not inside(nx, ny) for nx, ny in ((dx - 1, dy), (dx + 1, dy), (dx, dy - 1), (dx, dy + 1))))
+                    if selected:
+                        pixels[(y + dy) * w + x + dx] = rgba.copy()
         else:  # four-connected raw-color fill
             initial = pixels[y * w + x]
             if initial == rgba:
@@ -197,6 +220,26 @@ def rgba_composite(project):
                 out[j + c] = (num + alpha // 2) // alpha
             out[j + 3] = (alpha + 127) // 255
     return out
+
+
+def read_region(project, x, y, width, height, layer=None):
+    validate_project(project)
+    x = integer(x, 0, project["width"] - 1)
+    y = integer(y, 0, project["height"] - 1)
+    width = integer(width, 1, project["width"] - x)
+    height = integer(height, 1, project["height"] - y)
+    if width * height > MAX_REGION_PIXELS:
+        raise ValueError("region exceeds 4096 pixels")
+    if layer is None:
+        composite = rgba_composite(project)
+        pixels = [list(composite[i:i + 4]) for i in range(0, len(composite), 4)]
+    else:
+        layer = integer(layer, 0, len(project["layers"]) - 1)
+        pixels = project["layers"][layer]["pixels"]
+    stride = project["width"]
+    rows = [pixels[(y + row) * stride + x:(y + row) * stride + x + width] for row in range(height)]
+    return {"ok": True, "revision": project_revision(project), "x": x, "y": y, "width": width, "height": height,
+            "source": "composite" if layer is None else "layer", "layer": layer, "pixels": rows}
 
 
 def png_bytes(project, scale=1):
@@ -252,8 +295,9 @@ def main(args):
     if args == ["capabilities"]:
         return {"ok": True, "bridge": "experimental-python-data-only", "project_version": 1,
                 "max_dimension": MAX_DIMENSION, "max_layers": MAX_LAYERS, "max_export_scale": MAX_EXPORT_SCALE,
-                "operations": ["add_layer", "rename_layer", "set_visibility", "pixel", "line", "rectangle", "fill"],
-                "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "export-png", "export-png-scaled"],
+                "max_brush_size": MAX_BRUSH_SIZE, "max_region_pixels": MAX_REGION_PIXELS,
+                "operations": ["add_layer", "rename_layer", "set_visibility", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
+                "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "read-region", "export-png", "export-png-scaled"],
                 "autonomous_execution": False, "rust_cli_parity": False}
     if len(args) == 5 and args[0] == "create":
         _, w, h, ops_path, output = args
@@ -299,6 +343,14 @@ def main(args):
         else:
             raise ValueError("sample source must be composite or layer LAYER")
         return {"ok": True, "revision": project_revision(project), "x": x, "y": y, "source": args[4], "color": rgba}
+    if len(args) in (7, 8) and args[0] == "read-region":
+        project = load_json(args[1], MAX_PROJECT_BYTES)
+        x, y, width, height = (int(value) for value in args[2:6])
+        if args[6:] == ["composite"]:
+            return read_region(project, x, y, width, height)
+        if len(args) == 8 and args[6] == "layer":
+            return read_region(project, x, y, width, height, int(args[7]))
+        raise ValueError("region source must be composite or layer LAYER")
     if len(args) == 3 and args[0] == "export-png":
         _, input_path, output = args
         project = load_json(input_path, MAX_PROJECT_BYTES)
@@ -312,7 +364,7 @@ def main(args):
         result = png_bytes(project, scale)
         write_new(output, result)
         return {"ok": True, "output": output, "width": project["width"] * scale, "height": project["height"] * scale, "scale": scale}
-    raise ValueError("usage: arena_art.py capabilities | create WIDTH HEIGHT OPERATIONS_JSON OUTPUT | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE")
+    raise ValueError("usage: arena_art.py capabilities | create WIDTH HEIGHT OPERATIONS_JSON OUTPUT | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE")
 
 
 if __name__ == "__main__":
