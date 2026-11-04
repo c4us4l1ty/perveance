@@ -33,11 +33,13 @@ All colors are unpremultiplied RGBA bytes. A failed operation leaves the source 
 
 The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder, duplicate, flip, clear or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. The editor warns before a normal window close if the project differs from the last successful project save or open. PNG exports do not mark a project saved. This is not crash recovery and cannot prevent data loss from force-quitting, system failure or external file changes. Unsupported project fields are rejected rather than silently discarded.
 
-### Session palette
+### Palette
 
 Below the GUI color picker, select one of 16 numbered swatches to set the drawing color. Choose a slot, adjust the color picker (or use the eyedropper), then press **Store current color** to replace that slot, including alpha. **Reset palette** restores the default swatches and selects slot 1 without changing the current drawing color. Swatch previews blend transparency over gray; hover a slot to see its exact RGBA values.
 
-The palette is kept only for the current app session: it is not saved in the project, shared with the CLI, or included in undo history. Choosing a swatch does not change artwork; drawing with it is undoable as usual.
+Swatches are separate from the project and undo history. To keep them, expand **Palette files**, enter a path, and save as a new file; existing files are never overwritten. Loading a palette explicitly replaces the 16 swatches and selects slot 1, but leaves the current drawing color unchanged. An invalid or unreadable file leaves the palette unchanged. Palette settings are otherwise session-only. Choosing, saving or loading swatches does not change artwork; drawing with them is undoable as usual.
+
+Palette files are version-1 JSON with exactly 16 straight-alpha RGBA colors, for example `{"version":1,"colors":[[0,0,0,255], ...]}` (the ellipsis is illustrative, not valid JSON). Files are limited to 8 KiB and unknown fields are rejected. Agents can inspect one using `perveance-cli inspect-palette palette.perveance.json`. Palette saves use the same staged create-new mechanism and filesystem caveats as projects.
 
 ### Example layered asset
 

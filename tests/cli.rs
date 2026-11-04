@@ -367,3 +367,24 @@ fn read_region_exposes_revision_bound_rows_and_validates_bounds() {
     }
     assert_eq!(fs::read(edited).unwrap(), before);
 }
+
+#[test]
+fn inspect_palette_reports_colors_and_rejects_invalid_files() {
+    let dir = TempDir::new();
+    let path = dir.0.join("palette.json");
+    let mut colors = [[0; 4]; perveance::PALETTE_SLOTS];
+    colors[3] = [7, 8, 9, 12];
+    perveance::Palette::new(colors).save_new(&path).unwrap();
+    let output = cli(&["inspect-palette", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["version"], 1);
+    assert_eq!(value["colors"][3], serde_json::json!([7,8,9,12]));
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "inspect-palette"));
+    fs::write(&path, b"{}").unwrap();
+    let failed = cli(&["inspect-palette", path.to_str().unwrap()]);
+    assert!(!failed.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stderr).unwrap();
+    assert_eq!(error["ok"], false);
+}

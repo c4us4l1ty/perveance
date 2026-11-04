@@ -38,6 +38,44 @@ pub struct Project {
     pub layers: Vec<Layer>,
 }
 
+/// A portable, separate swatch file; it is not embedded in a project.
+pub const PALETTE_VERSION: u32 = 1;
+pub const PALETTE_SLOTS: usize = 16;
+pub const MAX_PALETTE_BYTES: u64 = 8 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Palette {
+    pub version: u32,
+    /// Straight-alpha RGBA bytes in slot order.
+    pub colors: [[u8; 4]; PALETTE_SLOTS],
+}
+
+impl Palette {
+    pub fn new(colors: [[u8; 4]; PALETTE_SLOTS]) -> Self {
+        Self { version: PALETTE_VERSION, colors }
+    }
+
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("open palette: {e}"))?;
+        let mut bytes = Vec::new();
+        BufReader::new(file).take(MAX_PALETTE_BYTES + 1).read_to_end(&mut bytes)
+            .map_err(|e| format!("read palette: {e}"))?;
+        if bytes.len() as u64 > MAX_PALETTE_BYTES { return Err("palette exceeds size limit".into()); }
+        let palette: Self = serde_json::from_slice(&bytes).map_err(|e| format!("parse palette: {e}"))?;
+        if palette.version != PALETTE_VERSION { return Err("unsupported palette version".into()); }
+        Ok(palette)
+    }
+
+    /// Staged no-clobber write; same filesystem limitations as project saves.
+    pub fn save_new(&self, path: &Path) -> Result<(), String> {
+        if self.version != PALETTE_VERSION { return Err("unsupported palette version".into()); }
+        let bytes = serde_json::to_vec(self).map_err(|e| format!("serialize palette: {e}"))?;
+        if bytes.len() as u64 > MAX_PALETTE_BYTES { return Err("palette exceeds size limit".into()); }
+        write_new(path, &bytes)
+    }
+}
+
 /// Undo/redo snapshots for the local editor. Each stack is limited by count and
 /// estimated pixel/name payload, not a precise process-memory ceiling.
 #[derive(Default)]

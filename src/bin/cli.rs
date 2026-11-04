@@ -1,4 +1,4 @@
-use perveance::{EditProposal, Operation, Project};
+use perveance::{EditProposal, Operation, Palette, Project};
 use serde_json::json;
 use std::{env, fs::File, io::Read, path::Path, process};
 
@@ -39,7 +39,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "sample", "read-region", "paint", "apply", "apply-proposal", "import-png", "export-png"],
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "sample", "read-region", "paint", "apply", "apply-proposal", "import-png", "export-png"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
@@ -58,6 +58,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "ellipse": {"op": "ellipse", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "filled": true, "color": [255, 0, 0, 255]},
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
+            "palette_format": {"version": perveance::PALETTE_VERSION, "slots": perveance::PALETTE_SLOTS, "max_bytes": perveance::MAX_PALETTE_BYTES, "color": "straight-alpha RGBA bytes"},
             "proposal_version": perveance::PROPOSAL_VERSION,
             "proposal_example": {"version": 1, "base_revision": "<revision from inspect>", "operations": [{"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}]},
             "proposal_semantics": "Data-only typed edits bound to a project snapshot fingerprint; input is loaded once and output is create-new. This does not lock files or detect unsaved edits in another process.",
@@ -78,6 +79,10 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.import_png_layer(Path::new(png_path))?;
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "layer": project.layers.len() - 1}))
+        }
+        [command, input] if command == "inspect-palette" => {
+            let palette = Palette::load(Path::new(input))?;
+            Ok(json!({"ok": true, "version": palette.version, "colors": palette.colors}))
         }
         [command, input] if command == "inspect" => {
             let project = Project::load(Path::new(input))?;
@@ -139,7 +144,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
     }
 }
 

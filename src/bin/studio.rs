@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{EditProposal, FlipAxis, History, Operation, Project};
+use perveance::{EditProposal, FlipAxis, History, Operation, Palette, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -81,6 +81,7 @@ struct Studio {
     color: [u8; 4],
     palette: [[u8; 4]; 16],
     palette_slot: usize,
+    palette_path: String,
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
@@ -109,7 +110,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
+            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -234,10 +235,36 @@ impl Studio {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
+    fn save_palette(&mut self) {
+        match Palette::new(self.palette).save_new(Path::new(&self.palette_path)) {
+            Ok(()) => self.status = "Palette saved as a new file.".into(),
+            Err(error) => self.status = error,
+        }
+    }
+    fn load_palette(&mut self) {
+        match Palette::load(Path::new(&self.palette_path)) {
+            Ok(palette) => {
+                self.palette = palette.colors;
+                self.palette_slot = 0;
+                self.status = "Palette loaded; current drawing color is unchanged.".into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn palette_file_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.label("Palette file path");
+        ui.text_edit_singleline(&mut self.palette_path);
+        let save = ui.button("Save palette as new file");
+        if save.clicked() { self.save_palette(); }
+        let load = ui.button("Load palette (replaces swatches)");
+        if load.clicked() { self.load_palette(); }
+        ui.small("Separate file; load does not change the current drawing color.");
+        (save.rect, load.rect)
+    }
     // Return controls' rectangles for interaction tests; the palette is editor state,
     // so choosing/storing a color does not edit the document or create undo entries.
     fn palette_ui(&mut self, ui: &mut egui::Ui) -> (Vec<Rect>, Rect, Rect) {
-        ui.label("Palette (session only)");
+        ui.label("Palette");
         let mut slots = Vec::with_capacity(self.palette.len());
         for row in 0..4 {
             ui.horizontal(|ui| {
@@ -259,8 +286,9 @@ impl Studio {
         ui.small(format!("Selected slot: {} · RGBA {:?}", self.palette_slot + 1, self.palette[self.palette_slot]));
         let store = ui.button("Store current color").on_hover_text("Replace the selected slot with the current drawing color, including alpha");
         if store.clicked() { self.palette[self.palette_slot] = self.color; }
-        let reset = ui.button("Reset palette").on_hover_text("Restore session swatches; current drawing color is unchanged");
+        let reset = ui.button("Reset palette").on_hover_text("Restore default swatches; current drawing color is unchanged");
         if reset.clicked() { self.palette = DEFAULT_PALETTE; self.palette_slot = 0; }
+        egui::CollapsingHeader::new("Palette files").show(ui, |ui| { self.palette_file_ui(ui); });
         (slots, store.rect, reset.rect)
     }
     fn ai_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
@@ -823,6 +851,69 @@ mod tests {
         assert_eq!(studio.color, [7, 21, 99, 63]);
         assert_eq!(swatch_preview([255, 0, 0, 0]), Color32::from_gray(96));
         assert_eq!(swatch_preview([255, 0, 0, 255]), Color32::from_rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn palette_file_load_save_is_explicit_and_failure_preserves_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("palette.json");
+        let mut studio = Studio::default();
+        let original = studio.project.clone();
+        studio.palette_path = path.to_str().unwrap().into();
+        studio.palette[3] = [2, 4, 8, 32];
+        studio.save_palette();
+        assert!(studio.status.contains("saved"));
+        studio.palette = DEFAULT_PALETTE;
+        studio.palette_slot = 5;
+        studio.color = [99, 88, 77, 66];
+        studio.load_palette();
+        assert_eq!(studio.palette[3], [2, 4, 8, 32]);
+        assert_eq!(studio.palette_slot, 0);
+        assert_eq!(studio.color, [99, 88, 77, 66]);
+        let saved_bytes = std::fs::read(&path).unwrap();
+        studio.palette[3] = [0; 4];
+        studio.save_palette();
+        assert_eq!(std::fs::read(&path).unwrap(), saved_bytes);
+        std::fs::write(&path, b"invalid palette").unwrap();
+        let before = studio.palette;
+        studio.palette_slot = 3;
+        studio.load_palette();
+        assert_eq!(studio.palette, before);
+        assert_eq!(studio.palette_slot, 3);
+        assert!(studio.status.contains("parse palette"));
+        assert_eq!(studio.color, [99, 88, 77, 66]);
+        assert_eq!(studio.project, original);
+        assert!(!studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+    }
+
+    #[test]
+    fn palette_file_buttons_save_and_load() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.palette_file_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("palette.json");
+        studio.palette_path = path.to_str().unwrap().into();
+        studio.palette[3] = [3, 5, 9, 18];
+        let ctx = egui::Context::default();
+        let (save, load) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, save.center());
+        assert!(path.exists());
+        studio.palette[3] = [0; 4];
+        click(&ctx, &mut studio, load.center());
+        assert_eq!(studio.palette[3], [3, 5, 9, 18]);
     }
 
     #[test]
