@@ -97,6 +97,8 @@ The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, r
 
 ### Choosing files and directories
 
+Use **Open…** in the top bar or Ctrl+O to choose and open an existing project. The file name starts focused; type a name and press Enter, or select a listed file and choose **Open**. Pressing Enter in the directory field navigates there instead. Escape cancels. If artwork is modified, opening asks for confirmation before discarding it; a failed open retains the current artwork.
+
 Use **Browse…** beside the project, PNG, palette, proposal or recovery-directory path to navigate without typing the whole path. Pick a directory or file name and select **Use path**; this only fills the associated path field. Opening, saving, importing and exporting still require their separate buttons and retain their existing confirmation and no-overwrite behavior. Cancel or Escape leaves the field unchanged. File names for new outputs can be typed in the browser; select **Go** after editing the directory.
 
 This is a simple in-app browser, not the operating system's file dialog. It lists directories, regular files and links without filtering extensions; hidden entries are optional. Listings are limited to 512 entries including hidden entries, and non-UTF-8 or special-file entries are omitted. For larger directories, enter a trusted path manually. Non-UTF-8 paths are not supported by the GUI; special-file entries are omitted and opening special files may block. Links are not followed while listing, but the existing open/import operations follow input symlinks. The browser is not a sandbox, path authorization mechanism, file lock or reservation, and trusted directories are required.

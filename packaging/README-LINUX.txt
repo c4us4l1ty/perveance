@@ -18,6 +18,8 @@ To launch from a terminal in a writable directory on an X11 desktop:
 To open an existing UTF-8 project path directly:
   /path/to/perveance-linux-x86_64/bin/perveance /path/to/project.json
 
+Use Open or Ctrl+O to choose and open a project; unsaved artwork requires
+confirmation before replacement. Escape cancels the chooser or confirmation.
 Use Browse beside a file or directory field to select a path. Use path only
 fills the field; opening, saving, importing and exporting need separate actions.
 This is an in-app browser, not a native OS dialog or security boundary. Large

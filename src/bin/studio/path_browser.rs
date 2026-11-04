@@ -72,7 +72,10 @@ impl PathBrowser {
         let mut directory_has_focus = false;
         ui.horizontal(|ui| {
             ui.label("Directory");
-            directory_has_focus = ui.text_edit_singleline(&mut self.directory_input).has_focus();
+            let response = ui.add(egui::TextEdit::singleline(&mut self.directory_input).id(egui::Id::new("path_browser_directory")));
+            // Single-line text edits surrender focus on Enter in egui. Treat
+            // that as directory focus for this key so Enter navigates, not opens.
+            directory_has_focus = response.has_focus() || (response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)));
             if ui.button("Go").clicked() { self.refresh(); }
         });
         ui.horizontal(|ui| {
@@ -158,6 +161,27 @@ mod tests {
         let directory = PathBrowser::new(BrowserTarget::RecoveryDirectory, dir.path().to_str().unwrap());
         assert_eq!(directory.selection().unwrap(), dir.path());
         assert_eq!(std::fs::read(file).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn enter_in_directory_field_navigates_without_selecting() {
+        let parent = tempfile::tempdir().unwrap();
+        let child = parent.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        let mut browser = PathBrowser::new(BrowserTarget::OpenProject, parent.path().join("art.json").to_str().unwrap());
+        browser.focus_filename = false;
+        browser.directory_input = child.to_str().unwrap().into();
+        let ctx = egui::Context::default();
+        ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("path_browser_directory")));
+        let mut action = BrowserAction::None;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))),
+            events: vec![Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }],
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| { action = browser.ui(ui).0; }); });
+        assert!(matches!(action, BrowserAction::None));
+        assert_eq!(browser.selection().unwrap(), child.join("art.json"));
     }
 
     #[test]
