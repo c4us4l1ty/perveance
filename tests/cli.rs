@@ -163,3 +163,36 @@ fn raster_shapes_are_discoverable_and_batch_errors_are_atomic() {
     let value: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
     assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "ellipse"));
 }
+
+#[test]
+fn sample_reports_raw_layer_or_visible_composite_without_mutation() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let edited = dir.0.join("edited.json");
+    let operations = dir.0.join("operations.json");
+    assert!(cli(&["new", "2", "2", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"pixel","layer":0,"x":0,"y":0,"color":[20,40,60,200]},
+        {"op":"add_layer"},
+        {"op":"pixel","layer":1,"x":0,"y":0,"color":[200,120,50,100]},
+        {"op":"set_visibility","layer":1,"visible":false}
+    ]"#).unwrap();
+    assert!(cli(&["apply", initial.to_str().unwrap(), edited.to_str().unwrap(), operations.to_str().unwrap()]).status.success());
+    let path = edited.to_str().unwrap();
+    let before = fs::read(&edited).unwrap();
+    let raw = cli(&["sample", path, "0", "0", "layer", "1"]);
+    assert!(raw.status.success());
+    let raw: serde_json::Value = serde_json::from_slice(&raw.stdout).unwrap();
+    assert_eq!(raw["color"], serde_json::json!([200, 120, 50, 100]));
+    let composite = cli(&["sample", path, "0", "0", "composite"]);
+    assert!(composite.status.success());
+    let composite: serde_json::Value = serde_json::from_slice(&composite.stdout).unwrap();
+    assert_eq!(composite["color"], serde_json::json!([20, 40, 60, 200]));
+    for args in [vec!["sample", path, "2", "0", "composite"], vec!["sample", path, "0", "0", "layer", "2"]] {
+        let result = cli(&args);
+        assert!(!result.status.success());
+        let error: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+        assert_eq!(error["ok"], false);
+    }
+    assert_eq!(fs::read(&edited).unwrap(), before);
+}

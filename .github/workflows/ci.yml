@@ -51,6 +51,26 @@ jobs:
             sleep 1
             kill -0 "$pid"
             scrot /tmp/perveance-shape.png
+            # Line: drag a diagonal on a separate part of the canvas.
+            xdotool mousemove --window "$window" 65 231 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 534 208 mousedown 1
+            sleep 0.3
+            xdotool mousemove --sync --window "$window" 582 256
+            sleep 0.3
+            xdotool mouseup 1
+            sleep 1
+            scrot /tmp/perveance-line.png
+            # Pick a transparent composite pixel, then use pencil to clear a border pixel.
+            xdotool mousemove --window "$window" 65 261 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 550 160 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 65 81 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 486 112 click 1
+            sleep 1
+            scrot /tmp/perveance-eyedropper.png
             /usr/bin/python3 tools/verify_gui_smoke.py
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true

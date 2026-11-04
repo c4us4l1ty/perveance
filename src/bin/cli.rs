@@ -8,7 +8,7 @@ fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
-            "operations": ["new", "new-from-png", "inspect", "paint", "apply", "import-png", "export-png"],
+            "operations": ["new", "new-from-png", "inspect", "sample", "paint", "apply", "import-png", "export-png"],
             "batch_operations": ["add_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
@@ -47,6 +47,19 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             Ok(json!({"ok": true, "version": project.version, "width": project.width, "height": project.height,
                 "layers": project.layers.iter().map(|layer| json!({"name": layer.name, "visible": layer.visible})).collect::<Vec<_>>() }))
         }
+        [command, input, x, y, source] if command == "sample" && source == "composite" => {
+            let project = Project::load(Path::new(input))?;
+            let (x, y) = (number(x)?, number(y)?);
+            let color = project.sample_composite(x, y)?;
+            Ok(json!({"ok": true, "x": x, "y": y, "source": "composite", "color": color}))
+        }
+        [command, input, x, y, source, layer] if command == "sample" && source == "layer" => {
+            let project = Project::load(Path::new(input))?;
+            let (x, y) = (number(x)?, number(y)?);
+            let layer: usize = layer.parse().map_err(|_| "invalid layer index".to_string())?;
+            let color = project.sample_layer(layer, x, y)?;
+            Ok(json!({"ok": true, "x": x, "y": y, "source": "layer", "layer": layer, "color": color}))
+        }
         [command, input, output, layer, x, y, r, g, b, a] if command == "paint" => {
             let mut project = Project::load(Path::new(input))?;
             let layer: usize = layer.parse().map_err(|_| "invalid layer index".to_string())?;
@@ -71,7 +84,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
     }
 }
 

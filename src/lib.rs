@@ -387,6 +387,26 @@ impl Project {
         Ok(())
     }
 
+    /// Read a raw layer pixel, even if its layer is hidden, preserving all RGBA bytes.
+    pub fn sample_layer(&self, layer: usize, x: u32, y: u32) -> Result<[u8; 4], String> {
+        self.validate()?;
+        if x >= self.width || y >= self.height { return Err("sample point is outside canvas".into()); }
+        let layer = self.layers.get(layer).ok_or("layer does not exist")?;
+        Ok(layer.pixels[(y * self.width + x) as usize])
+    }
+
+    /// Sample the visible composite exactly as exported to PNG, without the checkerboard.
+    pub fn sample_composite(&self, x: u32, y: u32) -> Result<[u8; 4], String> {
+        self.validate()?;
+        if x >= self.width || y >= self.height { return Err("sample point is outside canvas".into()); }
+        let index = (y * self.width + x) as usize;
+        let mut output = [0; 4];
+        for layer in self.layers.iter().filter(|layer| layer.visible) {
+            blend(&mut output, layer.pixels[index]);
+        }
+        Ok(output)
+    }
+
     pub fn rgba(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
         let mut output = vec![0; (self.width * self.height * 4) as usize];
@@ -671,6 +691,21 @@ mod tests {
         assert!(p.ellipse(0, 4, 4, 2, 2, true, ink).is_err());
         assert!(p.rectangle_outline(0, u32::MAX, 0, 2, 1, ink).is_err());
         assert_eq!(p, original);
+    }
+    #[test]
+    fn sampling_matches_composite_and_preserves_raw_hidden_pixels() {
+        let mut p = Project::new(2, 1).unwrap();
+        p.set_pixel(0, 0, 0, [20, 40, 60, 200]).unwrap();
+        p.add_layer().unwrap();
+        p.set_pixel(1, 0, 0, [200, 120, 50, 100]).unwrap();
+        p.set_pixel(1, 1, 0, [7, 8, 9, 0]).unwrap();
+        assert_eq!(p.sample_composite(0, 0).unwrap().as_slice(), &p.rgba().unwrap()[0..4]);
+        assert_eq!(p.sample_layer(1, 1, 0).unwrap(), [7, 8, 9, 0]);
+        p.layers[1].visible = false;
+        assert_eq!(p.sample_layer(1, 0, 0).unwrap(), [200, 120, 50, 100]);
+        assert_eq!(p.sample_composite(0, 0).unwrap(), [20, 40, 60, 200]);
+        assert!(p.sample_composite(2, 0).is_err());
+        assert!(p.sample_layer(2, 0, 0).is_err());
     }
     #[test]
     fn project_round_trip_and_png_are_valid() {

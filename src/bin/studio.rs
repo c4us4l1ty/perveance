@@ -3,7 +3,7 @@ use perveance::{History, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse }
+enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper }
 
 fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str) {
     ui.horizontal(|ui| {
@@ -39,6 +39,16 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
             }
             Tool::Ellipse => {
                 ui.painter().add(egui::Shape::ellipse_stroke(p(9.0, 9.0), Vec2::new(6.0, 5.0), stroke));
+            }
+            Tool::Line => {
+                ui.painter().line_segment([p(3.0, 14.0), p(15.0, 4.0)], stroke);
+                ui.painter().circle_filled(p(3.0, 14.0), 1.5, tint);
+                ui.painter().circle_filled(p(15.0, 4.0), 1.5, tint);
+            }
+            Tool::Eyedropper => {
+                ui.painter().line_segment([p(4.0, 14.0), p(12.0, 6.0)], stroke);
+                ui.painter().line_segment([p(10.0, 4.0), p(15.0, 9.0)], stroke);
+                ui.painter().line_segment([p(4.0, 14.0), p(3.0, 16.0)], stroke);
             }
         }
         if ui.selectable_label(*current == target, label).clicked() { *current = target; }
@@ -103,9 +113,16 @@ impl Studio {
             Tool::Rectangle if filled => project.rectangle(layer, x, y, width, height, color),
             Tool::Rectangle => project.rectangle_outline(layer, x, y, width, height, color),
             Tool::Ellipse => project.ellipse(layer, x, y, width, height, filled, color),
+            Tool::Line => project.draw_line(layer, start, end, color),
             _ => Err("not a shape tool".into()),
         });
         if let Err(error) = result { self.status = error; }
+    }
+    fn pick_color(&mut self, point: [u32; 2]) {
+        match self.project.sample_composite(point[0], point[1]) {
+            Ok(color) => { self.color = color; self.status = format!("Sampled composite RGBA {color:?}."); }
+            Err(error) => self.status = error,
+        }
     }
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
@@ -154,6 +171,8 @@ impl eframe::App for Studio {
             tool_button(ui, &mut self.tool, Tool::Fill, "Fill");
             tool_button(ui, &mut self.tool, Tool::Rectangle, "Rectangle");
             tool_button(ui, &mut self.tool, Tool::Ellipse, "Ellipse");
+            tool_button(ui, &mut self.tool, Tool::Line, "Line");
+            tool_button(ui, &mut self.tool, Tool::Eyedropper, "Eyedropper");
             if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
                 ui.checkbox(&mut self.shape_filled, "Filled shape");
             }
@@ -300,7 +319,7 @@ impl eframe::App for Studio {
                 ui.add_space(8.0);
                 let scale = self.zoom;
                 let size = Vec2::new(self.project.width as f32 * scale, self.project.height as f32 * scale);
-                let sense = if self.tool == Tool::Fill { Sense::click() } else { Sense::click_and_drag() };
+                let sense = if matches!(self.tool, Tool::Fill | Tool::Eyedropper) { Sense::click() } else { Sense::click_and_drag() };
                 let (rect, response) = ui.allocate_exact_size(size, sense);
                 if let Ok(mut rgba) = self.project.rgba() {
                     // Composite a checkerboard only for the preview; exported PNG keeps alpha.
@@ -338,7 +357,13 @@ impl eframe::App for Studio {
                     let y = ((pos.y - rect.min.y) / scale) as u32;
                     if x < width && y < height { Some([x, y]) } else { None }
                 };
-                if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
+                if self.tool == Tool::Eyedropper {
+                    self.shape_start = None;
+                    self.shape_current = None;
+                    if response.clicked() {
+                        if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) { self.pick_color(point); }
+                    }
+                } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse | Tool::Line) {
                     if response.drag_started() {
                         self.shape_start = ctx.input(|input| input.pointer.press_origin()).and_then(to_pixel);
                         self.shape_current = self.shape_start;
@@ -365,6 +390,9 @@ impl eframe::App for Studio {
                         let stroke = egui::Stroke::new(1.5, Color32::from_rgb(166, 215, 74));
                         if self.tool == Tool::Ellipse {
                             ui.painter().add(egui::Shape::ellipse_stroke(preview.center(), preview.size() / 2.0, stroke));
+                        } else if self.tool == Tool::Line {
+                            let center = |point: [u32; 2]| Pos2::new(rect.min.x + (point[0] as f32 + 0.5) * scale, rect.min.y + (point[1] as f32 + 0.5) * scale);
+                            ui.painter().line_segment([center(start), center(end)], stroke);
                         } else {
                             ui.painter().line_segment([preview.left_top(), preview.right_top()], stroke);
                             ui.painter().line_segment([preview.right_top(), preview.right_bottom()], stroke);
@@ -455,6 +483,22 @@ mod tests {
         assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], [0; 4]);
         studio.redo_edit();
         assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
+    }
+    #[test]
+    fn line_gesture_and_composite_eyedropper() {
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([1, 1], [3, 3]);
+        assert_eq!(studio.project.layers[0].pixels[2 * 32 + 2], studio.color);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[0].pixels[2 * 32 + 2], [0; 4]);
+        assert!(studio.history.can_redo());
+        studio.pick_color([2, 2]);
+        assert_eq!(studio.color, [0; 4]);
+        assert!(studio.history.can_redo());
+        studio.redo_edit();
+        studio.pick_color([2, 2]);
+        assert_eq!(studio.color, [166, 215, 74, 255]);
     }
     #[test]
     fn shape_error_and_noop_preserve_redo() {

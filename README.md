@@ -4,7 +4,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 
 ## Current prototype
 
-- A native Linux desktop window with a pixel canvas, pencil, eraser, fill, rectangle and ellipse tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
+- A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse and composite-eyedropper tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -55,4 +55,15 @@ cargo run --locked --bin perveance-cli -- import-png project.json another-image.
 
 PNG input is limited to 8 MiB and dimensions of 1–256 pixels on each side. Static RGB, RGBA, grayscale, grayscale-alpha and indexed images are decoded to editable 8-bit RGBA; 16-bit samples are reduced to 8 bits. Animated PNGs are rejected. Metadata, ICC profiles and color management are not preserved or applied, so colors may differ from color-managed applications. Importing does not make a generated image's original objects or layers editable: the PNG is one raster layer. There is no resizing or alignment on layer import.
 
-Rectangle and ellipse tools write raster pixels to the selected layer; they are not editable vector objects. Drag in either direction and choose filled or outlined. Ellipse edges use a deterministic pixel-center rasterization, and outline pixels are the four-connected edge.
+The line, rectangle and ellipse tools write raster pixels to the selected layer; they are not editable vector objects. Drag in either direction and choose filled or outlined. Ellipse edges use a deterministic pixel-center rasterization, and outline pixels are the four-connected edge.
+
+### Sampling colors
+
+The GUI eyedropper samples the visible composited pixel, including alpha, without the checkerboard. It does not change the artwork or undo history. For agents, the CLI can inspect either the visible composite or a raw layer pixel (including hidden layers):
+
+```sh
+perveance-cli sample project.json 2 3 composite
+perveance-cli sample project.json 2 3 layer 0
+```
+
+Both commands return straight-alpha RGBA bytes as JSON. Raw pixels preserve their RGB bytes even when alpha is zero; the visible composite uses the same blending as PNG export.
