@@ -31,3 +31,7 @@ A separate branch-triggered workflow checks the reviewed Graphite revision's CLI
 The first Graphite CI check ([run 41799441325](https://github.com/c4us4l1ty/perveance/actions/runs/41799441325)) failed with exit code 101. Its detailed log was not accessible from this sandbox. A rerun is configured to surface the final diagnostics as check annotations; the first failure is not evidence that Graphite is unsuitable.
 
 The diagnostic rerun ([41799783606](https://github.com/c4us4l1ty/perveance/actions/runs/41799783606)) found that `cargo check --locked -p graphene-cli --no-default-features` fails at this revision with an unresolved `wgpu_executor` reference in `export.rs` on Rust 1.99.1. This is a concrete limitation of that configuration, not proof that the default Graphite build fails. The next check uses default features; even if that passes, GPU-independent rendering remains unverified.
+
+The default-feature `cargo check --locked -p graphene-cli` succeeded in [run 41800196385](https://github.com/c4us4l1ty/perveance/actions/runs/41800196385) on the pinned upstream revision. This checks compilation, not a runnable export, graphical usability, headless GPU availability, or integration. The feature-disabled failure remains relevant. The foundation choice is still open.
+
+The Perveance prototype's own dependencies are not yet locked in a committed Cargo.lock; CI resolves them when building. A reproducible dependency lock and full license inventory are outstanding before release, as are actual desktop interaction and visual testing.
