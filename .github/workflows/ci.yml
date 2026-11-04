@@ -48,7 +48,7 @@ jobs:
           fi
       - name: Report temporary desktop preview for inspection
         run: |
-          python3 -c 'import base64,hashlib,pathlib; b=pathlib.Path("/tmp/perveance-preview.png").read_bytes(); s=base64.b64encode(b).decode(); n=(len(s)+6999)//7000; print("::notice::PER_PREVIEW_SHA256="+hashlib.sha256(b).hexdigest()); [print("::notice::PER_PREVIEW_%03d_%03d="%(i,n)+s[i*7000:(i+1)*7000]) for i in range(n)]'
+          python3 -c 'import base64,hashlib,pathlib; b=pathlib.Path("/tmp/perveance-preview.png").read_bytes(); s=base64.b64encode(b).decode(); n=(len(s)+14999)//15000; print("::notice::PER_PREVIEW_SHA256="+hashlib.sha256(b).hexdigest()); [print("::notice::PER_PREVIEW_%03d_%03d="%(i,n)+s[i*15000:(i+1)*15000]) for i in range(n)]'
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
       - name: Exercise CLI round trip
