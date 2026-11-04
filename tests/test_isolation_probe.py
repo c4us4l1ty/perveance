@@ -42,6 +42,7 @@ class IsolationProbeTests(unittest.TestCase):
         self.assertEqual(result["autonomous_execution"], "disabled")
 
     def test_launch_uses_fixed_code_and_required_namespaces(self):
+        workspaces = []
         def fake_popen(command, **kwargs):
             self.assertEqual(command[0], "/test/bwrap")
             for option in ("--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--clearenv", "--tmpfs"):
@@ -53,6 +54,9 @@ class IsolationProbeTests(unittest.TestCase):
             self.assertNotIn("HOME", kwargs["env"])
             checks = {name: True for name in probe.CHECKS}
             workspace = Path(command[command.index("--bind") + 1])
+            workspaces.append(workspace.name)
+            self.assertEqual((workspace / "input.fixture").read_bytes(), b"fixed-probe-input")
+            self.assertEqual((workspace / "host.sock").exists(), workspace.name == "unsafe-workspace")
             if workspace.name == "unsafe-workspace":
                 checks["workspace_host_socket_unreachable"] = False
             kwargs["stdout"].write(json.dumps(checks).encode())
@@ -62,6 +66,7 @@ class IsolationProbeTests(unittest.TestCase):
         with patch.object(probe.subprocess, "Popen", side_effect=fake_popen):
             result = probe.run_fixed_probe("/test/bwrap")
         self.assertEqual(result["status"], "passed")
+        self.assertEqual(workspaces, ["clean-workspace", "unsafe-workspace"])
         self.assertFalse(result["unsafe_workspace_control"]["workspace_host_socket_unreachable"])
         self.assertEqual(result["autonomous_execution"], "disabled")
 

@@ -41,3 +41,7 @@ jobs:
           if python3 tools/isolation_probe.py > /tmp/perveance-isolation-matrix.json; then code=0; else code=$?; fi
           cat /tmp/perveance-isolation-matrix.json
           python3 -c 'import json,sys; r=json.load(open("/tmp/perveance-isolation-matrix.json")); assert r["status"] in ("passed","failed","unavailable"); assert r["autonomous_execution"] == "disabled"; assert (int(sys.argv[1]) == 0) == (r["status"] == "passed"); print("::notice::Fixed probe "+sys.argv[2]+": "+r["status"]+"; "+r["reason"]+"; no execution authorized")' "$code" '${{ matrix.os }}'
+      - name: Require the fixed checks on the selected CI diagnostic image
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          python3 -c 'import json; r=json.load(open("/tmp/perveance-isolation-matrix.json")); assert r["status"] == "passed", "fixed diagnostic did not pass; see previous step"; assert r["autonomous_execution"] == "disabled"'
