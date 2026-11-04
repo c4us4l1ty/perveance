@@ -1,5 +1,8 @@
 name: Graphite feasibility spike
 on:
+  push:
+    branches: ["arena/015bd4ba-perveance"]
+    paths: [".github/workflows/graphite-spike.yml"]
   workflow_dispatch:
 permissions:
   contents: read
