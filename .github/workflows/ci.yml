@@ -17,7 +17,7 @@ jobs:
       - name: Select Rust
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth scrot
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth scrot pngquant
       - name: Build and test Rust
         run: cargo test --locked --all-targets
       - name: Verify desktop window starts under X11
@@ -48,7 +48,8 @@ jobs:
           fi
       - name: Report temporary desktop preview for inspection
         run: |
-          python3 -c 'import base64,hashlib,pathlib; b=pathlib.Path("/tmp/perveance-preview.png").read_bytes(); s=base64.b64encode(b).decode(); n=(len(s)+14999)//15000; print("::notice::PER_PREVIEW_SHA256="+hashlib.sha256(b).hexdigest()); [print("::notice::PER_PREVIEW_%03d_%03d="%(i,n)+s[i*15000:(i+1)*15000]) for i in range(n)]'
+          pngquant --nofs --force --output /tmp/perveance-preview-small.png 32 /tmp/perveance-preview.png
+          python3 -c 'import base64,hashlib,pathlib; b=pathlib.Path("/tmp/perveance-preview-small.png").read_bytes(); s=base64.b64encode(b).decode(); n=(len(s)+3999)//4000; print("::notice::PER_PREVIEW_SHA256="+hashlib.sha256(b).hexdigest()); [print("::notice::PER_PREVIEW_%03d_%03d="%(i,n)+s[i*4000:(i+1)*4000]) for i in range(n)]'
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
       - name: Exercise CLI round trip
