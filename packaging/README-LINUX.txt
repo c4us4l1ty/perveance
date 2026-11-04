@@ -22,10 +22,17 @@ Use Save or Ctrl+S to create the first file (using the GUI's File path field),
 or a numbered version after edits. Existing files are never overwritten.
 Ctrl+S is ignored in text fields, dialogs and active drawing gestures.
 
+Optional recovery checkpoints are off by default. To enable them, select an
+existing trusted directory in the GUI's Recovery checkpoints section, or start:
+  /path/to/perveance-linux-x86_64/bin/perveance --recovery-dir /path/to/directory
+They include hidden layers and remain on disk until manually removed. They are
+best-effort snapshots, not a replacement for saving or backups; see the main
+repository README for limits and recovery instructions.
+
 The GUI uses the current working directory for its default project and PNG
 paths. Save projects and exports in a directory you can write to. Project
 and PNG saves never overwrite existing files. The project format is experimental;
-version saves are not locking, automatic backup or crash recovery.
+version saves are not locking or automatic backup. Recovery snapshots are opt-in and best-effort.
 
 To try the command-line editor from a writable directory:
   /path/to/perveance-linux-x86_64/bin/perveance-cli new 16 16 potion-base.json

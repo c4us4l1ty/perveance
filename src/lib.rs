@@ -3,6 +3,7 @@
 
 pub mod fixed_worker;
 pub mod provider;
+pub mod recovery;
 pub mod supervisor;
 pub mod workspace;
 

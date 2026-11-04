@@ -127,6 +127,13 @@ jobs:
             echo "::error::Native GUI project round trip failed; see the step output"
             exit 1
           fi
+      - name: Test recovery after forced GUI termination
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_recovery_smoke.sh "$RUNNER_TEMP/gui-recovery" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
+            cat "$RUNNER_TEMP/gui-recovery/gui.log" "$RUNNER_TEMP/gui-recovery/reopened.log" 2>/dev/null || true
+            echo "::error::GUI recovery smoke failed; see the step output"
+            exit 1
+          fi
       - name: Test environment probe
         run: |
           if ! python3 -m unittest discover -s tests -v > /tmp/perveance-python-tests.log 2>&1; then

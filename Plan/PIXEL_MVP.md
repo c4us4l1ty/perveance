@@ -20,7 +20,7 @@ Arena bridge remain prototypes; arbitrary-code autonomy stays disabled.
    backups or recovery, and test failed writes, interruptions and conflicting
    edits. The current numbered-copy saves never overwrite files and perform a
    best-effort source-content check, but have no atomic cross-process CAS, file
-   lock, crash recovery, or durability guarantee after power loss.
+   lock or durability guarantee after power loss. Opt-in recovery checkpoints provide limited, user-managed snapshots but not guaranteed crash recovery.
 4. **Agent handoff:** verify an Arena agent can create art with the bridge, a
    person can transfer/open/edit it in the Rust app, and the agent can inspect
    the resulting saved project. Document unsupported operations, limits and
