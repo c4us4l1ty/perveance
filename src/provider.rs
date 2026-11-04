@@ -184,6 +184,9 @@ mod tests {
         let content = r#"{"operations":[{"op":"add_layer"},{"op":"pixel","layer":1,"x":1,"y":1,"color":[1,2,3,255]}]}"#;
         let (url, server) = serve_once("200 OK", response(content, "stop"), "");
         let mut project = Project::new(2, 2).unwrap();
+        project.rename_layer(0, "private-layer-sentinel").unwrap();
+        project.set_pixel(0, 0, 0, [43, 67, 89, 135]).unwrap();
+        let original_layer = project.layers[0].clone();
         let context = TaskContext::from_project(&project).unwrap();
         let proposal = request(&context, "test/model", "fake-key", "paint one pixel", &url, false).unwrap();
         let received = server.join().unwrap();
@@ -194,9 +197,13 @@ mod tests {
         assert_eq!(payload["model"], "test/model");
         assert_eq!(payload["max_tokens"], MAX_OUTPUT_TOKENS);
         assert_eq!(payload["messages"][1]["content"], "paint one pixel");
-        assert!(!String::from_utf8_lossy(&received[header_end..]).contains("fake-key"));
+        let body = String::from_utf8_lossy(&received[header_end..]);
+        assert!(!body.contains("fake-key"));
+        assert!(!body.contains("private-layer-sentinel"));
+        assert!(!body.contains("[43,67,89,135]"));
+        assert!(!body.contains(&context.revision));
         project.apply_proposal(&proposal).unwrap();
-        assert_eq!(project.layers[0].pixels, vec![[0; 4]; 4]);
+        assert_eq!(project.layers[0], original_layer);
         assert_eq!(project.layers[1].pixels[3], [1, 2, 3, 255]);
     }
 
