@@ -142,7 +142,10 @@ jobs:
           cargo run --locked --quiet --bin perveance-cli -- capabilities
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
           cargo run --locked --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
-          cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
+          cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json > /tmp/perveance-inspection.json
+          python3 -c 'import json; r=json.load(open("/tmp/perveance-inspection.json")); json.dump({"version":1,"base_revision":r["revision"],"prompt":"make art","budgets":{"wall_seconds":10,"cpu_seconds":10,"memory_mib":32,"scratch_mib":32,"processes":2,"model_calls":0,"model_cost_microusd":0}},open("/tmp/perveance-task.json","w"))'
+          cargo run --locked --quiet --bin perveance-cli -- inspect-autonomy-request /tmp/perveance-painted.json /tmp/perveance-task.json > /tmp/perveance-intake.json
+          python3 -c 'import json; r=json.load(open("/tmp/perveance-intake.json")); assert r["ok"] and r["intake"]["status"] == "blocked" and not r["intake"]["autonomous_execution"] and not r["intake"]["budgets_enforced"] and not r["intake"]["persistent_task_created"]'
           stage_parent=$(mktemp -d)
           trap 'rmdir "$stage_parent"' EXIT
           cargo run --locked --quiet --bin perveance-cli -- verify-project-staging /tmp/perveance-painted.json "$stage_parent"

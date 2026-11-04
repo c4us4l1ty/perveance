@@ -2,6 +2,7 @@
 //! It does not execute AI-generated code or implement a sandbox.
 
 pub mod provider;
+pub mod supervisor;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};
