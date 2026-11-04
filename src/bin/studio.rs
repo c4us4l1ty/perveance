@@ -9,8 +9,10 @@ use perveance::recovery::{RecoverySession, RECOVERY_LIMIT};
 
 fn path_input_row(ui: &mut egui::Ui, value: &mut String, enabled: bool) -> bool {
     ui.horizontal(|ui| {
-        let width = (ui.available_width() - 82.0).max(36.0);
-        ui.add_enabled_ui(enabled, |ui| { ui.add_sized([width, 24.0], egui::TextEdit::singleline(value)); });
+        // Scroll-area children may report a very large available width. Keep
+        // this row bounded so it cannot expand the tools panel over the canvas.
+        let width = (ui.available_width() - 85.0).clamp(32.0, 88.0);
+        ui.add_enabled(enabled, egui::TextEdit::singleline(value).desired_width(width));
         ui.add_enabled(enabled, egui::Button::new("Browse…")).clicked()
     }).inner
 }
