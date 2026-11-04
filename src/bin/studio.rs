@@ -20,10 +20,25 @@ fn path_input_row(ui: &mut egui::Ui, value: &mut String, enabled: bool) -> bool 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper }
 
+impl Tool {
+    fn shortcut(self) -> (egui::Key, &'static str, &'static str) {
+        match self {
+            Self::Pencil => (egui::Key::B, "B", "Pencil"),
+            Self::Eraser => (egui::Key::E, "E", "Eraser"),
+            Self::Fill => (egui::Key::G, "G", "Fill"),
+            Self::Rectangle => (egui::Key::R, "R", "Rectangle"),
+            Self::Ellipse => (egui::Key::O, "O", "Ellipse"),
+            Self::Line => (egui::Key::L, "L", "Line"),
+            Self::Eyedropper => (egui::Key::I, "I", "Eyedropper"),
+        }
+    }
+}
+
 fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str) {
     ui.horizontal(|ui| {
         let (icon, response) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
-        if response.on_hover_text(label).clicked() { *current = target; }
+        let hint = format!("{label} ({})", target.shortcut().1);
+        if response.on_hover_text(hint.as_str()).clicked() { *current = target; }
         let tint = if *current == target { Color32::from_rgb(166, 215, 74) } else { Color32::from_gray(175) };
         let stroke = egui::Stroke::new(1.5, tint);
         let p = |x: f32, y: f32| Pos2::new(icon.min.x + x, icon.min.y + y);
@@ -66,7 +81,7 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
                 ui.painter().line_segment([p(4.0, 14.0), p(3.0, 16.0)], stroke);
             }
         }
-        if ui.selectable_label(*current == target, label).clicked() { *current = target; }
+        if ui.selectable_label(*current == target, label).on_hover_text(hint).clicked() { *current = target; }
     });
 }
 
@@ -329,6 +344,20 @@ impl Studio {
             self.save_current_with_status();
         } else if ctx.input_mut(|input| input.consume_shortcut(&open)) {
             self.open_path_browser(BrowserTarget::OpenProject);
+        } else {
+            for tool in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Eyedropper] {
+                let (key, shortcut, name) = tool.shortcut();
+                // egui's consume_key ignores extra Shift/Alt, so require an
+                // exact unmodified key event before consuming a tool shortcut.
+                let unmodified = ctx.input(|input| input.events.iter().any(|event| matches!(event,
+                    egui::Event::Key { key: pressed_key, pressed: true, modifiers, .. }
+                    if *pressed_key == key && *modifiers == egui::Modifiers::NONE)));
+                if unmodified && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)) {
+                    self.tool = tool;
+                    self.status = format!("{name} tool selected ({shortcut}).");
+                    break;
+                }
+            }
         }
     }
     fn enable_recovery(&mut self, now: Instant) -> Result<(), String> {
@@ -820,6 +849,16 @@ impl eframe::App for Studio {
             tool_button(ui, &mut self.tool, Tool::Ellipse, "Ellipse");
             tool_button(ui, &mut self.tool, Tool::Line, "Line");
             tool_button(ui, &mut self.tool, Tool::Eyedropper, "Eyedropper");
+            egui::CollapsingHeader::new("Keyboard shortcuts").show(ui, |ui| {
+                ui.small("B Pencil · E Eraser · G Fill");
+                ui.small("R Rectangle · O Ellipse");
+                ui.small("L Line · I Eyedropper");
+                ui.small("Ctrl+O Open · Ctrl+S Save");
+                ui.small("Ctrl+Z Undo");
+                ui.small("Ctrl+Shift+Z / Ctrl+Y Redo");
+                ui.small("Ignored while typing, in dialogs");
+                ui.small("or during a drawing gesture.");
+            });
             if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
                 ui.checkbox(&mut self.shape_filled, "Filled shape");
             }
@@ -1252,6 +1291,51 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn tool_shortcuts_respect_modifiers_dialogs_gestures_and_text_focus() {
+        fn send(ctx: &egui::Context, studio: &mut Studio, key: egui::Key, modifiers: egui::Modifiers) {
+            let event = |pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers };
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), modifiers, events: vec![event(true), event(false)], ..Default::default() };
+            let _ = ctx.run(input, |ctx| studio.handle_shortcuts(ctx));
+        }
+        let ctx = egui::Context::default();
+        let mut studio = Studio::default();
+        let original = studio.project.clone();
+        for tool in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Eyedropper] {
+            send(&ctx, &mut studio, tool.shortcut().0, egui::Modifiers::NONE);
+            assert!(studio.tool == tool);
+        }
+        assert_eq!(studio.project, original);
+        assert!(!studio.history.can_undo());
+        for modifiers in [egui::Modifiers::ALT, egui::Modifiers::SHIFT, egui::Modifiers::COMMAND] {
+            send(&ctx, &mut studio, egui::Key::B, modifiers);
+            assert!(studio.tool == Tool::Eyedropper);
+        }
+        studio.open_path_browser(BrowserTarget::Project);
+        send(&ctx, &mut studio, egui::Key::B, egui::Modifiers::NONE);
+        assert!(studio.tool == Tool::Eyedropper);
+        studio.finish_path_browser(BrowserAction::Cancel);
+        studio.pending_replacement = Some(CanvasReplacement::New { width: 1, height: 1 });
+        send(&ctx, &mut studio, egui::Key::B, egui::Modifiers::NONE);
+        assert!(studio.tool == Tool::Eyedropper);
+        studio.pending_replacement = None;
+        studio.shape_start = Some([0, 0]);
+        send(&ctx, &mut studio, egui::Key::B, egui::Modifiers::NONE);
+        assert!(studio.tool == Tool::Eyedropper);
+        studio.shape_start = None;
+        studio.stroke_last = Some([0, 0]);
+        send(&ctx, &mut studio, egui::Key::B, egui::Modifiers::NONE);
+        assert!(studio.tool == Tool::Eyedropper);
+        studio.stroke_last = None;
+        let mut text = String::new();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| { ui.text_edit_singleline(&mut text).request_focus(); });
+        });
+        send(&ctx, &mut studio, egui::Key::B, egui::Modifiers::NONE);
+        assert!(studio.tool == Tool::Eyedropper);
+        assert_eq!(studio.project, original);
     }
 
     #[test]

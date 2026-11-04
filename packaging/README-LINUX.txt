@@ -26,6 +26,10 @@ This is an in-app browser, not a native OS dialog or security boundary. Large
 directories may require manual path entry. Non-UTF-8 paths are not supported;
 special-file entries are omitted and opening special files may block.
 
+Tool shortcuts: B Pencil, E Eraser, G Fill, R Rectangle, O Ellipse, L Line,
+and I Eyedropper. The Tools panel has a shortcut reference. Shortcuts are
+ignored while typing, in dialogs and during active drawing gestures.
+
 Use Save or Ctrl+S to create the first file (using the GUI's File path field),
 or a numbered version after edits. Existing files are never overwritten.
 Ctrl+S is ignored in text fields, dialogs and active drawing gestures.
