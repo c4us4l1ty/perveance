@@ -2,6 +2,7 @@
 //! It does not execute AI-generated code or implement a sandbox.
 
 pub mod fixed_worker;
+pub mod file_browser;
 pub mod provider;
 pub mod recovery;
 pub mod supervisor;

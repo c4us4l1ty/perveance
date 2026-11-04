@@ -1,8 +1,19 @@
+#[path = "studio/path_browser.rs"]
+mod path_browser;
+use path_browser::{BrowserAction, BrowserTarget, PathBrowser};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
 use perveance::{EditProposal, FlipAxis, History, Operation, Palette, Project};
 use std::path::Path;
 use std::time::Instant;
 use perveance::recovery::{RecoverySession, RECOVERY_LIMIT};
+
+fn path_input_row(ui: &mut egui::Ui, value: &mut String, enabled: bool) -> bool {
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - 82.0).max(36.0);
+        ui.add_enabled_ui(enabled, |ui| { ui.add_sized([width, 24.0], egui::TextEdit::singleline(value)); });
+        ui.add_enabled(enabled, egui::Button::new("Browse…")).clicked()
+    }).inner
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper }
@@ -89,6 +100,7 @@ struct Studio {
     recovery_dir: String,
     recovery: Option<RecoverySession>,
     recovery_status: String,
+    path_browser: Option<PathBrowser>,
     confirm_close: bool,
     allow_close: bool,
     layer: usize,
@@ -132,7 +144,7 @@ struct Studio {
 impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
-        Self { saved_project: Some(project.clone()), saved_path: None, recovery_dir: ".".into(), recovery: None, recovery_status: "Recovery checkpoints are off.".into(), project, confirm_close: false, allow_close: false, layer: 0,
+        Self { saved_project: Some(project.clone()), saved_path: None, recovery_dir: ".".into(), recovery: None, recovery_status: "Recovery checkpoints are off.".into(), path_browser: None, project, confirm_close: false, allow_close: false, layer: 0,
             color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
@@ -140,13 +152,43 @@ impl Default for Studio {
 }
 
 impl Studio {
+    fn open_path_browser(&mut self, target: BrowserTarget) {
+        if self.confirm_close || self.pending_replacement.is_some() || self.path_browser.is_some()
+            || self.shape_start.is_some() || self.stroke_last.is_some() { return; }
+        let initial = match target {
+            BrowserTarget::Project => &self.path,
+            BrowserTarget::PngInput => &self.png_path,
+            BrowserTarget::PngExport => &self.export_path,
+            BrowserTarget::Palette => &self.palette_path,
+            BrowserTarget::Proposal => &self.proposal_path,
+            BrowserTarget::RecoveryDirectory => &self.recovery_dir,
+        };
+        self.path_browser = Some(PathBrowser::new(target, initial));
+    }
+    fn finish_path_browser(&mut self, action: BrowserAction) {
+        if matches!(action, BrowserAction::None) { return; }
+        if let Some(browser) = self.path_browser.take() {
+            if let BrowserAction::Use(path) = action {
+                if let Some(path) = path.to_str() {
+                    match browser.target {
+                        BrowserTarget::Project => self.path = path.into(),
+                        BrowserTarget::PngInput => self.png_path = path.into(),
+                        BrowserTarget::PngExport => self.export_path = path.into(),
+                        BrowserTarget::Palette => self.palette_path = path.into(),
+                        BrowserTarget::Proposal => self.proposal_path = path.into(),
+                        BrowserTarget::RecoveryDirectory => self.recovery_dir = path.into(),
+                    }
+                } else { self.status = "Selected path must be valid UTF-8.".into(); }
+            }
+        }
+    }
     fn has_unsaved_changes(&self) -> bool {
         self.saved_project.as_ref().map_or(true, |saved| *saved != self.project)
     }
     // Capture the requested path/dimensions at click time; never keep a blanket
     // "allow replacement" setting that can outlive the user's confirmation.
     fn request_replacement(&mut self, replacement: CanvasReplacement) {
-        if self.confirm_close || self.pending_replacement.is_some() { return; }
+        if self.confirm_close || self.pending_replacement.is_some() || self.path_browser.is_some() { return; }
         if self.has_unsaved_changes() || self.shape_start.is_some() || self.stroke_last.is_some() {
             self.pending_replacement = Some(replacement);
         } else {
@@ -269,7 +311,7 @@ impl Studio {
     }
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Do not intercept shortcuts in dialogs, text fields, or drawing gestures.
-        if self.confirm_close || self.pending_replacement.is_some() || self.shape_start.is_some() || self.stroke_last.is_some()
+        if self.confirm_close || self.pending_replacement.is_some() || self.path_browser.is_some() || self.shape_start.is_some() || self.stroke_last.is_some()
             || ctx.wants_keyboard_input() || ctx.input(|input| input.pointer.any_down()) { return; }
         let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
         let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
@@ -291,7 +333,7 @@ impl Studio {
     }
     fn recovery_ui(&mut self, ui: &mut egui::Ui) {
         ui.label("Recovery directory (trusted, existing)");
-        ui.add_enabled(self.recovery.is_none(), egui::TextEdit::singleline(&mut self.recovery_dir));
+        if path_input_row(ui, &mut self.recovery_dir, self.recovery.is_none()) { self.open_path_browser(BrowserTarget::RecoveryDirectory); }
         let mut enabled = self.recovery.is_some();
         if ui.checkbox(&mut enabled, "Enable recovery checkpoints").changed() {
             if enabled {
@@ -308,7 +350,7 @@ impl Studio {
         if self.recovery.is_none() { return; }
         let dirty = self.has_unsaved_changes();
         let eligible = !self.confirm_close && !self.allow_close && self.pending_replacement.is_none()
-            && self.shape_start.is_none() && self.stroke_last.is_none() && !ctx.input(|input| input.pointer.any_down());
+            && self.path_browser.is_none() && self.shape_start.is_none() && self.stroke_last.is_none() && !ctx.input(|input| input.pointer.any_down());
         let session = self.recovery.as_mut().expect("checked above");
         let result = session.checkpoint_if_due(&self.project, dirty, eligible, now);
         match result {
@@ -349,7 +391,7 @@ impl Studio {
     }
     fn export_png_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.label("PNG export path");
-        ui.text_edit_singleline(&mut self.export_path);
+        if path_input_row(ui, &mut self.export_path, true) { self.open_path_browser(BrowserTarget::PngExport); }
         ui.add(egui::DragValue::new(&mut self.export_scale).range(1..=perveance::MAX_EXPORT_SCALE).prefix("Scale ×"));
         ui.small("Nearest-neighbor; export does not save the project.");
         let button = ui.button("Export PNG as new file");
@@ -573,7 +615,7 @@ impl Studio {
     fn poll_ai(&mut self, ctx: &egui::Context) {
         if self.ai_pending.is_none() { return; }
         // Do not inject a discrete edit into an active brush/shape gesture or dialog.
-        if self.confirm_close || self.pending_replacement.is_some() || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
+        if self.confirm_close || self.pending_replacement.is_some() || self.path_browser.is_some() || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
             return;
         }
@@ -611,7 +653,7 @@ impl Studio {
     }
     fn palette_file_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
         ui.label("Palette file path");
-        ui.text_edit_singleline(&mut self.palette_path);
+        if path_input_row(ui, &mut self.palette_path, true) { self.open_path_browser(BrowserTarget::Palette); }
         let save = ui.button("Save palette as new file");
         if save.clicked() { self.save_palette(); }
         let load = ui.button("Load palette (replaces swatches)");
@@ -675,7 +717,7 @@ impl Studio {
             }
         }
         ui.label("Proposal JSON path");
-        ui.text_edit_singleline(&mut self.proposal_path);
+        if path_input_row(ui, &mut self.proposal_path, true) { self.open_path_browser(BrowserTarget::Proposal); }
         let apply = ui.button("Apply proposal");
         if apply.clicked() {
             match EditProposal::load(Path::new(&self.proposal_path)) {
@@ -734,7 +776,10 @@ impl eframe::App for Studio {
         // A native close request is cancellable; this does not protect against a crash,
         // force-quit, or an operating system that terminates the process outright.
         if ctx.input(|input| input.viewport().close_requested()) && !self.allow_close {
-            if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() || self.stroke_last.is_some() {
+            if self.path_browser.is_some() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.path_browser = None;
+            } else if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() || self.stroke_last.is_some() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.confirm_close = true;
                 self.pending_replacement = None;
@@ -791,7 +836,7 @@ impl eframe::App for Studio {
             egui::CollapsingHeader::new("Resize existing canvas").show(ui, |ui| { self.resize_ui(ui); });
             ui.separator();
             ui.label("File path");
-            ui.text_edit_singleline(&mut self.path);
+            if path_input_row(ui, &mut self.path, true) { self.open_path_browser(BrowserTarget::Project); }
             self.project_save_ui(ui);
             egui::CollapsingHeader::new("Recovery checkpoints").show(ui, |ui| { self.recovery_ui(ui); });
             self.export_png_ui(ui);
@@ -800,7 +845,7 @@ impl eframe::App for Studio {
             }
             ui.separator();
             ui.label("PNG path");
-            ui.text_edit_singleline(&mut self.png_path);
+            if path_input_row(ui, &mut self.png_path, true) { self.open_path_browser(BrowserTarget::PngInput); }
             if ui.button("Import PNG as layer").clicked() {
                 let mut updated = self.project.clone();
                 match updated.import_png_layer(Path::new(&self.png_path)) {
@@ -1014,6 +1059,12 @@ impl eframe::App for Studio {
               });
             });
         });
+        if let Some(browser) = &mut self.path_browser {
+            let mut action = BrowserAction::None;
+            egui::Modal::new(egui::Id::new("path_browser")).show(ctx, |ui| { action = browser.ui(ui).0; });
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { action = BrowserAction::Cancel; }
+            self.finish_path_browser(action);
+        }
         if self.pending_replacement.is_some() && !self.confirm_close {
             egui::Modal::new(egui::Id::new("unsaved_replace")).show(ctx, |ui| { self.replacement_dialog_ui(ui); });
             if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { self.resolve_replacement(false); }
@@ -1194,6 +1245,41 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn path_browser_selection_changes_only_the_intended_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("source.json");
+        Project::new(3, 3).unwrap().save_new(&input).unwrap();
+        let before_bytes = std::fs::read(&input).unwrap();
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let before = studio.project.clone();
+        let source_path = studio.saved_path.clone();
+        studio.path = input.to_str().unwrap().into();
+        studio.open_path_browser(BrowserTarget::Project);
+        assert!(studio.path_browser.is_some());
+        studio.request_replacement(CanvasReplacement::New { width: 2, height: 2 });
+        assert!(studio.pending_replacement.is_none());
+        studio.finish_path_browser(BrowserAction::Use(input.clone()));
+        assert_eq!(studio.path, input.to_str().unwrap());
+        assert_eq!(studio.saved_path, source_path);
+        assert_eq!(studio.project, before);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.history.can_undo());
+        assert_eq!(std::fs::read(&input).unwrap(), before_bytes);
+        let previous = studio.export_path.clone();
+        studio.open_path_browser(BrowserTarget::PngExport);
+        studio.finish_path_browser(BrowserAction::Cancel);
+        assert_eq!(studio.export_path, previous);
+        assert_eq!(studio.project, before);
+        // Use path only changes the field, even if it refers to an existing file.
+        studio.open_path_browser(BrowserTarget::PngExport);
+        studio.finish_path_browser(BrowserAction::Use(input.clone()));
+        assert_eq!(studio.export_path, input.to_str().unwrap());
+        assert_eq!(std::fs::read(&input).unwrap(), before_bytes);
     }
 
     #[test]
