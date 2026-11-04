@@ -109,3 +109,23 @@ fn bridge_proposal_checks_rust_revision_and_matches_rust_output() {
     assert!(!result.status.success());
     assert!(!bad.exists());
 }
+
+#[test]
+fn bridge_scaled_png_matches_rust_nearest_neighbor() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("project.json");
+    let mut p = Project::new(3, 2).unwrap();
+    p.set_pixel(0, 0, 0, [10, 20, 30, 255]).unwrap();
+    p.set_pixel(0, 1, 1, [20, 40, 60, 127]).unwrap();
+    p.add_layer().unwrap();
+    p.set_pixel(1, 1, 1, [200, 100, 50, 90]).unwrap();
+    p.save_new(&source).unwrap();
+    for scale in [1, 2, 8] {
+        let py_png = dir.path().join(format!("python-{scale}.png"));
+        let rust_png = dir.path().join(format!("rust-{scale}.png"));
+        python(&["export-png-scaled", source.to_str().unwrap(), py_png.to_str().unwrap(), &scale.to_string()]);
+        p.export_png_scaled_new(&rust_png, scale).unwrap();
+        assert_eq!(decoded(&py_png), decoded(&rust_png));
+    }
+    assert_eq!(Project::load(&source).unwrap(), p);
+}

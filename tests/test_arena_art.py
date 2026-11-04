@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import struct
+import zlib
 import sys
 import tempfile
 import unittest
@@ -25,6 +27,41 @@ class ArenaArtTests(unittest.TestCase):
         self.assertEqual(list(art.rgba_composite(p)), [127, 0, 128, 255])
         self.assertEqual(p["layers"][2]["pixels"][0], [7, 9, 11, 0])
         self.assertTrue(art.png_bytes(p).startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_scaled_png_is_nearest_neighbor_and_bounded(self):
+        p = art.create_project(2, 1, [
+            {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [10, 20, 30, 255]},
+            {"op": "pixel", "layer": 0, "x": 1, "y": 0, "color": [30, 20, 10, 128]},
+        ])
+        data = art.png_bytes(p, 3)
+        self.assertEqual(struct.unpack(">II", data[16:24]), (6, 3))
+        cursor = 8
+        compressed = b""
+        while cursor < len(data):
+            length = struct.unpack(">I", data[cursor:cursor + 4])[0]
+            kind = data[cursor + 4:cursor + 8]
+            if kind == b"IDAT":
+                compressed += data[cursor + 8:cursor + 8 + length]
+            cursor += 12 + length
+        row = b"\0" + bytes([10, 20, 30, 255]) * 3 + bytes([30, 20, 10, 128]) * 3
+        self.assertEqual(zlib.decompress(compressed), row * 3)
+        for factor in (0, 9, True):
+            with self.assertRaises(ValueError):
+                art.png_bytes(p, factor)
+
+    def test_scaled_export_refuses_clobber(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "project.json"
+            output = root / "output.png"
+            project.write_text(json.dumps(art.create_project(1, 1, [])))
+            output.write_bytes(b"existing")
+            with self.assertRaises(FileExistsError):
+                art.main(["export-png-scaled", str(project), str(output), "2"])
+            self.assertEqual(output.read_bytes(), b"existing")
+            with self.assertRaises(ValueError):
+                art.main(["export-png-scaled", str(project), str(root / "no.png"), "9"])
+            self.assertFalse((root / "no.png").exists())
 
     def test_invalid_inputs_are_rejected_before_writing(self):
         bad_ops = [
