@@ -35,7 +35,8 @@ pub fn stage_project(project: &Project, trusted_parent: &Path) -> Result<StagedP
 
     project.validate()?;
     let revision = project.revision()?;
-    let directory = tempfile::Builder::new().prefix("perveance-stage-").tempdir_in(trusted_parent)
+    let directory = tempfile::Builder::new().prefix("perveance-stage-")
+        .permissions(std::fs::Permissions::from_mode(0o700)).tempdir_in(trusted_parent)
         .map_err(|e| format!("create staging directory: {e}"))?;
     let metadata = std::fs::symlink_metadata(directory.path()).map_err(|e| format!("inspect staging directory: {e}"))?;
     if !metadata.file_type().is_dir() || metadata.permissions().mode() & 0o077 != 0 {
