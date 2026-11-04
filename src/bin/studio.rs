@@ -3,7 +3,7 @@ mod path_browser;
 use path_browser::{BrowserAction, BrowserTarget, PathBrowser};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
 use perveance::{EditProposal, FlipAxis, History, Operation, Palette, Project};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use perveance::recovery::{RecoverySession, RECOVERY_LIMIT};
 
@@ -329,7 +329,7 @@ impl Studio {
     }
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Do not intercept shortcuts in dialogs, text fields, or drawing gestures.
-        if self.confirm_close || self.pending_replacement.is_some() || self.path_browser.is_some() || self.shape_start.is_some() || self.stroke_last.is_some()
+        if self.confirm_close || self.allow_close || self.pending_replacement.is_some() || self.path_browser.is_some() || self.shape_start.is_some() || self.stroke_last.is_some()
             || ctx.wants_keyboard_input() || ctx.input(|input| input.pointer.any_down()) { return; }
         let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
         let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
@@ -344,6 +344,10 @@ impl Studio {
             self.save_current_with_status();
         } else if ctx.input_mut(|input| input.consume_shortcut(&open)) {
             self.open_path_browser(BrowserTarget::OpenProject);
+        } else if ctx.input(|input| input.events.iter().any(|event| matches!(event,
+            egui::Event::Key { key: egui::Key::F9, pressed: true, modifiers, .. } if *modifiers == egui::Modifiers::NONE)))
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F9)) {
+            self.manual_checkpoint(ctx, Instant::now());
         } else {
             for tool in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Eyedropper] {
                 let (key, shortcut, name) = tool.shortcut();
@@ -378,34 +382,51 @@ impl Studio {
                 self.recovery_status = "Recovery off; existing checkpoint files remain.".into();
             }
         }
-        ui.small("Opt-in: every 15 seconds when changed, up to 8 files per session. Includes hidden layers. No automatic deletion.");
+        ui.small("Opt-in: every 15 seconds when changed, or use Checkpoint / F9. Up to 8 files per session. Includes hidden layers. No automatic deletion.");
         ui.small(&self.recovery_status);
+    }
+    fn recovery_idle(&self) -> bool {
+        !self.confirm_close && !self.allow_close && self.pending_replacement.is_none()
+            && self.path_browser.is_none() && self.shape_start.is_none() && self.stroke_last.is_none()
+    }
+    fn report_recovery_result(&mut self, result: Result<Option<PathBuf>, String>, manual: bool) {
+        match result {
+            Ok(Some(path)) => {
+                self.recovery_status = format!("Checkpoint saved: {}", path.display());
+                if self.recovery.as_ref().map_or(false, |session| session.is_full()) {
+                    self.recovery_status = format!("Checkpoint saved: {}. Limit of {RECOVERY_LIMIT} reached; recovery stopped.", path.display());
+                    self.recovery = None;
+                }
+                if manual || self.recovery.is_none() { self.status = self.recovery_status.clone(); }
+            }
+            Ok(None) if manual => {
+                self.recovery_status = "No new checkpoint: project matches the last checkpoint.".into();
+                self.status = self.recovery_status.clone();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.recovery_status = format!("{error} Recovery stopped; the current project is unchanged.");
+                self.status = self.recovery_status.clone();
+                self.recovery = None;
+            }
+        }
+    }
+    fn manual_checkpoint(&mut self, ctx: &egui::Context, now: Instant) {
+        if self.recovery.is_none() {
+            self.status = "Enable recovery checkpoints before using Checkpoint now.".into();
+            return;
+        }
+        if !self.recovery_idle() || ctx.input(|input| input.pointer.any_down()) { return; }
+        let result = self.recovery.as_mut().expect("checked above").checkpoint_now(&self.project, now);
+        self.report_recovery_result(result, true);
+        if let Some(session) = &self.recovery { ctx.request_repaint_after(session.delay(now)); }
     }
     fn tick_recovery(&mut self, ctx: &egui::Context, now: Instant) {
         if self.recovery.is_none() { return; }
         let dirty = self.has_unsaved_changes();
-        let eligible = !self.confirm_close && !self.allow_close && self.pending_replacement.is_none()
-            && self.path_browser.is_none() && self.shape_start.is_none() && self.stroke_last.is_none() && !ctx.input(|input| input.pointer.any_down());
-        let session = self.recovery.as_mut().expect("checked above");
-        let result = session.checkpoint_if_due(&self.project, dirty, eligible, now);
-        match result {
-            Ok(Some(path)) => {
-                self.recovery_status = format!("Checkpoint saved: {}", path.display());
-                if session.is_full() {
-                    self.recovery_status = format!("Checkpoint saved: {}. Limit of {RECOVERY_LIMIT} reached; recovery stopped.", path.display());
-                    self.status = self.recovery_status.clone();
-                    self.recovery = None;
-                    return;
-                }
-            }
-            Ok(None) => {}
-            Err(error) => {
-                self.recovery_status = format!("{error} Recovery stopped; your project is still unsaved.");
-                self.status = self.recovery_status.clone();
-                self.recovery = None;
-                return;
-            }
-        }
+        let eligible = self.recovery_idle() && !ctx.input(|input| input.pointer.any_down());
+        let result = self.recovery.as_mut().expect("checked above").checkpoint_if_due(&self.project, dirty, eligible, now);
+        self.report_recovery_result(result, false);
         if let Some(session) = &self.recovery { ctx.request_repaint_after(session.delay(now)); }
     }
     fn project_save_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
@@ -828,6 +849,10 @@ impl eframe::App for Studio {
                 ui.label(egui::RichText::new("STUDIO / EARLY PROTOTYPE").small().color(Color32::from_rgb(166, 215, 74)));
                 if ui.button("Open…").on_hover_text("Ctrl+O — open an existing project").clicked() { self.open_path_browser(BrowserTarget::OpenProject); }
                 if ui.button("Save").on_hover_text("Ctrl+S — save a new file or numbered version; never overwrites").clicked() { self.save_current_with_status(); }
+                if self.recovery.is_some() && ui.add_enabled(self.recovery_idle(), egui::Button::new("Checkpoint"))
+                    .on_hover_text("F9 — create an opt-in recovery snapshot now; this does not save the project").clicked() {
+                    self.manual_checkpoint(ctx, Instant::now());
+                }
                 ui.label(if self.saved_path.is_none() { "Not saved" } else if self.has_unsaved_changes() { "Modified" } else { "Saved" });
                 if ui.add_enabled(self.history.can_undo(), egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.undo_edit(); }
                 if ui.add_enabled(self.history.can_redo(), egui::Button::new("Redo")).on_hover_text("Ctrl+Shift+Z or Ctrl+Y").clicked() { self.redo_edit(); }
@@ -854,6 +879,7 @@ impl eframe::App for Studio {
                 ui.small("R Rectangle · O Ellipse");
                 ui.small("L Line · I Eyedropper");
                 ui.small("Ctrl+O Open · Ctrl+S Save");
+                ui.small("F9 Recovery checkpoint");
                 ui.small("Ctrl+Z Undo");
                 ui.small("Ctrl+Shift+Z / Ctrl+Y Redo");
                 ui.small("Ignored while typing, in dialogs");
@@ -1405,6 +1431,95 @@ mod tests {
         assert_eq!(studio.saved_path.as_deref(), path.to_str());
         assert!(!studio.has_unsaved_changes());
         assert!(!studio.history.can_undo());
+    }
+
+    #[test]
+    fn f9_checkpoints_only_when_unmodified_and_editor_is_idle() {
+        fn press(ctx: &egui::Context, studio: &mut Studio, modifiers: egui::Modifiers) {
+            let event = |pressed| egui::Event::Key { key: egui::Key::F9, physical_key: None, pressed, repeat: false, modifiers };
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), modifiers, events: vec![event(true), event(false)], ..Default::default() };
+            let _ = ctx.run(input, |ctx| studio.handle_shortcuts(ctx));
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut studio = Studio::default();
+        studio.recovery_dir = dir.path().to_str().unwrap().into();
+        studio.enable_recovery(Instant::now()).unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let ctx = egui::Context::default();
+        for modifiers in [egui::Modifiers::ALT, egui::Modifiers::SHIFT, egui::Modifiers::COMMAND] {
+            press(&ctx, &mut studio, modifiers);
+        }
+        studio.confirm_close = true;
+        press(&ctx, &mut studio, egui::Modifiers::NONE);
+        studio.confirm_close = false;
+        studio.stroke_last = Some([0, 0]);
+        press(&ctx, &mut studio, egui::Modifiers::NONE);
+        studio.stroke_last = None;
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        press(&ctx, &mut studio, egui::Modifiers::NONE);
+        let checkpoint = std::fs::read_dir(dir.path()).unwrap().next().unwrap().unwrap().path();
+        assert_eq!(Project::load(&checkpoint).unwrap(), studio.project);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.saved_path.is_none());
+    }
+
+    #[test]
+    fn manual_recovery_respects_modal_and_gesture_guards_and_preserves_work() {
+        let root = tempfile::tempdir().unwrap();
+        let recovery_dir = root.path().join("recovery");
+        std::fs::create_dir(&recovery_dir).unwrap();
+        let source = root.path().join("source.json");
+        let mut studio = Studio::default();
+        studio.path = source.to_str().unwrap().into();
+        studio.save_project().unwrap();
+        let source_bytes = std::fs::read(&source).unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let before = studio.project.clone();
+        let ctx = egui::Context::default();
+        let now = Instant::now();
+        studio.manual_checkpoint(&ctx, now);
+        assert!(studio.status.contains("Enable recovery"));
+        assert_eq!(std::fs::read_dir(&recovery_dir).unwrap().count(), 0);
+        studio.recovery_dir = recovery_dir.to_str().unwrap().into();
+        studio.enable_recovery(now).unwrap();
+        studio.stroke_last = Some([0, 0]);
+        studio.manual_checkpoint(&ctx, now);
+        studio.stroke_last = None;
+        studio.shape_start = Some([0, 0]);
+        studio.manual_checkpoint(&ctx, now);
+        studio.shape_start = None;
+        studio.open_path_browser(BrowserTarget::Project);
+        studio.manual_checkpoint(&ctx, now);
+        studio.finish_path_browser(BrowserAction::Cancel);
+        studio.confirm_close = true;
+        studio.manual_checkpoint(&ctx, now);
+        studio.confirm_close = false;
+        assert_eq!(std::fs::read_dir(&recovery_dir).unwrap().count(), 0);
+        studio.manual_checkpoint(&ctx, now);
+        let checkpoint = std::fs::read_dir(&recovery_dir).unwrap().next().unwrap().unwrap().path();
+        assert_eq!(Project::load(&checkpoint).unwrap(), before);
+        assert_eq!(studio.project, before);
+        assert_eq!(studio.saved_path.as_deref(), source.to_str());
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.history.can_undo());
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        studio.manual_checkpoint(&ctx, now);
+        assert!(studio.status.contains("No new checkpoint"));
+        assert_eq!(std::fs::read_dir(&recovery_dir).unwrap().count(), 1);
+        // A failed manual checkpoint disables recovery but never drops edits.
+        std::fs::remove_file(checkpoint).unwrap();
+        std::fs::remove_dir(&recovery_dir).unwrap();
+        studio.commit_shape([1, 1], [1, 1]);
+        let dirty = studio.project.clone();
+        studio.manual_checkpoint(&ctx, now);
+        assert!(studio.recovery.is_none());
+        assert!(studio.status.contains("Recovery stopped"));
+        assert_eq!(studio.project, dirty);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.history.can_undo());
+        assert_eq!(std::fs::read(source).unwrap(), source_bytes);
     }
 
     #[test]

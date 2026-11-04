@@ -37,9 +37,13 @@ Ctrl+S is ignored in text fields, dialogs and active drawing gestures.
 Optional recovery checkpoints are off by default. To enable them, select an
 existing trusted directory in the GUI's Recovery checkpoints section, or start:
   /path/to/perveance-linux-x86_64/bin/perveance --recovery-dir /path/to/directory
-They include hidden layers and remain on disk until manually removed. They are
-best-effort snapshots, not a replacement for saving or backups; see the main
-repository README for limits and recovery instructions.
+While enabled, use the top-bar Checkpoint button or F9 for an immediate
+snapshot (ignored while typing, in dialogs, or during a drawing gesture).
+Manual and automatic snapshots share the eight-file limit, skip identical
+project snapshots, include hidden layers, and remain until manually removed.
+Deduplication does not check that the old file still exists. Checkpoints do not
+mark the project saved and are not a replacement for saving or backups; see the
+main repository README for limits and recovery instructions.
 
 The GUI uses the current working directory for its default project and PNG
 paths. Save projects and exports in a directory you can write to. Project
