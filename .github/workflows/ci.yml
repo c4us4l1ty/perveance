@@ -57,7 +57,8 @@ jobs:
             xdotool mousemove --window "$window" 534 208 mousedown 1
             sleep 0.3
             xdotool mousemove --sync --window "$window" 582 256
-            sleep 0.3
+            sleep 0.5
+            scrot /tmp/perveance-line-preview.png
             xdotool mouseup 1
             sleep 1
             scrot /tmp/perveance-line.png
@@ -93,6 +94,7 @@ jobs:
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
           cargo run --locked --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
           cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
+          cargo run --locked --quiet --bin perveance-cli -- sample /tmp/perveance-painted.json 2 3 composite
           cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-potion-base.json
           cargo run --locked --quiet --bin perveance-cli -- apply /tmp/perveance-potion-base.json /tmp/perveance-potion.json examples/potion-operations.json
