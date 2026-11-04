@@ -135,3 +135,105 @@ fn example_potion_is_layered_and_transparent() {
     let pixel = (7 * 16 + 6) * 4;
     assert_eq!(&rgba[pixel..pixel + 4], &[239, 204, 245, 255]);
 }
+
+#[test]
+fn raster_shapes_are_discoverable_and_batch_errors_are_atomic() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("base.json");
+    let output = dir.0.join("shapes.json");
+    let bad_output = dir.0.join("bad.json");
+    let operations = dir.0.join("shapes-ops.json");
+    assert!(cli(&["new", "7", "7", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"rectangle_outline","layer":0,"x":1,"y":1,"width":5,"height":5,"color":[255,0,0,255]},
+        {"op":"ellipse","layer":0,"x":2,"y":2,"width":3,"height":3,"filled":true,"color":[0,0,255,255]}
+    ]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), output.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let project = perveance::Project::load(&output).unwrap();
+    assert_eq!(project.layers[0].pixels[8], [255, 0, 0, 255]);
+    assert_eq!(project.layers[0].pixels[24], [0, 0, 255, 255]);
+    fs::write(&operations, r#"[
+        {"op":"rectangle_outline","layer":0,"x":0,"y":0,"width":2,"height":2,"color":[255,0,0,255]},
+        {"op":"ellipse","layer":0,"x":6,"y":6,"width":2,"height":2,"filled":false,"color":[0,0,255,255]}
+    ]"#).unwrap();
+    assert!(!cli(&["apply", initial.to_str().unwrap(), bad_output.to_str().unwrap(), operations.to_str().unwrap()]).status.success());
+    assert!(!bad_output.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap().layers[0].pixels[0], [0; 4]);
+    let value: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "ellipse"));
+}
+
+#[test]
+fn sample_reports_raw_layer_or_visible_composite_without_mutation() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let edited = dir.0.join("edited.json");
+    let operations = dir.0.join("operations.json");
+    assert!(cli(&["new", "2", "2", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"pixel","layer":0,"x":0,"y":0,"color":[20,40,60,200]},
+        {"op":"add_layer"},
+        {"op":"pixel","layer":1,"x":0,"y":0,"color":[200,120,50,100]},
+        {"op":"set_visibility","layer":1,"visible":false}
+    ]"#).unwrap();
+    assert!(cli(&["apply", initial.to_str().unwrap(), edited.to_str().unwrap(), operations.to_str().unwrap()]).status.success());
+    let path = edited.to_str().unwrap();
+    let before = fs::read(&edited).unwrap();
+    let raw = cli(&["sample", path, "0", "0", "layer", "1"]);
+    assert!(raw.status.success());
+    let raw: serde_json::Value = serde_json::from_slice(&raw.stdout).unwrap();
+    assert_eq!(raw["color"], serde_json::json!([200, 120, 50, 100]));
+    let composite = cli(&["sample", path, "0", "0", "composite"]);
+    assert!(composite.status.success());
+    let composite: serde_json::Value = serde_json::from_slice(&composite.stdout).unwrap();
+    assert_eq!(composite["color"], serde_json::json!([20, 40, 60, 200]));
+    for args in [vec!["sample", path, "2", "0", "composite"], vec!["sample", path, "0", "0", "layer", "2"]] {
+        let result = cli(&args);
+        assert!(!result.status.success());
+        let error: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+        assert_eq!(error["ok"], false);
+    }
+    assert_eq!(fs::read(&edited).unwrap(), before);
+}
+
+#[test]
+fn batch_layer_transforms_reopen_and_fail_atomically() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("transformed.json");
+    let rejected = dir.0.join("rejected.json");
+    let operations = dir.0.join("operations.json");
+    assert!(cli(&["new", "4", "3", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"pixel","layer":0,"x":0,"y":0,"color":[5,6,7,255]},
+        {"op":"duplicate_layer","layer":0},
+        {"op":"flip_layer","layer":1,"axis":"horizontal"},
+        {"op":"flip_layer","layer":1,"axis":"vertical"},
+        {"op":"clear_layer","layer":0}
+    ]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), output.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let project = perveance::Project::load(&output).unwrap();
+    assert_eq!(project.layers.len(), 2);
+    assert_eq!(project.layers[1].name, "Layer 1 copy");
+    assert_eq!(project.layers[0].pixels[0], [0; 4]);
+    assert_eq!(project.layers[1].pixels[11], [5, 6, 7, 255]);
+    let png = dir.0.join("transformed.png");
+    assert!(cli(&["export-png", output.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut pixels).unwrap();
+    assert_eq!(&pixels[44..48], &[5, 6, 7, 255]);
+    assert_eq!(&pixels[0..4], &[0; 4]);
+    fs::write(&operations, r#"[{"op":"duplicate_layer","layer":0},{"op":"clear_layer","layer":9}]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), rejected.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(!result.status.success());
+    assert!(!rejected.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap().layers.len(), 1);
+    let capabilities: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    for operation in ["duplicate_layer", "clear_layer", "flip_layer"] {
+        assert!(capabilities["batch_operations"].as_array().unwrap().iter().any(|value| value == operation));
+        assert_eq!(capabilities["batch_examples"][operation]["op"], operation);
+    }
+}

@@ -132,11 +132,19 @@ impl History {
     }
 }
 
+/// Axis of reflection across the full layer's canvas bounds.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FlipAxis { Horizontal, Vertical }
+
 /// A bounded, typed operation accepted by the headless interface.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     AddLayer,
+    DuplicateLayer { layer: usize },
+    ClearLayer { layer: usize },
+    FlipLayer { layer: usize, axis: FlipAxis },
     SetVisibility { layer: usize, visible: bool },
     RenameLayer { layer: usize, name: String },
     MoveLayer { from: usize, to: usize },
@@ -144,6 +152,8 @@ pub enum Operation {
     Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
     Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
     Rectangle { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
+    RectangleOutline { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
+    Ellipse { layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4] },
     Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
 }
 
@@ -206,6 +216,51 @@ impl Project {
         Ok(())
     }
 
+    /// Insert an exact pixel/visibility copy immediately above the source layer.
+    /// The copy's name is suffixed without breaking the 256-byte UTF-8 limit.
+    pub fn duplicate_layer(&mut self, layer: usize) -> Result<usize, String> {
+        self.validate()?;
+        let source = self.layers.get(layer).ok_or("layer does not exist")?;
+        if self.layers.len() >= 32 { return Err("layer limit reached".into()); }
+        let mut copy = source.clone();
+        const SUFFIX: &str = " copy";
+        if copy.name.len() + SUFFIX.len() > 256 {
+            let mut end = 256 - SUFFIX.len();
+            while !copy.name.is_char_boundary(end) { end -= 1; }
+            copy.name.truncate(end);
+        }
+        copy.name.push_str(SUFFIX);
+        self.layers.insert(layer + 1, copy);
+        Ok(layer + 1)
+    }
+
+    /// Clear all pixels of a layer, including RGB of transparent pixels.
+    pub fn clear_layer(&mut self, layer: usize) -> Result<(), String> {
+        self.validate()?;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        target.pixels.fill([0; 4]);
+        Ok(())
+    }
+
+    /// Reflect an entire layer in its canvas bounds; preserve exact RGBA bytes.
+    pub fn flip_layer(&mut self, layer: usize, axis: FlipAxis) -> Result<(), String> {
+        self.validate()?;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        let width = self.width as usize;
+        let height = self.height as usize;
+        match axis {
+            FlipAxis::Horizontal => {
+                for row in target.pixels.chunks_exact_mut(width) { row.reverse(); }
+            }
+            FlipAxis::Vertical => {
+                for y in 0..height / 2 {
+                    for x in 0..width { target.pixels.swap(y * width + x, (height - 1 - y) * width + x); }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn rename_layer(&mut self, layer: usize, name: &str) -> Result<(), String> {
         self.validate()?;
         if name.trim().is_empty() || name.len() > 256 { return Err("layer name must be 1 to 256 bytes and not blank".into()); }
@@ -245,6 +300,54 @@ impl Project {
             let start = (row * self.width + x) as usize;
             let end = start + width as usize;
             self.layers[layer].pixels[start..end].fill(color);
+        }
+        Ok(())
+    }
+
+    /// Draw a one-pixel rectangle border, including degenerate one-pixel boxes.
+    pub fn rectangle_outline(&mut self, layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4]) -> Result<(), String> {
+        self.check_shape_bounds(layer, x, y, width, height)?;
+        let pixels = &mut self.layers[layer].pixels;
+        let stride = self.width as usize;
+        for dy in 0..height {
+            for dx in 0..width {
+                if dx == 0 || dy == 0 || dx + 1 == width || dy + 1 == height {
+                    pixels[(y + dy) as usize * stride + (x + dx) as usize] = color;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Raster ellipse using pixel centers; outlines are its four-connected edge.
+    pub fn ellipse(&mut self, layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4]) -> Result<(), String> {
+        self.check_shape_bounds(layer, x, y, width, height)?;
+        let (w, h) = (i64::from(width), i64::from(height));
+        let inside = |px: i64, py: i64| -> bool {
+            if px < 0 || py < 0 || px >= w || py >= h { return false; }
+            let dx = 2 * px + 1 - w;
+            let dy = 2 * py + 1 - h;
+            dx * dx * h * h + dy * dy * w * w <= w * w * h * h
+        };
+        let stride = self.width as usize;
+        let pixels = &mut self.layers[layer].pixels;
+        for dy in 0..height {
+            for dx in 0..width {
+                let (px, py) = (i64::from(dx), i64::from(dy));
+                if inside(px, py) && (filled || !inside(px - 1, py) || !inside(px + 1, py) || !inside(px, py - 1) || !inside(px, py + 1)) {
+                    pixels[(y + dy) as usize * stride + (x + dx) as usize] = color;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_shape_bounds(&self, layer: usize, x: u32, y: u32, width: u32, height: u32) -> Result<(), String> {
+        self.validate()?;
+        let right = x.checked_add(width).ok_or("shape out of bounds")?;
+        let bottom = y.checked_add(height).ok_or("shape out of bounds")?;
+        if layer >= self.layers.len() || width == 0 || height == 0 || right > self.width || bottom > self.height {
+            return Err("shape or layer is outside the project".into());
         }
         Ok(())
     }
@@ -317,6 +420,9 @@ impl Project {
         for (index, operation) in operations.iter().enumerate() {
             let result = match operation {
                 Operation::AddLayer => candidate.add_layer(),
+                Operation::DuplicateLayer { layer } => candidate.duplicate_layer(*layer).map(|_| ()),
+                Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
+                Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
                 Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
                     Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),
@@ -327,12 +433,34 @@ impl Project {
                 Operation::Pixel { layer, x, y, color } => candidate.set_pixel(*layer, *x, *y, *color),
                 Operation::Line { layer, from, to, color } => candidate.draw_line(*layer, *from, *to, *color),
                 Operation::Rectangle { layer, x, y, width, height, color } => candidate.rectangle(*layer, *x, *y, *width, *height, *color),
+                Operation::RectangleOutline { layer, x, y, width, height, color } => candidate.rectangle_outline(*layer, *x, *y, *width, *height, *color),
+                Operation::Ellipse { layer, x, y, width, height, filled, color } => candidate.ellipse(*layer, *x, *y, *width, *height, *filled, *color),
                 Operation::Fill { layer, x, y, color } => candidate.fill(*layer, *x, *y, *color),
             };
             result.map_err(|error| format!("operation {index}: {error}"))?;
         }
         *self = candidate;
         Ok(())
+    }
+
+    /// Read a raw layer pixel, even if its layer is hidden, preserving all RGBA bytes.
+    pub fn sample_layer(&self, layer: usize, x: u32, y: u32) -> Result<[u8; 4], String> {
+        self.validate()?;
+        if x >= self.width || y >= self.height { return Err("sample point is outside canvas".into()); }
+        let layer = self.layers.get(layer).ok_or("layer does not exist")?;
+        Ok(layer.pixels[(y * self.width + x) as usize])
+    }
+
+    /// Sample the visible composite exactly as exported to PNG, without the checkerboard.
+    pub fn sample_composite(&self, x: u32, y: u32) -> Result<[u8; 4], String> {
+        self.validate()?;
+        if x >= self.width || y >= self.height { return Err("sample point is outside canvas".into()); }
+        let index = (y * self.width + x) as usize;
+        let mut output = [0; 4];
+        for layer in self.layers.iter().filter(|layer| layer.visible) {
+            blend(&mut output, layer.pixels[index]);
+        }
+        Ok(output)
     }
 
     pub fn rgba(&self) -> Result<Vec<u8>, String> {
@@ -591,6 +719,117 @@ mod tests {
         assert_eq!(count, 20);
         assert!(history.can_redo());
     }
+    #[test]
+    fn rectangle_and_ellipse_masks_are_symmetric_and_respect_bounds() {
+        let ink = [1, 2, 3, 255];
+        for width in 1..=10 {
+            for height in 1..=10 {
+                let mut p = Project::new(width, height).unwrap();
+                p.ellipse(0, 0, 0, width, height, true, ink).unwrap();
+                let pixels = &p.layers[0].pixels;
+                for y in 0..height {
+                    for x in 0..width {
+                        let at = |x, y| pixels[(y * width + x) as usize];
+                        assert_eq!(at(x, y), at(width - 1 - x, y));
+                        assert_eq!(at(x, y), at(x, height - 1 - y));
+                    }
+                }
+                assert!(pixels.contains(&ink));
+            }
+        }
+        let mut p = Project::new(5, 5).unwrap();
+        p.ellipse(0, 0, 0, 5, 5, false, ink).unwrap();
+        assert_eq!(p.layers[0].pixels[12], [0; 4]);
+        assert_eq!(p.layers[0].pixels[2], ink);
+        p.rectangle_outline(0, 1, 1, 3, 3, ink).unwrap();
+        assert_eq!(p.layers[0].pixels[12], [0; 4]);
+        let original = p.clone();
+        assert!(p.ellipse(0, 4, 4, 2, 2, true, ink).is_err());
+        assert!(p.rectangle_outline(0, u32::MAX, 0, 2, 1, ink).is_err());
+        assert_eq!(p, original);
+    }
+    #[test]
+    fn sampling_matches_composite_and_preserves_raw_hidden_pixels() {
+        let mut p = Project::new(2, 1).unwrap();
+        p.set_pixel(0, 0, 0, [20, 40, 60, 200]).unwrap();
+        p.add_layer().unwrap();
+        p.set_pixel(1, 0, 0, [200, 120, 50, 100]).unwrap();
+        p.set_pixel(1, 1, 0, [7, 8, 9, 0]).unwrap();
+        assert_eq!(p.sample_composite(0, 0).unwrap().as_slice(), &p.rgba().unwrap()[0..4]);
+        assert_eq!(p.sample_layer(1, 1, 0).unwrap(), [7, 8, 9, 0]);
+        p.layers[1].visible = false;
+        assert_eq!(p.sample_layer(1, 0, 0).unwrap(), [200, 120, 50, 100]);
+        assert_eq!(p.sample_composite(0, 0).unwrap(), [20, 40, 60, 200]);
+        assert!(p.sample_composite(2, 0).is_err());
+        assert!(p.sample_layer(2, 0, 0).is_err());
+    }
+    #[test]
+    fn duplicate_flip_and_clear_preserve_layer_data_and_validate() {
+        let mut p = Project::new(3, 2).unwrap();
+        p.layers[0].name = "é".repeat(128);
+        p.layers[0].visible = false;
+        for (i, pixel) in p.layers[0].pixels.iter_mut().enumerate() { *pixel = [i as u8, 9, 8, 0]; }
+        let original = p.layers[0].clone();
+        p.add_layer().unwrap();
+        assert_eq!(p.duplicate_layer(0).unwrap(), 1);
+        assert_eq!(p.layers[1].pixels, original.pixels);
+        assert!(!p.layers[1].visible);
+        assert!(p.layers[1].name.ends_with(" copy"));
+        assert!(p.layers[1].name.len() <= 256);
+        p.flip_layer(1, FlipAxis::Horizontal).unwrap();
+        assert_eq!(p.layers[1].pixels.iter().map(|p| p[0]).collect::<Vec<_>>(), [2, 1, 0, 5, 4, 3]);
+        p.flip_layer(1, FlipAxis::Vertical).unwrap();
+        assert_eq!(p.layers[1].pixels.iter().map(|p| p[0]).collect::<Vec<_>>(), [5, 4, 3, 2, 1, 0]);
+        p.flip_layer(1, FlipAxis::Vertical).unwrap();
+        p.flip_layer(1, FlipAxis::Horizontal).unwrap();
+        assert_eq!(p.layers[1].pixels, original.pixels);
+        p.clear_layer(1).unwrap();
+        assert!(p.layers[1].pixels.iter().all(|pixel| *pixel == [0; 4]));
+        assert_eq!(p.layers[0], original);
+        let before = p.clone();
+        assert!(p.duplicate_layer(99).is_err());
+        assert!(p.flip_layer(99, FlipAxis::Horizontal).is_err());
+        assert!(p.clear_layer(99).is_err());
+        assert_eq!(p, before);
+        while p.layers.len() < 32 { p.add_layer().unwrap(); }
+        let full = p.clone();
+        assert!(p.duplicate_layer(0).is_err());
+        assert_eq!(p, full);
+    }
+
+    #[test]
+    fn layer_flips_are_involutions_for_odd_even_and_single_pixel_sizes() {
+        for width in 1..=7 {
+            for height in 1..=7 {
+                let mut p = Project::new(width, height).unwrap();
+                for (i, pixel) in p.layers[0].pixels.iter_mut().enumerate() {
+                    *pixel = [i as u8, 255 - i as u8, 42, if i % 2 == 0 { 0 } else { 255 }];
+                }
+                let before = p.clone();
+                for axis in [FlipAxis::Horizontal, FlipAxis::Vertical] {
+                    p.flip_layer(0, axis).unwrap();
+                    p.flip_layer(0, axis).unwrap();
+                    assert_eq!(p, before, "{width}x{height} {axis:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn layer_transforms_are_atomic_in_batches_and_noops_preserve_redo() {
+        let mut p = Project::new(2, 2).unwrap();
+        let mut history = History::default();
+        history.apply(&mut p, |p| p.set_pixel(0, 0, 0, [1, 2, 3, 4])).unwrap();
+        assert!(history.undo(&mut p));
+        assert!(!history.apply(&mut p, |p| p.clear_layer(0)).unwrap());
+        assert!(history.can_redo());
+        let before = p.clone();
+        let ops = [Operation::DuplicateLayer { layer: 0 }, Operation::FlipLayer { layer: 99, axis: FlipAxis::Vertical }];
+        assert!(p.apply_operations(&ops).is_err());
+        assert_eq!(p, before);
+        assert!(serde_json::from_str::<Operation>(r#"{"op":"flip_layer","layer":0,"axis":"diagonal"}"#).is_err());
+    }
+
     #[test]
     fn project_round_trip_and_png_are_valid() {
         let mut p = Project::new(2, 2).unwrap();

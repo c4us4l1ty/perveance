@@ -17,7 +17,7 @@ jobs:
       - name: Select Rust
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth scrot python3-pil
       - name: Build and test Rust
         run: |
           if cargo test --locked --all-targets > /tmp/perveance-rust-test.log 2>&1; then
@@ -27,19 +27,86 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-rust-test.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
-      - name: Verify desktop window starts under X11
+      - name: Exercise desktop tools under X11
         run: |
           cargo build --locked --bin perveance
-          if ! xvfb-run -a sh -c '
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" sh -c '
             set -eu
             export LIBGL_ALWAYS_SOFTWARE=1
+            export WINIT_X11_SCALE_FACTOR=1
             ./target/debug/perveance >/tmp/perveance-gui.log 2>&1 &
             pid=$!
             trap "kill $pid 2>/dev/null || true" EXIT
-            timeout 30s xdotool search --sync --onlyvisible --name Perveance
+            window=$(timeout 30s xdotool search --sync --onlyvisible --name Perveance | head -n 1)
             kill -0 "$pid"
             sleep 2
+            # Select the rectangle tool and drag inside the default 32x32 canvas.
+            xdotool mousemove --window "$window" 65 171 click 1
+            sleep 1
+            xdotool mousemove --window "$window" 438 112 mousedown 1
+            sleep 0.3
+            xdotool mousemove --sync --window "$window" 486 160
+            sleep 0.3
+            xdotool mouseup 1
+            sleep 1
             kill -0 "$pid"
+            scrot /tmp/perveance-shape.png
+            # Line: drag a diagonal on a separate part of the canvas.
+            xdotool mousemove --window "$window" 65 231 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 534 208 mousedown 1
+            sleep 0.3
+            xdotool mousemove --sync --window "$window" 582 256
+            sleep 0.5
+            scrot /tmp/perveance-line-preview.png
+            xdotool mouseup 1
+            sleep 1
+            scrot /tmp/perveance-line.png
+            # Pick a transparent composite pixel, then use pencil to clear a border pixel.
+            xdotool mousemove --window "$window" 65 261 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 550 160 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 65 81 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 486 112 click 1
+            sleep 1
+            scrot /tmp/perveance-eyedropper.png
+            # Duplicate the selected layer, flip the copy and clear it; undo the clear.
+            xdotool mousemove --window "$window" 1070 282 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 1043 341 click 1
+            sleep 1
+            scrot /tmp/perveance-flipped.png
+            xdotool mousemove --window "$window" 1055 373 click 1
+            sleep 1
+            scrot /tmp/perveance-cleared.png
+            xdotool windowfocus --sync "$window"
+            xdotool key --window "$window" ctrl+z
+            sleep 1
+            scrot /tmp/perveance-clear-undone.png
+            # Request an ordinary native close on the dirty document; it must be cancelled.
+            /usr/bin/python3 tools/send_x11_close.py "$window"
+            sleep 1
+            kill -0 "$pid"
+            scrot /tmp/perveance-close-warning.png
+            xdotool key --window "$window" Escape
+            sleep 1
+            kill -0 "$pid"
+            scrot /tmp/perveance-close-cancelled.png
+            /usr/bin/python3 tools/verify_gui_smoke.py
+            # A fresh, unchanged document should close without a confirmation dialog.
+            kill "$pid"
+            wait "$pid" || true
+            ./target/debug/perveance >/tmp/perveance-gui-clean.log 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            window=$(timeout 30s xdotool search --sync --onlyvisible --name Perveance | head -n 1)
+            sleep 2
+            /usr/bin/python3 tools/send_x11_close.py "$window"
+            sleep 2
+            if kill -0 "$pid" 2>/dev/null; then echo "unchanged project did not close"; exit 1; fi
+            wait "$pid"
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
             for file in /tmp/perveance-smoke.log /tmp/perveance-gui.log; do
@@ -61,6 +128,7 @@ jobs:
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
           cargo run --locked --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
           cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
+          cargo run --locked --quiet --bin perveance-cli -- sample /tmp/perveance-painted.json 2 3 composite
           cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-potion-base.json
           cargo run --locked --quiet --bin perveance-cli -- apply /tmp/perveance-potion-base.json /tmp/perveance-potion.json examples/potion-operations.json

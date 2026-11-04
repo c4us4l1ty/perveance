@@ -1,9 +1,9 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{History, Project};
+use perveance::{FlipAxis, History, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Pencil, Eraser, Fill }
+enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper }
 
 fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str) {
     ui.horizontal(|ui| {
@@ -31,6 +31,25 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
                 ui.painter().line_segment([p(9.0, 14.0), p(3.0, 8.0)], stroke);
                 ui.painter().circle_filled(p(15.0, 14.0), 1.5, tint);
             }
+            Tool::Rectangle => {
+                ui.painter().line_segment([p(3.0, 4.0), p(15.0, 4.0)], stroke);
+                ui.painter().line_segment([p(15.0, 4.0), p(15.0, 14.0)], stroke);
+                ui.painter().line_segment([p(15.0, 14.0), p(3.0, 14.0)], stroke);
+                ui.painter().line_segment([p(3.0, 14.0), p(3.0, 4.0)], stroke);
+            }
+            Tool::Ellipse => {
+                ui.painter().add(egui::Shape::ellipse_stroke(p(9.0, 9.0), Vec2::new(6.0, 5.0), stroke));
+            }
+            Tool::Line => {
+                ui.painter().line_segment([p(3.0, 14.0), p(15.0, 4.0)], stroke);
+                ui.painter().circle_filled(p(3.0, 14.0), 1.5, tint);
+                ui.painter().circle_filled(p(15.0, 4.0), 1.5, tint);
+            }
+            Tool::Eyedropper => {
+                ui.painter().line_segment([p(4.0, 14.0), p(12.0, 6.0)], stroke);
+                ui.painter().line_segment([p(10.0, 4.0), p(15.0, 9.0)], stroke);
+                ui.painter().line_segment([p(4.0, 14.0), p(3.0, 16.0)], stroke);
+            }
         }
         if ui.selectable_label(*current == target, label).clicked() { *current = target; }
     });
@@ -38,11 +57,19 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
 
 struct Studio {
     project: Project,
+    // A snapshot of the last successfully saved/opened project (or initial blank canvas).
+    // None means a new/PNG canvas has not yet been saved as a project.
+    saved_project: Option<Project>,
+    confirm_close: bool,
+    allow_close: bool,
     layer: usize,
     color: [u8; 4],
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
+    shape_start: Option<[u32; 2]>,
+    shape_current: Option<[u32; 2]>,
+    shape_filled: bool,
     path: String,
     png_path: String,
     status: String,
@@ -58,14 +85,23 @@ struct Studio {
 
 impl Default for Studio {
     fn default() -> Self {
-        Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
+        let project = Project::new(32, 32).expect("valid initial canvas");
+        Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
+            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
 }
 
 impl Studio {
+    fn has_unsaved_changes(&self) -> bool {
+        self.saved_project.as_ref().map_or(true, |saved| *saved != self.project)
+    }
+    fn save_project(&mut self) -> Result<(), String> {
+        self.project.save_new(Path::new(&self.path))?;
+        self.saved_project = Some(self.project.clone());
+        Ok(())
+    }
     fn checkpoint(&mut self) {
         self.history.checkpoint_with_selection(&self.project, self.layer);
     }
@@ -81,15 +117,71 @@ impl Studio {
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
     }
+    fn commit_shape(&mut self, start: [u32; 2], end: [u32; 2]) {
+        let (x, y, width, height) = shape_box(start, end);
+        let layer = self.layer;
+        let color = self.color;
+        let filled = self.shape_filled;
+        let tool = self.tool;
+        let result = self.history.apply_with_selection(&mut self.project, layer, |project| match tool {
+            Tool::Rectangle if filled => project.rectangle(layer, x, y, width, height, color),
+            Tool::Rectangle => project.rectangle_outline(layer, x, y, width, height, color),
+            Tool::Ellipse => project.ellipse(layer, x, y, width, height, filled, color),
+            Tool::Line => project.draw_line(layer, start, end, color),
+            _ => Err("not a shape tool".into()),
+        });
+        if let Err(error) = result { self.status = error; }
+    }
+    fn duplicate_selected(&mut self) {
+        let layer = self.layer;
+        match self.history.apply_with_selection(&mut self.project, layer, |p| p.duplicate_layer(layer).map(|_| ())) {
+            Ok(true) => { self.layer = layer + 1; self.rename_buffer = self.project.layers[self.layer].name.clone(); }
+            Ok(false) => {}
+            Err(error) => self.status = error,
+        }
+    }
+    fn flip_selected(&mut self, axis: FlipAxis) {
+        let layer = self.layer;
+        if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.flip_layer(layer, axis)) {
+            self.status = error;
+        }
+    }
+    fn clear_selected(&mut self) {
+        let layer = self.layer;
+        if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.clear_layer(layer)) {
+            self.status = error;
+        }
+    }
+    fn pick_color(&mut self, point: [u32; 2]) {
+        match self.project.sample_composite(point[0], point[1]) {
+            Ok(color) => { self.color = color; self.status = format!("Sampled composite RGBA {color:?}."); }
+            Err(error) => self.status = error,
+        }
+    }
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
     }
 }
 
+/// Inclusive endpoints in either direction produce a positive pixel bounding box.
+fn shape_box(start: [u32; 2], end: [u32; 2]) -> (u32, u32, u32, u32) {
+    let x = start[0].min(end[0]);
+    let y = start[1].min(end[1]);
+    (x, y, start[0].max(end[0]) - x + 1, start[1].max(end[1]) - y + 1)
+}
+
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Do not intercept shortcuts while a text field is editing or a brush gesture is active.
-        if !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
+        // A native close request is cancellable; this does not protect against a crash,
+        // force-quit, or an operating system that terminates the process outright.
+        if ctx.input(|input| input.viewport().close_requested()) && !self.allow_close {
+            if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.confirm_close = true;
+            }
+        }
+        // Do not intercept shortcuts while a dialog, text field, or brush gesture is active.
+        if !self.confirm_close && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
             let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
             let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
             let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -119,6 +211,13 @@ impl eframe::App for Studio {
             tool_button(ui, &mut self.tool, Tool::Pencil, "Pencil");
             tool_button(ui, &mut self.tool, Tool::Eraser, "Eraser");
             tool_button(ui, &mut self.tool, Tool::Fill, "Fill");
+            tool_button(ui, &mut self.tool, Tool::Rectangle, "Rectangle");
+            tool_button(ui, &mut self.tool, Tool::Ellipse, "Ellipse");
+            tool_button(ui, &mut self.tool, Tool::Line, "Line");
+            tool_button(ui, &mut self.tool, Tool::Eyedropper, "Eyedropper");
+            if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
+                ui.checkbox(&mut self.shape_filled, "Filled shape");
+            }
             ui.separator();
             ui.label("Color");
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
@@ -131,7 +230,7 @@ impl eframe::App for Studio {
             ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
             if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
                 match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
+                    Ok(project) => { self.project = project; self.saved_project = None; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
                     Err(error) => self.status = error,
                 }
             }
@@ -139,7 +238,7 @@ impl eframe::App for Studio {
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
             if ui.button("Save as new file").clicked() {
-                let result = self.project.save_new(Path::new(&self.path));
+                let result = self.save_project();
                 self.set_status(result, "Project saved.");
             }
             if ui.button("Export PNG as new file").clicked() {
@@ -149,7 +248,7 @@ impl eframe::App for Studio {
             }
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
+                    Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
                     Err(error) => self.status = error,
                 }
             }
@@ -173,8 +272,11 @@ impl eframe::App for Studio {
                 match Project::from_png(Path::new(&self.png_path)) {
                     Ok(project) => {
                         self.project = project;
+                        self.saved_project = None;
                         self.layer = 0;
                         self.history.clear();
+                        self.shape_start = None;
+                        self.shape_current = None;
                         self.rename_buffer = self.project.layers[0].name.clone();
                         self.confirm_open = false;
                         self.status = "PNG opened as a new canvas.".into();
@@ -249,6 +351,13 @@ impl eframe::App for Studio {
                     }
                 }
             });
+            ui.separator();
+            if ui.add_enabled(self.project.layers.len() < 32, egui::Button::new("Duplicate layer")).on_hover_text("Insert a copy above the selected layer").clicked() { self.duplicate_selected(); }
+            ui.horizontal(|ui| {
+                if ui.button("Flip H").on_hover_text("Mirror selected layer horizontally across the canvas").clicked() { self.flip_selected(FlipAxis::Horizontal); }
+                if ui.button("Flip V").on_hover_text("Mirror selected layer vertically across the canvas").clicked() { self.flip_selected(FlipAxis::Vertical); }
+            });
+            if ui.button("Clear layer").on_hover_text("Clear selected layer pixels (undoable)").clicked() { self.clear_selected(); }
           });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
@@ -260,7 +369,7 @@ impl eframe::App for Studio {
                 ui.add_space(8.0);
                 let scale = self.zoom;
                 let size = Vec2::new(self.project.width as f32 * scale, self.project.height as f32 * scale);
-                let sense = if self.tool == Tool::Fill { Sense::click() } else { Sense::click_and_drag() };
+                let sense = if matches!(self.tool, Tool::Fill | Tool::Eyedropper) { Sense::click() } else { Sense::click_and_drag() };
                 let (rect, response) = ui.allocate_exact_size(size, sense);
                 if let Ok(mut rgba) = self.project.rgba() {
                     // Composite a checkerboard only for the preview; exported PNG keeps alpha.
@@ -298,6 +407,52 @@ impl eframe::App for Studio {
                     let y = ((pos.y - rect.min.y) / scale) as u32;
                     if x < width && y < height { Some([x, y]) } else { None }
                 };
+                if self.tool == Tool::Eyedropper {
+                    self.shape_start = None;
+                    self.shape_current = None;
+                    if response.clicked() {
+                        if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) { self.pick_color(point); }
+                    }
+                } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse | Tool::Line) {
+                    if response.drag_started() {
+                        self.shape_start = ctx.input(|input| input.pointer.press_origin()).and_then(to_pixel);
+                        self.shape_current = self.shape_start;
+                    }
+                    if response.drag_started() || response.dragged() || response.drag_stopped() {
+                        if let Some(pos) = ctx.input(|input| input.pointer.latest_pos()) {
+                            let x = (((pos.x - rect.min.x) / scale).floor() as i32).clamp(0, width as i32 - 1) as u32;
+                            let y = (((pos.y - rect.min.y) / scale).floor() as i32).clamp(0, height as i32 - 1) as u32;
+                            self.shape_current = Some([x, y]);
+                        }
+                    }
+                    if response.clicked() {
+                        if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) { self.commit_shape(point, point); }
+                        self.shape_start = None;
+                        self.shape_current = None;
+                    } else if response.drag_stopped() {
+                        if let (Some(start), Some(end)) = (self.shape_start, self.shape_current) { self.commit_shape(start, end); }
+                        self.shape_start = None;
+                        self.shape_current = None;
+                    }
+                    if let (Some(start), Some(end)) = (self.shape_start, self.shape_current) {
+                        let (x, y, w, h) = shape_box(start, end);
+                        let preview = Rect::from_min_size(Pos2::new(rect.min.x + x as f32 * scale, rect.min.y + y as f32 * scale), Vec2::new(w as f32 * scale, h as f32 * scale));
+                        let stroke = egui::Stroke::new(1.5, Color32::from_rgb(166, 215, 74));
+                        if self.tool == Tool::Ellipse {
+                            ui.painter().add(egui::Shape::ellipse_stroke(preview.center(), preview.size() / 2.0, stroke));
+                        } else if self.tool == Tool::Line {
+                            let center = |point: [u32; 2]| Pos2::new(rect.min.x + (point[0] as f32 + 0.5) * scale, rect.min.y + (point[1] as f32 + 0.5) * scale);
+                            ui.painter().line_segment([center(start), center(end)], stroke);
+                        } else {
+                            ui.painter().line_segment([preview.left_top(), preview.right_top()], stroke);
+                            ui.painter().line_segment([preview.right_top(), preview.right_bottom()], stroke);
+                            ui.painter().line_segment([preview.right_bottom(), preview.left_bottom()], stroke);
+                            ui.painter().line_segment([preview.left_bottom(), preview.left_top()], stroke);
+                        }
+                    }
+                } else {
+                    self.shape_start = None;
+                    self.shape_current = None;
                 if response.clicked() || response.drag_started() {
                     self.stroke_recorded = false;
                     self.stroke_last = if response.drag_started() {
@@ -335,9 +490,31 @@ impl eframe::App for Studio {
                     self.stroke_last = None;
                     self.stroke_recorded = false;
                 }
+                }
               });
             });
         });
+        if self.confirm_close {
+            let mut keep_editing = false;
+            let mut discard = false;
+            egui::Modal::new(egui::Id::new("unsaved_close")).show(ctx, |ui| {
+                ui.heading("Unsaved project");
+                ui.label("Your current artwork has unsaved changes.");
+                ui.label("Keep editing to save it as a new project file, or discard changes and quit.");
+                ui.horizontal(|ui| {
+                    if ui.button("Keep editing").clicked() { keep_editing = true; }
+                    if ui.button("Discard and quit").clicked() { discard = true; }
+                });
+            });
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { keep_editing = true; }
+            if discard {
+                self.allow_close = true;
+                self.confirm_close = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if keep_editing {
+                self.confirm_close = false;
+            }
+        }
     }
 }
 
@@ -360,4 +537,99 @@ fn main() -> eframe::Result<()> {
         cc.egui_ctx.set_style(style);
         Ok(Box::new(Studio::default()))
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn shape_drag_is_reversible_and_uses_inclusive_bounds() {
+        assert_eq!(shape_box([4, 5], [2, 3]), (2, 3, 3, 3));
+        let mut studio = Studio::default();
+        studio.tool = Tool::Rectangle;
+        studio.commit_shape([4, 5], [2, 3]);
+        assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
+        assert_eq!(studio.project.layers[0].pixels[(4 * 32 + 3) as usize], [0; 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], [0; 4]);
+        studio.redo_edit();
+        assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
+    }
+    #[test]
+    fn dirty_state_tracks_successful_save_and_undo_without_false_clean_on_failure() {
+        let mut studio = Studio::default();
+        assert!(!studio.has_unsaved_changes());
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        assert!(studio.has_unsaved_changes());
+        studio.undo_edit();
+        assert!(!studio.has_unsaved_changes());
+        studio.redo_edit();
+        assert!(studio.has_unsaved_changes());
+        let dir = tempfile::tempdir().unwrap();
+        studio.path = dir.path().join("art.json").to_str().unwrap().to_owned();
+        studio.save_project().unwrap();
+        assert!(!studio.has_unsaved_changes());
+        studio.commit_shape([1, 0], [1, 0]);
+        assert!(studio.save_project().is_err()); // The path already exists; do not mark clean.
+        assert!(studio.has_unsaved_changes());
+        studio.undo_edit();
+        assert!(!studio.has_unsaved_changes());
+        studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
+        assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn layer_controls_restore_selection_and_pixels_on_undo() {
+        let mut studio = Studio::default();
+        studio.project.set_pixel(0, 0, 0, [1, 2, 3, 4]).unwrap();
+        studio.duplicate_selected();
+        assert_eq!(studio.layer, 1);
+        assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 4]);
+        studio.flip_selected(FlipAxis::Horizontal);
+        assert_eq!(studio.project.layers[1].pixels[31], [1, 2, 3, 4]);
+        studio.clear_selected();
+        assert_eq!(studio.project.layers[1].pixels[31], [0; 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[1].pixels[31], [1, 2, 3, 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 4]);
+        studio.undo_edit();
+        assert_eq!(studio.layer, 0);
+        assert_eq!(studio.project.layers.len(), 1);
+        studio.redo_edit();
+        assert_eq!(studio.layer, 1);
+        assert_eq!(studio.rename_buffer, "Layer 1 copy");
+    }
+
+    #[test]
+    fn line_gesture_and_composite_eyedropper() {
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([1, 1], [3, 3]);
+        assert_eq!(studio.project.layers[0].pixels[2 * 32 + 2], studio.color);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[0].pixels[2 * 32 + 2], [0; 4]);
+        assert!(studio.history.can_redo());
+        studio.pick_color([2, 2]);
+        assert_eq!(studio.color, [0; 4]);
+        assert!(studio.history.can_redo());
+        studio.redo_edit();
+        studio.pick_color([2, 2]);
+        assert_eq!(studio.color, [166, 215, 74, 255]);
+    }
+    #[test]
+    fn shape_error_and_noop_preserve_redo() {
+        let mut studio = Studio::default();
+        studio.tool = Tool::Ellipse;
+        studio.shape_filled = true;
+        studio.commit_shape([0, 0], [0, 0]);
+        studio.undo_edit();
+        assert!(studio.history.can_redo());
+        studio.commit_shape([300, 0], [300, 0]);
+        assert!(studio.history.can_redo());
+        studio.color = [0; 4];
+        studio.commit_shape([1, 1], [1, 1]);
+        assert!(studio.history.can_redo());
+    }
 }
