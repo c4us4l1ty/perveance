@@ -69,6 +69,10 @@ The prototype CLI can apply a JSON array of up to 1,024 typed operations in one 
 
 Layer duplicates are inserted immediately above their source and retain its visibility and exact pixel bytes. `flip_layer` mirrors a full layer across the canvas (`"axis":"horizontal"` or `"axis":"vertical"`); `clear_layer` resets all its pixels to transparent black. These edits are undoable in the GUI. Layer indices can change after a duplicate or reorder, so later batch operations use the resulting ordering.
 
+### Tool shortcuts
+
+When the canvas or editor has focus, use **B** for Pencil, **E** Eraser, **G** Fill, **R** Rectangle, **O** Ellipse, **L** Line, and **I** Eyedropper. The Tools panel has a collapsible shortcut reference and each tool's tooltip shows its key. These unmodified-key shortcuts do not change artwork by themselves, and are ignored while typing, a dialog is open, or a drawing gesture is active. **Ctrl+O** still opens a project; **Ctrl+S** saves; **Ctrl+Z** undoes; **Ctrl+Shift+Z** or **Ctrl+Y** redoes.
+
 ### Pencil and eraser brush size
 
 Select Pencil or Eraser and adjust **Brush size** from 1 to 16 pixels. Strokes stamp a solid square along an inclusive pixel line; stamps are clipped at the canvas edges. Even sizes are biased one pixel toward the top and left of the pointer. The pencil replaces raw RGBA rather than blending; the eraser writes transparent black. A continuous stroke is one undoable edit. Brush size is session-only and does not change the separate line or shape tools.
