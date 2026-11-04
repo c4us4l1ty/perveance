@@ -35,6 +35,20 @@ fn fixed_worker_lifecycle_on_supported_host() {
     assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) }, 0);
     let control = Command::new("/usr/bin/python3").args(["-I", "-c", "import os,sys; os.fstat(int(sys.argv[1]))", &fd.to_string()]).status().unwrap();
     assert!(control.success());
+    // Characterize the helper without the launcher's FD hygiene. This negative
+    // control contains only a disposable file; either observation is recorded
+    // because future bubblewrap releases may themselves close the descriptor.
+    let mut raw = Command::new("/usr/bin/bwrap");
+    raw.args(["--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--new-session", "--die-with-parent", "--clearenv"]);
+    for path in ["/usr", "/bin", "/lib", "/lib64"] {
+        if std::path::Path::new(path).exists() { raw.args(["--ro-bind", path, path]); }
+    }
+    let result = raw.args(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--chdir", "/tmp", "/usr/bin/python3", "-I", "-c",
+        "import os,sys\ntry:\n os.fstat(int(sys.argv[1])); print('inherited')\nexcept OSError:\n print('closed')", &fd.to_string()])
+        .env_clear().output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(result.stdout == b"inherited\n" || result.stdout == b"closed\n");
+    println!("bare bubblewrap synthetic descriptor: {}", String::from_utf8_lossy(&result.stdout).trim());
     let no = AtomicBool::new(false);
     let inspect = run_fixed_worker(&p, parent.path(), FixedMode::Inspect, Duration::from_secs(10), &no).unwrap();
     assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, flags) }, 0);
