@@ -95,6 +95,18 @@ jobs:
             kill -0 "$pid"
             scrot /tmp/perveance-close-cancelled.png
             /usr/bin/python3 tools/verify_gui_smoke.py
+            # A fresh, unchanged document should close without a confirmation dialog.
+            kill "$pid"
+            wait "$pid" || true
+            ./target/debug/perveance >/tmp/perveance-gui-clean.log 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            window=$(timeout 30s xdotool search --sync --onlyvisible --name Perveance | head -n 1)
+            sleep 2
+            /usr/bin/python3 tools/send_x11_close.py "$window"
+            sleep 2
+            if kill -0 "$pid" 2>/dev/null; then echo "unchanged project did not close"; exit 1; fi
+            wait "$pid"
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
             for file in /tmp/perveance-smoke.log /tmp/perveance-gui.log; do
