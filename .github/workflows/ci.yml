@@ -163,6 +163,14 @@ jobs:
             echo "::error::GUI recovery smoke failed; see the step output"
             exit 1
           fi
+      - name: Test immediate recovery checkpoint after forced termination
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_manual_checkpoint.sh "$RUNNER_TEMP/gui-manual-recovery" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/tools/send_x11_close.py" > "$RUNNER_TEMP/gui-manual-recovery.log" 2>&1; then
+            cat "$RUNNER_TEMP/gui-manual-recovery.log" "$RUNNER_TEMP/gui-manual-recovery/gui.log" "$RUNNER_TEMP/gui-manual-recovery/reopened.log" 2>/dev/null || true
+            tail -n 10 "$RUNNER_TEMP/gui-manual-recovery.log" | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/gui-manual-recovery.log"
       - name: Test environment probe
         run: |
           if ! python3 -m unittest discover -s tests -v > /tmp/perveance-python-tests.log 2>&1; then

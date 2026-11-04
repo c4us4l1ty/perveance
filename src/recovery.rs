@@ -41,7 +41,21 @@ impl RecoverySession {
             return Ok(None);
         }
         self.next_attempt = now + RECOVERY_INTERVAL;
-        if !dirty || self.last_snapshot.as_ref() == Some(project) { return Ok(None); }
+        if !dirty { return Ok(None); }
+        self.write_checkpoint(project)
+    }
+
+    /// Explicitly checkpoint the current project, including a clean one. Identical
+    /// snapshots are deduplicated, and success restarts the automatic interval.
+    /// This does not check that an older checkpoint still exists on disk.
+    pub fn checkpoint_now(&mut self, project: &Project, now: Instant) -> Result<Option<PathBuf>, String> {
+        let result = self.write_checkpoint(project)?;
+        if result.is_some() { self.next_attempt = now + RECOVERY_INTERVAL; }
+        Ok(result)
+    }
+
+    fn write_checkpoint(&mut self, project: &Project) -> Result<Option<PathBuf>, String> {
+        if self.last_snapshot.as_ref() == Some(project) { return Ok(None); }
         if self.is_full() { return Err("Recovery checkpoint limit reached.".into()); }
         let path = self.directory.join(format!("{}-{:02}.perveance.json", self.prefix, self.written + 1));
         project.save_new(&path).map_err(|e| format!("Recovery checkpoint failed: {e}"))?;
@@ -82,6 +96,38 @@ mod tests {
         assert!(s.is_full());
         p.set_pixel(0, 1, 1, [99, 2, 3, 4]).unwrap();
         assert!(s.checkpoint_if_due(&p, true, true, first_time + RECOVERY_INTERVAL * 20).is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), RECOVERY_LIMIT);
+    }
+
+    #[test]
+    fn manual_checkpoints_share_deduplication_limits_and_timer() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Instant::now();
+        let mut session = RecoverySession::new(dir.path(), now).unwrap();
+        let mut project = Project::new(2, 2).unwrap();
+        // A manual checkpoint may back up a clean project before the timer.
+        let at = now + Duration::from_secs(1);
+        let first = session.checkpoint_now(&project, at).unwrap().unwrap();
+        assert_eq!(Project::load(&first).unwrap(), project);
+        assert!(session.checkpoint_now(&project, at + Duration::from_secs(1)).unwrap().is_none());
+        project.set_pixel(0, 0, 0, [9, 8, 7, 0]).unwrap();
+        assert!(session.checkpoint_if_due(&project, true, true, now + RECOVERY_INTERVAL).unwrap().is_none());
+        let second = session.checkpoint_if_due(&project, true, true, at + RECOVERY_INTERVAL).unwrap().unwrap();
+        assert_eq!(Project::load(&second).unwrap(), project);
+        assert!(session.checkpoint_now(&project, at + RECOVERY_INTERVAL).unwrap().is_none());
+        let collision = dir.path().join(format!("{}-03.perveance.json", session.prefix));
+        std::fs::write(&collision, b"keep").unwrap();
+        project.set_pixel(0, 0, 0, [1, 2, 3, 4]).unwrap();
+        assert!(session.checkpoint_now(&project, at + RECOVERY_INTERVAL).is_err());
+        assert_eq!(std::fs::read(&collision).unwrap(), b"keep");
+        std::fs::remove_file(collision).unwrap();
+        for i in 2..RECOVERY_LIMIT {
+            project.set_pixel(0, 0, 0, [i as u8, 2, 3, 4]).unwrap();
+            assert!(session.checkpoint_now(&project, at + RECOVERY_INTERVAL).unwrap().is_some());
+        }
+        assert!(session.is_full());
+        project.set_pixel(0, 0, 0, [99, 2, 3, 4]).unwrap();
+        assert!(session.checkpoint_now(&project, at + RECOVERY_INTERVAL).is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), RECOVERY_LIMIT);
     }
 
