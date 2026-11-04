@@ -128,6 +128,14 @@ jobs:
             echo "::error::Native GUI project round trip failed; see the step output"
             exit 1
           fi
+      - name: Exercise native project opening and unsaved-work protection
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_open_project_smoke.sh "$RUNNER_TEMP/gui-open" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/target/debug/perveance-cli" "$GITHUB_WORKSPACE/tools/send_x11_close.py" > "$RUNNER_TEMP/gui-open-test.log" 2>&1; then
+            cat "$RUNNER_TEMP/gui-open-test.log" "$RUNNER_TEMP/gui-open/gui.log" 2>/dev/null || true
+            tail -n 10 "$RUNNER_TEMP/gui-open-test.log" | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/gui-open-test.log"
       - name: Exercise agent-to-GUI-to-agent handoff
         run: |
           if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_agent_handoff.sh "$RUNNER_TEMP/agent-handoff" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/target/debug/perveance-cli" "$GITHUB_WORKSPACE/tools/arena_art.py" "$GITHUB_WORKSPACE/examples/rocket-operations.json" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
