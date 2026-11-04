@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{EditProposal, FlipAxis, History, Project};
+use perveance::{EditProposal, FlipAxis, History, Operation, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -154,8 +154,10 @@ impl Studio {
         }
     }
     fn apply_proposal(&mut self, proposal: &EditProposal) {
+        let original_count = self.project.layers.len();
         match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.apply_proposal(proposal)) {
             Ok(changed) => {
+                if changed { self.layer = selection_after_operations(self.layer, original_count, &proposal.operations); }
                 self.layer = self.layer.min(self.project.layers.len() - 1);
                 self.rename_buffer = self.project.layers[self.layer].name.clone();
                 self.status = if changed { "Proposal applied (undoable)." } else { "Proposal made no changes." }.into();
@@ -172,6 +174,32 @@ impl Studio {
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
     }
+}
+
+/// Preserve the selected layer through successful index-changing proposal edits.
+/// Only called after the full batch has validated against the original project.
+fn selection_after_operations(mut selected: usize, mut count: usize, operations: &[Operation]) -> usize {
+    for op in operations {
+        match op {
+            Operation::AddLayer => count += 1,
+            Operation::DuplicateLayer { layer } => {
+                if *layer < selected { selected += 1; }
+                count += 1;
+            }
+            Operation::RemoveLayer { layer } => {
+                count -= 1;
+                if *layer < selected { selected -= 1; }
+                selected = selected.min(count - 1);
+            }
+            Operation::MoveLayer { from, to } if from != to => {
+                if selected == *from { selected = *to; }
+                else if *from < selected && *to >= selected { selected -= 1; }
+                else if *from > selected && *to <= selected { selected += 1; }
+            }
+            _ => {}
+        }
+    }
+    selected
 }
 
 /// Inclusive endpoints in either direction produce a positive pixel bounding box.
@@ -627,6 +655,27 @@ mod tests {
         assert!(studio.history.can_redo());
         studio.redo_edit();
         assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn proposal_selection_follows_layer_reorder_and_undo() {
+        let mut studio = Studio::default();
+        studio.project.add_layer().unwrap();
+        studio.project.rename_layer(1, "Selected").unwrap();
+        studio.layer = 1;
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
+            Operation::DuplicateLayer { layer: 0 },
+            Operation::MoveLayer { from: 2, to: 0 },
+        ] };
+        studio.apply_proposal(&proposal);
+        assert_eq!(studio.layer, 0);
+        assert_eq!(studio.project.layers[studio.layer].name, "Selected");
+        studio.undo_edit();
+        assert_eq!(studio.layer, 1);
+        assert_eq!(studio.project.layers[studio.layer].name, "Selected");
+        studio.redo_edit();
+        assert_eq!(studio.layer, 0);
+        assert_eq!(studio.project.layers[studio.layer].name, "Selected");
     }
 
     #[test]
