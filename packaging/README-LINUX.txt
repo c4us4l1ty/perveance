@@ -60,5 +60,8 @@ SHA256SUMS accompanies the archive, not this extracted directory. Verify it
 before extraction using sha256sum -c SHA256SUMS in the downloaded artifact
 directory. A checksum detects corruption, not the identity of the publisher;
 this artifact is not signed. Download only from a GitHub Actions run you trust.
-The complete third-party license inventory and redistribution review remain
-outstanding; this artifact is provided for evaluation, not as a formal release.
+CI artifacts include a separate LICENSE-INVENTORY.json and checksum based on
+Cargo metadata, outside this archive. It is an unverified review aid, not a
+complete inventory of linked code, system libraries or assets, nor a license
+or redistribution review. Local packaging does not generate the sidecar.
+This artifact is provided for evaluation, not as a formal release.

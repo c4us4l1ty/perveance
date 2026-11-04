@@ -54,3 +54,11 @@ It preserves separate open/save actions and no-clobber output, but is not an
 OS-native dialog, has limited directory listings and requires trusted paths.
 Real-desktop testing, release packaging and license review, stable project
 migrations, direct agent integration and live model validation remain open.
+
+## Dependency inventory increment
+
+CI is configured to publish an unverified, checksummed Cargo-metadata license
+summary alongside the evaluation artifact. It is not an exact linked-binary
+inventory, license-text collection, compliance decision or redistribution
+review. System libraries, non-Cargo assets and the project's own licensing
+decisions remain open. Check the associated CI run for actual results.
