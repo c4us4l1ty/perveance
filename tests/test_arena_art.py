@@ -1,3 +1,4 @@
+import concurrent.futures
 import importlib.util
 import json
 from pathlib import Path
@@ -6,7 +7,9 @@ import struct
 import zlib
 import sys
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "arena_art.py"
 spec = importlib.util.spec_from_file_location("arena_art", SCRIPT)
@@ -108,6 +111,56 @@ class ArenaArtTests(unittest.TestCase):
         self.assertEqual(len(art.read_region(big, 0, 0, 64, 64)["pixels"]), 64)
         with self.assertRaises(ValueError):
             art.read_region(big, 0, 0, 65, 64)
+
+    def test_region_results_do_not_alias_the_source_project(self):
+        project = art.create_project(2, 1, [
+            {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [7, 8, 9, 0]},
+            {"op": "set_visibility", "layer": 0, "visible": False},
+        ])
+        before = json.dumps(project)
+        revision = art.project_revision(project)
+        raw = art.read_region(project, 0, 0, 2, 1, 0)
+        raw["pixels"][0][0][0] = 222
+        raw["pixels"][0][1].append(999)
+        raw["pixels"][0].append([1, 2, 3, 4])
+        composite = art.read_region(project, 0, 0, 2, 1)
+        composite["pixels"][0][0][0] = 333
+        self.assertEqual(json.dumps(project), before)
+        self.assertEqual(art.project_revision(project), revision)
+
+    def test_no_clobber_installation_under_race_and_faults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "race.json"
+            barrier = threading.Barrier(8, timeout=10)
+            payloads = [bytes([i]) * 4096 for i in range(8)]
+            def attempt(payload):
+                barrier.wait()
+                try:
+                    art.write_new(output, payload)
+                    return payload
+                except FileExistsError:
+                    return None
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                winners = [result for result in pool.map(attempt, payloads) if result is not None]
+            self.assertEqual(len(winners), 1)
+            self.assertEqual(output.read_bytes(), winners[0])
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["race.json"])
+            for function in ("fsync", "link"):
+                target = root / (function + ".json")
+                with mock.patch.object(art.os, function, side_effect=OSError("injected failure")):
+                    with self.assertRaisesRegex(OSError, "injected failure"):
+                        art.write_new(target, b"data")
+                self.assertFalse(target.exists())
+                self.assertEqual(sorted(p.name for p in root.iterdir()), ["race.json"])
+            if hasattr(art.os, "symlink"):
+                link = root / "dangling.json"
+                link.symlink_to(root / "missing.json")
+                with self.assertRaises(FileExistsError):
+                    art.write_new(link, b"data")
+                self.assertTrue(link.is_symlink())
+                self.assertFalse((root / "missing.json").exists())
+                self.assertEqual(sorted(p.name for p in root.iterdir()), ["dangling.json", "race.json"])
 
     def test_layer_operations_and_resize_preserve_raw_pixels(self):
         p = art.create_project(3, 2, [
