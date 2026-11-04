@@ -73,14 +73,15 @@ jobs:
             sleep 1
             scrot /tmp/perveance-eyedropper.png
             # Duplicate the selected layer, flip the copy and clear it; undo the clear.
-            xdotool mousemove --window "$window" 1070 235 click 1
+            xdotool mousemove --window "$window" 1070 282 click 1
             sleep 0.5
-            xdotool mousemove --window "$window" 1043 286 click 1
+            xdotool mousemove --window "$window" 1043 341 click 1
             sleep 1
             scrot /tmp/perveance-flipped.png
-            xdotool mousemove --window "$window" 1055 310 click 1
+            xdotool mousemove --window "$window" 1055 373 click 1
             sleep 1
             scrot /tmp/perveance-cleared.png
+            xdotool windowfocus --sync "$window"
             xdotool key --window "$window" ctrl+z
             sleep 1
             scrot /tmp/perveance-clear-undone.png
