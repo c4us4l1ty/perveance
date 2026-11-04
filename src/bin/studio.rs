@@ -718,6 +718,16 @@ mod tests {
     }
 
     #[test]
+    fn proposal_selection_follows_insert_remove_and_move_indices() {
+        assert_eq!(selection_after_operations(1, 3, &[Operation::DuplicateLayer { layer: 0 }]), 2);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::RemoveLayer { layer: 0 }]), 0);
+        assert_eq!(selection_after_operations(2, 3, &[Operation::RemoveLayer { layer: 2 }]), 1);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::MoveLayer { from: 0, to: 2 }]), 0);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::MoveLayer { from: 2, to: 0 }]), 2);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::MoveLayer { from: 1, to: 2 }]), 2);
+    }
+
+    #[test]
     fn layer_controls_restore_selection_and_pixels_on_undo() {
         let mut studio = Studio::default();
         studio.project.set_pixel(0, 0, 0, [1, 2, 3, 4]).unwrap();
