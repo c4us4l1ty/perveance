@@ -72,6 +72,18 @@ jobs:
             xdotool mousemove --window "$window" 486 112 click 1
             sleep 1
             scrot /tmp/perveance-eyedropper.png
+            # Duplicate the selected layer, flip the copy and clear it; undo the clear.
+            xdotool mousemove --window "$window" 1070 235 click 1
+            sleep 0.5
+            xdotool mousemove --window "$window" 1043 286 click 1
+            sleep 1
+            scrot /tmp/perveance-flipped.png
+            xdotool mousemove --window "$window" 1055 310 click 1
+            sleep 1
+            scrot /tmp/perveance-cleared.png
+            xdotool key --window "$window" ctrl+z
+            sleep 1
+            scrot /tmp/perveance-clear-undone.png
             /usr/bin/python3 tools/verify_gui_smoke.py
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
@@ -86,7 +98,6 @@ jobs:
             done
             exit 1
           fi
-          cat /tmp/perveance-smoke.log
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
       - name: Exercise CLI round trip

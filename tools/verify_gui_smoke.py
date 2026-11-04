@@ -26,13 +26,13 @@ assert not is_ink(line_preview), line_preview
 assert is_ink(line_committed), line_committed
 assert cleared[0] == cleared[1] == cleared[2] and cleared[0] < 100, cleared
 
-# Temporary CI diagnostic: capture the editor layout as small check annotations.
-import base64
-import io
-with Image.open("/tmp/perveance-eyedropper.png") as source:
-    out = io.BytesIO()
-    source.resize((600, 400)).convert("RGB").quantize(colors=32).save(out, format="PNG", optimize=True)
-    encoded = base64.b64encode(out.getvalue()).decode("ascii")
-    print("::notice::SCREENSHOT_CHUNKS=" + str((len(encoded) + 3999) // 4000))
-    for i in range(0, len(encoded), 4000):
-        print("::notice::SCREENSHOT_%02d=" % (i // 4000) + encoded[i:i + 4000])
+# A duplicated layer is mirrored without moving the original, then cleared and undone.
+original = pixel("/tmp/perveance-flipped.png", (438, 112))
+flipped = pixel("/tmp/perveance-flipped.png", (762, 112))
+cleared_flip = pixel("/tmp/perveance-cleared.png", (762, 112))
+restored = pixel("/tmp/perveance-clear-undone.png", (762, 112))
+print("Original:", original, "flipped copy:", flipped, "cleared:", cleared_flip, "undo:", restored)
+assert is_ink(original), original
+assert is_ink(flipped), flipped
+assert not is_ink(cleared_flip), cleared_flip
+assert is_ink(restored), restored
