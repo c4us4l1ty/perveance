@@ -19,7 +19,7 @@ pub fn run_fixed_worker(project: &Project, trusted_parent: &Path, mode: FixedMod
     use std::{fs, io::{Read, Seek, SeekFrom}, os::unix::{fs::PermissionsExt, process::CommandExt}, process::{Command, Stdio}, sync::atomic::Ordering, thread, time::Instant};
     const OUTPUT_LIMIT: u64 = 4096;
     const FILE_LIMIT: libc::rlim_t = 8192;
-    const WORKER: &str = r#"import json, sys, time
+    const WORKER: &str = r#"import json, os, sys, time
 mode = sys.argv[1]
 if mode == 'wait':
     time.sleep(60)
@@ -29,11 +29,20 @@ elif mode == 'flood':
 elif mode == 'fail':
     sys.exit(7)
 else:
+    # Ignore the directory descriptor that disappears when listdir closes it.
+    # Do not print descriptor targets or other inherited data.
+    for entry in os.listdir('/proc/self/fd'):
+        if int(entry) > 2:
+            try:
+                os.readlink('/proc/self/fd/' + entry)
+            except FileNotFoundError:
+                continue
+            raise RuntimeError('unexpected inherited descriptor')
     with open('/work/project.perveance.json', 'r', encoding='utf-8') as f:
         p = json.load(f)
     print(json.dumps({'width': p['width'], 'height': p['height'], 'layers': len(p['layers'])}))
 "#;
-    if timeout.is_zero() || timeout > Duration::from_secs(30) { return Err("fixed worker timeout must be between zero and 30 seconds".into()); }
+    if timeout.is_zero() || timeout > Duration::from_secs(30) { return Err("fixed worker timeout must be greater than zero and at most 30 seconds".into()); }
     if cancelled.load(Ordering::SeqCst) { return Ok(FixedOutcome::Cancelled); }
     // These checks are not race-resistant and trust the system installation.
     let helper = fs::symlink_metadata("/usr/bin/bwrap").map_err(|_| "bubblewrap unavailable")?;

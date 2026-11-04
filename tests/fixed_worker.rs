@@ -23,7 +23,25 @@ fn fixed_worker_lifecycle_on_supported_host() {
     let mut p = Project::new(2, 3).unwrap();
     p.layers[0].visible = false;
     p.set_pixel(0, 0, 0, [4, 5, 6, 0]).unwrap();
+    // A deliberately inheritable synthetic host file must not survive into the
+    // fixed worker. First prove a plain child really can inherit this FD.
+    use std::{fs::File, os::fd::AsRawFd, process::Command};
+    let secret = parent.path().join("host-secret");
+    std::fs::write(&secret, b"synthetic-host-only").unwrap();
+    let file = File::open(&secret).unwrap();
+    let fd = file.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    assert!(flags >= 0);
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) }, 0);
+    let control = Command::new("/usr/bin/python3").args(["-I", "-c", "import os,sys; os.fstat(int(sys.argv[1]))", &fd.to_string()]).status().unwrap();
+    assert!(control.success());
     let no = AtomicBool::new(false);
+    let inspect = run_fixed_worker(&p, parent.path(), FixedMode::Inspect, Duration::from_secs(10), &no).unwrap();
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, flags) }, 0);
+    assert_eq!(inspect, FixedOutcome::Completed);
+    assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+    drop(file);
+    std::fs::remove_file(&secret).unwrap();
     for (mode, expected, timeout) in [
         (FixedMode::Inspect, FixedOutcome::Completed, 10),
         (FixedMode::Fail, FixedOutcome::Failed, 10),
