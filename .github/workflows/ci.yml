@@ -17,13 +17,14 @@ jobs:
       - name: Select Rust
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth
       - name: Build and test Rust
         run: cargo test --locked --all-targets
       - name: Verify desktop window starts under X11
         run: |
           cargo build --locked --bin perveance
           if ! xvfb-run -a sh -c '
+            set -eu
             export LIBGL_ALWAYS_SOFTWARE=1
             ./target/debug/perveance >/tmp/perveance-gui.log 2>&1 &
             pid=$!
