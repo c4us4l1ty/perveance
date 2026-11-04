@@ -71,6 +71,17 @@ perveance-cli sample project.json 2 3 layer 0
 
 Both commands return straight-alpha RGBA bytes as JSON. Raw pixels preserve their RGB bytes even when alpha is zero; the visible composite uses the same blending as PNG export.
 
+### Reading artwork regions headlessly
+
+Agents can inspect a rectangular area without invoking the CLI once per pixel:
+
+```sh
+perveance-cli read-region project.json 0 0 16 16 composite
+perveance-cli read-region project.json 0 0 16 16 layer 0
+```
+
+The JSON response contains `revision`, `x`, `y`, `width`, `height`, `source`, `layer` (null for composite), and `pixels`. Pixels are rows from top to bottom, each containing left-to-right straight-alpha RGBA byte arrays. Composite matches PNG export; raw layers include hidden pixels and preserve RGB even when alpha is zero. Regions must fit the canvas, have positive dimensions, and contain at most 4,096 pixels. Larger canvases can be read in tiles. The revision identifies the loaded snapshot, not a file lock: compare revisions across tile reads, and retry if they differ. As with `inspect`, this cannot see unsaved GUI edits or prevent external changes.
+
 ### Revision-checked agent handoff
 
 External tools or agents can prepare a **data-only** edit proposal for a particular project snapshot. First obtain `revision` from `perveance-cli inspect project.json`, then write a JSON file such as:

@@ -5,13 +5,43 @@ use std::{env, fs::File, io::Read, path::Path, process};
 fn number(s: &str) -> Result<u32, String> { s.parse().map_err(|_| format!("invalid number: {s}")) }
 fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid color channel: {s}")) }
 
+
+// Bound output and work even if callers provide enormous or overflowing coordinates.
+const MAX_REGION_PIXELS: u32 = 4096;
+
+fn read_region(project: &Project, x: u32, y: u32, width: u32, height: u32, layer: Option<usize>) -> Result<serde_json::Value, String> {
+    let count = width.checked_mul(height).ok_or("region size overflow")?;
+    if count == 0 || count > MAX_REGION_PIXELS { return Err("region must contain 1 to 4096 pixels".into()); }
+    if x.checked_add(width).filter(|&end| end <= project.width).is_none()
+        || y.checked_add(height).filter(|&end| end <= project.height).is_none() {
+        return Err("region is outside the canvas".into());
+    }
+    if let Some(index) = layer {
+        if index >= project.layers.len() { return Err("invalid layer index".into()); }
+    }
+    let mut rows = Vec::with_capacity(height as usize);
+    for py in y..y + height {
+        let mut row = Vec::with_capacity(width as usize);
+        for px in x..x + width {
+            row.push(match layer {
+                Some(index) => project.sample_layer(index, px, py)?,
+                None => project.sample_composite(px, py)?,
+            });
+        }
+        rows.push(row);
+    }
+    Ok(json!({"ok": true, "revision": project.revision()?, "x": x, "y": y,
+        "width": width, "height": height, "source": if layer.is_some() { "layer" } else { "composite" },
+        "layer": layer, "pixels": rows}))
+}
+
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "sample", "paint", "apply", "apply-proposal", "import-png", "export-png"],
+            "operations": ["new", "new-from-png", "inspect", "sample", "read-region", "paint", "apply", "apply-proposal", "import-png", "export-png"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
-            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
+            "limits": {"canvas_dimension": 256, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
                 "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
                 "move_layer": {"op": "move_layer", "from": 0, "to": 1},
@@ -67,6 +97,15 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             let color = project.sample_layer(layer, x, y)?;
             Ok(json!({"ok": true, "x": x, "y": y, "source": "layer", "layer": layer, "color": color}))
         }
+        [command, input, x, y, width, height, source] if command == "read-region" && source == "composite" => {
+            let project = Project::load(Path::new(input))?;
+            read_region(&project, number(x)?, number(y)?, number(width)?, number(height)?, None)
+        }
+        [command, input, x, y, width, height, source, layer] if command == "read-region" && source == "layer" => {
+            let project = Project::load(Path::new(input))?;
+            let index: usize = layer.parse().map_err(|_| "invalid layer index".to_string())?;
+            read_region(&project, number(x)?, number(y)?, number(width)?, number(height)?, Some(index))
+        }
         [command, input, output, layer, x, y, r, g, b, a] if command == "paint" => {
             let mut project = Project::load(Path::new(input))?;
             let layer: usize = layer.parse().map_err(|_| "invalid layer index".to_string())?;
@@ -100,7 +139,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
     }
 }
 
