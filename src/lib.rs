@@ -1,6 +1,7 @@
 //! Small, deliberately limited pixel-art prototype shared by the GUI and CLI.
 //! It does not execute AI-generated code or implement a sandbox.
 
+pub mod fixed_worker;
 pub mod provider;
 pub mod supervisor;
 pub mod workspace;

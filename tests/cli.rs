@@ -682,3 +682,25 @@ fn autonomy_intake_is_strict_revision_bound_and_cannot_start_a_job() {
     assert_eq!(caps["autonomy_intake"]["budgets_enforced"], false);
     assert_eq!(caps["autonomous_execution"], false);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a compatible unprivileged bubblewrap host"]
+fn fixed_worker_cli_on_supported_host() {
+    let dir = TempDir::new();
+    let project = dir.0.join("input.json");
+    let parent = dir.0.join("scratch");
+    fs::create_dir(&parent).unwrap();
+    let p = perveance::Project::new(2, 3).unwrap();
+    p.save_new(&project).unwrap();
+    let before = fs::read(&project).unwrap();
+    let result = cli(&["verify-fixed-worker", project.to_str().unwrap(), parent.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["revision"], p.revision().unwrap());
+    assert_eq!(report["fixed_code_only"], true);
+    assert_eq!(report["autonomous_execution"], false);
+    assert_eq!(report["security_boundary"], false);
+    assert_eq!(fs::read(project).unwrap(), before);
+    assert_eq!(fs::read_dir(parent).unwrap().count(), 0);
+}

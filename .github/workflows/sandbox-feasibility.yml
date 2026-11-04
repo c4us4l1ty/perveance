@@ -58,3 +58,25 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-staged-worker.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
+      - name: Test fixed worker supervision and cleanup
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          if cargo test --locked --test fixed_worker fixed_worker_lifecycle_on_supported_host -- --ignored --exact --nocapture > /tmp/perveance-fixed-lifecycle.log 2>&1; then
+            cat /tmp/perveance-fixed-lifecycle.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-fixed-lifecycle.log").read_text(); assert "1 passed; 0 failed" in s; observation=next(x for x in s.splitlines() if "bare bubblewrap synthetic descriptor:" in x).split("bare bubblewrap synthetic descriptor:",1)[1].strip(); assert observation in ("inherited","closed"); print("::notice::Bare bubblewrap synthetic descriptor: "+observation+"; fixed worker closes extra FDs; lifecycle tests passed; autonomy disabled")'
+          else
+            cat /tmp/perveance-fixed-lifecycle.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-fixed-lifecycle.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+      - name: Test fixed worker CLI diagnostic
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          if cargo test --locked --test cli fixed_worker_cli_on_supported_host -- --ignored --exact > /tmp/perveance-fixed-cli.log 2>&1; then
+            cat /tmp/perveance-fixed-cli.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-fixed-cli.log").read_text(); assert "1 passed; 0 failed" in s'
+          else
+            cat /tmp/perveance-fixed-cli.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-fixed-cli.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
