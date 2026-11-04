@@ -63,6 +63,35 @@ class ArenaArtTests(unittest.TestCase):
             ])
         self.assertEqual(json.dumps(p), before)
 
+    def test_revision_proposals_reject_stale_and_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "project.json"
+            proposal = root / "proposal.json"
+            output = root / "edited.json"
+            source = art.create_project(2, 2, [])
+            # Hashing is independent of JSON input key order.
+            reordered = dict(reversed(list(source.items())))
+            self.assertEqual(art.project_revision(source), art.project_revision(reordered))
+            project.write_text(json.dumps(reordered))
+            payload = {"version": 1, "base_revision": art.project_revision(source), "operations": [
+                {"op": "pixel", "layer": 0, "x": 1, "y": 1, "color": [1, 2, 3, 4]}]}
+            proposal.write_text(json.dumps(payload))
+            response = art.main(["apply-proposal", str(project), str(output), str(proposal)])
+            self.assertEqual(response["base_revision"], payload["base_revision"])
+            self.assertEqual(art.load_json(output, art.MAX_PROJECT_BYTES)["layers"][0]["pixels"][3], [1, 2, 3, 4])
+            bad = root / "bad.json"
+            payload["base_revision"] = "stale"
+            proposal.write_text(json.dumps(payload))
+            with self.assertRaises(ValueError):
+                art.main(["apply-proposal", str(project), str(bad), str(proposal)])
+            self.assertFalse(bad.exists())
+            payload["permit"] = True
+            proposal.write_text(json.dumps(payload))
+            with self.assertRaises(ValueError):
+                art.main(["apply-proposal", str(project), str(bad), str(proposal)])
+            self.assertFalse(bad.exists())
+
     def test_no_clobber_and_local_agent_flow(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

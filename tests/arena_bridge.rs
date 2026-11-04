@@ -74,6 +74,38 @@ fn bridge_edits_match_rust_for_lines_fill_and_visibility() {
     python(&["apply", base.to_str().unwrap(), py.to_str().unwrap(), operations.to_str().unwrap()]);
     let exe = env!("CARGO_BIN_EXE_perveance-cli");
     assert!(Command::new(exe).args(["apply", base.to_str().unwrap(), rust.to_str().unwrap(), operations.to_str().unwrap()]).status().unwrap().success());
-    assert_eq!(Project::load(&py).unwrap(), Project::load(&rust).unwrap());
+    let final_project = Project::load(&py).unwrap();
+    assert_eq!(final_project, Project::load(&rust).unwrap());
+    let inspection = Command::new("python3").args(["tools/arena_art.py", "inspect", py.to_str().unwrap()]).output().unwrap();
+    assert!(inspection.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&inspection.stdout).unwrap();
+    assert_eq!(report["revision"], final_project.revision().unwrap());
     assert_eq!(Project::load(&base).unwrap(), initial);
+}
+
+#[test]
+fn bridge_proposal_checks_rust_revision_and_matches_rust_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let proposal = dir.path().join("proposal.json");
+    let py = dir.path().join("py.json");
+    let rust = dir.path().join("rust.json");
+    let mut project = Project::new(3, 3).unwrap();
+    project.rename_layer(0, "é雪\n\"\u{0001}").unwrap();
+    project.set_pixel(0, 0, 0, [1, 2, 3, 0]).unwrap();
+    project.save_new(&base).unwrap();
+    let content = serde_json::json!({"version":1,"base_revision":project.revision().unwrap(),
+        "operations":[{"op":"pixel","layer":0,"x":1,"y":2,"color":[8,9,10,11]}]});
+    std::fs::write(&proposal, serde_json::to_vec(&content).unwrap()).unwrap();
+    python(&["apply-proposal", base.to_str().unwrap(), py.to_str().unwrap(), proposal.to_str().unwrap()]);
+    let exe = env!("CARGO_BIN_EXE_perveance-cli");
+    assert!(Command::new(exe).args(["apply-proposal", base.to_str().unwrap(), rust.to_str().unwrap(), proposal.to_str().unwrap()]).status().unwrap().success());
+    assert_eq!(Project::load(&py).unwrap(), Project::load(&rust).unwrap());
+    let mut stale = content;
+    stale["base_revision"] = "sha256-json-v1:stale".into();
+    std::fs::write(&proposal, serde_json::to_vec(&stale).unwrap()).unwrap();
+    let bad = dir.path().join("bad.json");
+    let result = Command::new("python3").args(["tools/arena_art.py", "apply-proposal", base.to_str().unwrap(), bad.to_str().unwrap(), proposal.to_str().unwrap()]).output().unwrap();
+    assert!(!result.status.success());
+    assert!(!bad.exists());
 }

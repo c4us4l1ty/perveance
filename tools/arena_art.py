@@ -5,6 +5,7 @@ No model, network, sandbox, plugins or arbitrary code are executed. Input paths
 and destination directories must be trusted. Not the full Rust editor/CLI.
 """
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -224,6 +225,15 @@ def write_new(path, data):
             os.unlink(temporary)
 
 
+def project_revision(project):
+    validate_project(project)
+    # Match Rust's v1 struct field order, regardless of input JSON key order.
+    ordered = {"version": project["version"], "width": project["width"], "height": project["height"],
+               "layers": [{"name": layer["name"], "visible": layer["visible"], "pixels": layer["pixels"]} for layer in project["layers"]]}
+    encoded = json.dumps(ordered, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return "sha256-json-v1:" + hashlib.sha256(encoded).hexdigest()
+
+
 def save_project(output, project):
     data = json.dumps(project, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(data) > MAX_PROJECT_BYTES:
@@ -236,14 +246,14 @@ def main(args):
         return {"ok": True, "bridge": "experimental-python-data-only", "project_version": 1,
                 "max_dimension": MAX_DIMENSION, "max_layers": MAX_LAYERS,
                 "operations": ["add_layer", "rename_layer", "set_visibility", "pixel", "line", "rectangle", "fill"],
-                "commands": ["capabilities", "create", "apply", "inspect", "sample", "export-png"],
+                "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "export-png"],
                 "autonomous_execution": False, "rust_cli_parity": False}
     if len(args) == 5 and args[0] == "create":
         _, w, h, ops_path, output = args
         ops = load_json(ops_path, MAX_BATCH_BYTES)
         project = create_project(int(w), int(h), ops)
         save_project(output, project)
-        return {"ok": True, "output": output, "width": project["width"], "height": project["height"], "layers": len(project["layers"])}
+        return {"ok": True, "output": output, "width": project["width"], "height": project["height"], "layers": len(project["layers"]), "revision": project_revision(project)}
     if len(args) == 4 and args[0] == "apply":
         _, input_path, output, ops_path = args
         project = load_json(input_path, MAX_PROJECT_BYTES)
@@ -251,9 +261,23 @@ def main(args):
         project = apply_operations(project, ops)
         save_project(output, project)
         return {"ok": True, "output": output, "applied": len(ops)}
+    if len(args) == 4 and args[0] == "apply-proposal":
+        _, input_path, output, proposal_path = args
+        project = validate_project(load_json(input_path, MAX_PROJECT_BYTES))
+        proposal = load_json(proposal_path, MAX_BATCH_BYTES)
+        exact(proposal, ("version", "base_revision", "operations"))
+        if type(proposal["version"]) is not int or proposal["version"] != 1:
+            raise ValueError("unsupported proposal version")
+        revision = project_revision(project)
+        if proposal["base_revision"] != revision:
+            raise ValueError("proposal base revision is stale or invalid")
+        edited = apply_operations(project, proposal["operations"])
+        save_project(output, edited)
+        return {"ok": True, "output": output, "applied": len(proposal["operations"]),
+                "base_revision": revision, "revision": project_revision(edited)}
     if len(args) == 2 and args[0] == "inspect":
         project = validate_project(load_json(args[1], MAX_PROJECT_BYTES))
-        return {"ok": True, "version": 1, "width": project["width"], "height": project["height"],
+        return {"ok": True, "version": 1, "revision": project_revision(project), "width": project["width"], "height": project["height"],
                 "layers": [{"name": layer["name"], "visible": layer["visible"]} for layer in project["layers"]]}
     if len(args) in (5, 6) and args[0] == "sample":
         project = validate_project(load_json(args[1], MAX_PROJECT_BYTES))
@@ -267,14 +291,14 @@ def main(args):
             rgba = project["layers"][layer]["pixels"][index]
         else:
             raise ValueError("sample source must be composite or layer LAYER")
-        return {"ok": True, "x": x, "y": y, "source": args[4], "color": rgba}
+        return {"ok": True, "revision": project_revision(project), "x": x, "y": y, "source": args[4], "color": rgba}
     if len(args) == 3 and args[0] == "export-png":
         _, input_path, output = args
         project = load_json(input_path, MAX_PROJECT_BYTES)
         result = png_bytes(project)
         write_new(output, result)
         return {"ok": True, "output": output, "width": project["width"], "height": project["height"]}
-    raise ValueError("usage: arena_art.py capabilities | create WIDTH HEIGHT OPERATIONS_JSON OUTPUT | apply INPUT OUTPUT OPERATIONS_JSON | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | export-png INPUT OUTPUT")
+    raise ValueError("usage: arena_art.py capabilities | create WIDTH HEIGHT OPERATIONS_JSON OUTPUT | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | export-png INPUT OUTPUT")
 
 
 if __name__ == "__main__":
