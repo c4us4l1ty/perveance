@@ -46,3 +46,11 @@ edit and PNG comparison. Check the relevant CI run for the actual result. This
 is an automated X11/file-transfer test, not direct Arena integration or
 validation on a user's desktop. Native installation, real model/provider
 validation, usability and security/reliability work remain open.
+
+## Path selection increment
+
+The GUI has an in-app, bounded path browser for common file/directory fields.
+It preserves separate open/save actions and no-clobber output, but is not an
+OS-native dialog, has limited directory listings and requires trusted paths.
+Real-desktop testing, release packaging and license review, stable project
+migrations, direct agent integration and live model validation remain open.

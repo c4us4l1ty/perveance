@@ -21,7 +21,8 @@ To open an existing UTF-8 project path directly:
 Use Browse beside a file or directory field to select a path. Use path only
 fills the field; opening, saving, importing and exporting need separate actions.
 This is an in-app browser, not a native OS dialog or security boundary. Large
-directories and non-UTF-8 or special-file names may require manual path entry.
+directories may require manual path entry. Non-UTF-8 paths are not supported;
+special-file entries are omitted and opening special files may block.
 
 Use Save or Ctrl+S to create the first file (using the GUI's File path field),
 or a numbered version after edits. Existing files are never overwritten.
