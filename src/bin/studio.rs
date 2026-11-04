@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{FlipAxis, History, Project};
+use perveance::{EditProposal, FlipAxis, History, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,7 @@ struct Studio {
     shape_filled: bool,
     path: String,
     png_path: String,
+    proposal_path: String,
     status: String,
     history: History,
     confirm_open: bool,
@@ -87,7 +88,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
+            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(),
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -150,6 +151,16 @@ impl Studio {
         let layer = self.layer;
         if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.clear_layer(layer)) {
             self.status = error;
+        }
+    }
+    fn apply_proposal(&mut self, proposal: &EditProposal) {
+        match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.apply_proposal(proposal)) {
+            Ok(changed) => {
+                self.layer = self.layer.min(self.project.layers.len() - 1);
+                self.rename_buffer = self.project.layers[self.layer].name.clone();
+                self.status = if changed { "Proposal applied (undoable)." } else { "Proposal made no changes." }.into();
+            }
+            Err(error) => self.status = error,
         }
     }
     fn pick_color(&mut self, point: [u32; 2]) {
@@ -285,6 +296,24 @@ impl eframe::App for Studio {
                 }
             }
             ui.small("PNG import uses 8-bit pixels; color profiles are not retained.");
+            ui.separator();
+            ui.heading("Agent handoff");
+            ui.small("Data-only proposals must match the current project revision.");
+            if ui.button("Copy current revision").clicked() {
+                match self.project.revision() {
+                    Ok(revision) => { ctx.copy_text(revision); self.status = "Revision sent to clipboard.".into(); }
+                    Err(error) => self.status = error,
+                }
+            }
+            ui.label("Proposal JSON path");
+            ui.text_edit_singleline(&mut self.proposal_path);
+            if ui.button("Apply proposal").clicked() {
+                match EditProposal::load(Path::new(&self.proposal_path)) {
+                    Ok(proposal) => self.apply_proposal(&proposal),
+                    Err(error) => self.status = error,
+                }
+            }
+
             ui.separator();
             ui.small("AI and autonomous feature building are not implemented.");
           });
@@ -577,6 +606,27 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn agent_proposals_are_one_undoable_edit_and_reject_stale() {
+        let mut studio = Studio::default();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
+            perveance::Operation::AddLayer,
+            perveance::Operation::Pixel { layer: 1, x: 0, y: 0, color: [1, 2, 3, 255] },
+        ] };
+        studio.apply_proposal(&proposal);
+        assert_eq!(studio.project.layers.len(), 2);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers.len(), 1);
+        assert!(studio.history.can_redo());
+        let mut stale = proposal.clone();
+        stale.base_revision = format!("sha256-json-v1:{}", "0".repeat(64));
+        studio.apply_proposal(&stale);
+        assert!(studio.status.contains("stale"));
+        assert!(studio.history.can_redo());
+        studio.redo_edit();
+        assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 255]);
     }
 
     #[test]

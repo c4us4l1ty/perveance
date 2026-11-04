@@ -69,3 +69,22 @@ perveance-cli sample project.json 2 3 layer 0
 ```
 
 Both commands return straight-alpha RGBA bytes as JSON. Raw pixels preserve their RGB bytes even when alpha is zero; the visible composite uses the same blending as PNG export.
+
+### Revision-checked agent handoff
+
+External tools or agents can prepare a **data-only** edit proposal for a particular project snapshot. First obtain `revision` from `perveance-cli inspect project.json`, then write a JSON file such as:
+
+```json
+{
+  "version": 1,
+  "base_revision": "<revision returned by inspect>",
+  "operations": [
+    {"op":"add_layer"},
+    {"op":"pixel","layer":1,"x":0,"y":0,"color":[255,0,0,255]}
+  ]
+}
+```
+
+Run `perveance-cli apply-proposal project.json edited.json proposal.json`; the output must not exist. Alternatively, in the GUI's **Agent handoff** section, copy the current in-memory revision and apply a proposal file. GUI application is one undoable edit. Proposals are limited to 256 KiB and 1,024 existing typed operations; unknown fields, stale revisions and invalid operations fail without applying any edits. The proposal format cannot run code or invoke commands, and an agent is not automatically connected to the GUI.
+
+The revision is `sha256-json-v1:` followed by the lowercase SHA-256 of the compact v1 project serialization (including hidden layer pixels and metadata). It fingerprints the document, not its file formatting. **It is not a lock, permission token, or atomic compare-and-swap:** the CLI checks the snapshot it loads, cannot see unsaved GUI edits, and another process may change a file after it is read. It never replaces the input file. Cross-process coordination and conflict-safe in-place updates remain unimplemented.
