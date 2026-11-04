@@ -27,7 +27,7 @@
 
 - Perveance repository contained only README.md before the planning files; a small Rust prototype and CI workflow have since been added.
 - Inspected Graphite's README, root layout and selected project metadata, relevant library manifests, license information and Holonomy's README, PRD audit, workspace, workflow and selected security-related files. See RESEARCH_AND_LICENSES.md and SECURITY.md for scoped findings and pinned links.
-- No Graphite or Holonomy build, formal security audit, license audit of all dependencies, agent compatibility test or sandbox escape test has been performed. Do not treat plan proposals as implemented features.
+- No Graphite desktop or Holonomy build, formal security audit, license audit of all dependencies, agent compatibility test or sandbox escape test has been performed. The Graphite headless CLI passed a default-feature cargo check in CI. Do not treat plan proposals as implemented features.
 
 ## Still to validate during Phase 0
 
@@ -42,3 +42,5 @@
 - Implementation started: preliminary feasibility observations, a shared pixel model, minimal desktop GUI and headless CLI, and a GitHub CI workflow. Autonomous execution is not implemented.
 - Next: verify the actual CI run; complete the Graphite, sandbox and harness feasibility gates. Do not claim production readiness.
 - Follow-up: added shared raster line/flood-fill operations and a bounded, all-or-nothing headless operation batch, plus GUI fill and continuous strokes. Rust CI passed on commit `7b36396` ([run 41800848834](https://github.com/c4us4l1ty/perveance/actions/runs/41800848834)). The native GUI was compiled, not interactively validated. Autonomous code execution, AI integration, vector support, crash-atomic saves and a finalized foundation decision remain outstanding.
+
+- Current branch: added zoom/grid, variable-size canvases, GUI layer rename/reorder/removal, headless rectangle and layer commands, strict unknown-field rejection and a committed Cargo.lock. The locked Rust tests, CLI smoke and X11 desktop-startup smoke passed in [CI run 41802110846](https://github.com/c4us4l1ty/perveance/actions/runs/41802110846). Window startup is not a visual or interaction audit. Projects with unknown fields are rejected; preserving opaque extension data remains future work.

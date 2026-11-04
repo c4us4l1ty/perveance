@@ -34,4 +34,4 @@ The diagnostic rerun ([41799783606](https://github.com/c4us4l1ty/perveance/actio
 
 The default-feature `cargo check --locked -p graphene-cli` succeeded in [run 41800196385](https://github.com/c4us4l1ty/perveance/actions/runs/41800196385) on the pinned upstream revision. This checks compilation, not a runnable export, graphical usability, headless GPU availability, or integration. The feature-disabled failure remains relevant. The foundation choice is still open.
 
-The Perveance prototype's own dependencies are not yet locked in a committed Cargo.lock; CI resolves them when building. A reproducible dependency lock and full license inventory are outstanding before release, as are actual desktop interaction and visual testing.
+Perveance now has a committed Cargo.lock, and CI tests with `--locked`. A full license inventory remains outstanding before release. CI launches the desktop window under X11, but full desktop interaction and visual testing remain outstanding.
