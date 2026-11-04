@@ -57,6 +57,11 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
 
 struct Studio {
     project: Project,
+    // A snapshot of the last successfully saved/opened project (or initial blank canvas).
+    // None means a new/PNG canvas has not yet been saved as a project.
+    saved_project: Option<Project>,
+    confirm_close: bool,
+    allow_close: bool,
     layer: usize,
     color: [u8; 4],
     tool: Tool,
@@ -80,7 +85,8 @@ struct Studio {
 
 impl Default for Studio {
     fn default() -> Self {
-        Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
+        let project = Project::new(32, 32).expect("valid initial canvas");
+        Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
             color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
@@ -88,6 +94,14 @@ impl Default for Studio {
 }
 
 impl Studio {
+    fn has_unsaved_changes(&self) -> bool {
+        self.saved_project.as_ref().map_or(true, |saved| *saved != self.project)
+    }
+    fn save_project(&mut self) -> Result<(), String> {
+        self.project.save_new(Path::new(&self.path))?;
+        self.saved_project = Some(self.project.clone());
+        Ok(())
+    }
     fn checkpoint(&mut self) {
         self.history.checkpoint_with_selection(&self.project, self.layer);
     }
@@ -158,8 +172,16 @@ fn shape_box(start: [u32; 2], end: [u32; 2]) -> (u32, u32, u32, u32) {
 
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Do not intercept shortcuts while a text field is editing or a brush gesture is active.
-        if !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
+        // A native close request is cancellable; this does not protect against a crash,
+        // force-quit, or an operating system that terminates the process outright.
+        if ctx.input(|input| input.viewport().close_requested()) && !self.allow_close {
+            if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.confirm_close = true;
+            }
+        }
+        // Do not intercept shortcuts while a dialog, text field, or brush gesture is active.
+        if !self.confirm_close && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
             let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
             let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
             let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -208,7 +230,7 @@ impl eframe::App for Studio {
             ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
             if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
                 match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
+                    Ok(project) => { self.project = project; self.saved_project = None; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
                     Err(error) => self.status = error,
                 }
             }
@@ -216,7 +238,7 @@ impl eframe::App for Studio {
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
             if ui.button("Save as new file").clicked() {
-                let result = self.project.save_new(Path::new(&self.path));
+                let result = self.save_project();
                 self.set_status(result, "Project saved.");
             }
             if ui.button("Export PNG as new file").clicked() {
@@ -226,7 +248,7 @@ impl eframe::App for Studio {
             }
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
+                    Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
                     Err(error) => self.status = error,
                 }
             }
@@ -250,6 +272,7 @@ impl eframe::App for Studio {
                 match Project::from_png(Path::new(&self.png_path)) {
                     Ok(project) => {
                         self.project = project;
+                        self.saved_project = None;
                         self.layer = 0;
                         self.history.clear();
                         self.shape_start = None;
@@ -471,6 +494,27 @@ impl eframe::App for Studio {
               });
             });
         });
+        if self.confirm_close {
+            let mut keep_editing = false;
+            let mut discard = false;
+            egui::Modal::new(egui::Id::new("unsaved_close")).show(ctx, |ui| {
+                ui.heading("Unsaved project");
+                ui.label("Your current artwork has unsaved changes.");
+                ui.label("Keep editing to save it as a new project file, or discard changes and quit.");
+                ui.horizontal(|ui| {
+                    if ui.button("Keep editing").clicked() { keep_editing = true; }
+                    if ui.button("Discard and quit").clicked() { discard = true; }
+                });
+            });
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { keep_editing = true; }
+            if discard {
+                self.allow_close = true;
+                self.confirm_close = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if keep_editing {
+                self.confirm_close = false;
+            }
+        }
     }
 }
 
@@ -511,6 +555,30 @@ mod tests {
         studio.redo_edit();
         assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
     }
+    #[test]
+    fn dirty_state_tracks_successful_save_and_undo_without_false_clean_on_failure() {
+        let mut studio = Studio::default();
+        assert!(!studio.has_unsaved_changes());
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        assert!(studio.has_unsaved_changes());
+        studio.undo_edit();
+        assert!(!studio.has_unsaved_changes());
+        studio.redo_edit();
+        assert!(studio.has_unsaved_changes());
+        let dir = tempfile::tempdir().unwrap();
+        studio.path = dir.path().join("art.json").to_str().unwrap().to_owned();
+        studio.save_project().unwrap();
+        assert!(!studio.has_unsaved_changes());
+        studio.commit_shape([1, 0], [1, 0]);
+        assert!(studio.save_project().is_err()); // The path already exists; do not mark clean.
+        assert!(studio.has_unsaved_changes());
+        studio.undo_edit();
+        assert!(!studio.has_unsaved_changes());
+        studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
+        assert!(studio.has_unsaved_changes());
+    }
+
     #[test]
     fn layer_controls_restore_selection_and_pixels_on_undo() {
         let mut studio = Studio::default();

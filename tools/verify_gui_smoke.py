@@ -38,3 +38,10 @@ assert is_ink(flipped), flipped
 assert not is_ink(cleared_flip), cleared_flip
 assert is_ink(original_after_clear), original_after_clear
 assert is_ink(restored), restored
+
+# The close warning darkens the canvas; Escape keeps the app and artwork open.
+warning = pixel("/tmp/perveance-close-warning.png", (438, 112))
+after_cancel = pixel("/tmp/perveance-close-cancelled.png", (438, 112))
+print("Close warning:", warning, "after cancel:", after_cancel)
+assert warning[1] < original[1] - 25, warning
+assert is_ink(after_cancel), after_cancel

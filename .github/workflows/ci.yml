@@ -85,6 +85,15 @@ jobs:
             xdotool key --window "$window" ctrl+z
             sleep 1
             scrot /tmp/perveance-clear-undone.png
+            # Request an ordinary native close on the dirty document; it must be cancelled.
+            /usr/bin/python3 tools/send_x11_close.py "$window"
+            sleep 1
+            kill -0 "$pid"
+            scrot /tmp/perveance-close-warning.png
+            xdotool key --window "$window" Escape
+            sleep 1
+            kill -0 "$pid"
+            scrot /tmp/perveance-close-cancelled.png
             /usr/bin/python3 tools/verify_gui_smoke.py
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
