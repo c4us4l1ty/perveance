@@ -59,6 +59,18 @@ Swatches are separate from the project and undo history. To keep them, expand **
 
 Palette files are version-1 JSON with exactly 16 straight-alpha RGBA colors, for example `{"version":1,"colors":[[0,0,0,255], ...]}` (the ellipsis is illustrative, not valid JSON). Files are limited to 8 KiB and unknown fields are rejected. Agents can inspect one using `perveance-cli inspect-palette palette.perveance.json`. Palette saves use the same staged create-new mechanism and filesystem caveats as projects.
 
+### Scaled PNG export
+
+The GUI Project section has a separate **PNG export path** and an integer **Scale** control from 1 to 8. Export uses nearest-neighbor pixel enlargement of the visible composite, without changing the editable project or marking it saved. It creates a new file and refuses to overwrite an existing one.
+
+The headless equivalent is:
+
+```sh
+perveance-cli export-png-scaled potion.json potion-4x.png 4
+```
+
+For example, a 16 × 16 canvas at 4× becomes a 64 × 64 PNG. Export is bounded to 2,048 × 2,048 pixels at the maximum project size and scale. Alpha and visible-layer compositing match regular PNG export; no interpolation or color management is applied. `export-png` remains the 1× command. The project/PNG import limit remains 256 × 256, so a larger exported PNG cannot be imported back into this prototype; keep the editable project.
+
 ### Example layered asset
 
 The repository includes [`examples/potion-operations.json`](examples/potion-operations.json), a small editable pixel-art potion. From the repository root, with Rust installed:

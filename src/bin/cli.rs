@@ -82,9 +82,9 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png"],
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
-            "limits": {"canvas_dimension": 256, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
+            "limits": {"canvas_dimension": 256, "png_export_scale": perveance::MAX_EXPORT_SCALE, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
                 "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
                 "move_layer": {"op": "move_layer", "from": 0, "to": 1},
@@ -192,12 +192,18 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "applied": proposal.operations.len(), "base_revision": base_revision, "revision": revision}))
         }
+        [command, input, output, scale] if command == "export-png-scaled" => {
+            let project = Project::load(Path::new(input))?;
+            let scale = number(scale)?;
+            project.export_png_scaled_new(Path::new(output), scale)?;
+            Ok(json!({"ok": true, "output": output, "width": project.width * scale, "height": project.height * scale, "scale": scale}))
+        }
         [command, input, output] if command == "export-png" => {
             let project = Project::load(Path::new(input))?;
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 

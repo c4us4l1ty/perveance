@@ -91,6 +91,8 @@ struct Studio {
     shape_filled: bool,
     path: String,
     png_path: String,
+    export_path: String,
+    export_scale: u32,
     proposal_path: String,
     ai_prompt: String,
     ai_model: String,
@@ -114,7 +116,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
+            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -128,6 +130,21 @@ impl Studio {
         self.project.save_new(Path::new(&self.path))?;
         self.saved_project = Some(self.project.clone());
         Ok(())
+    }
+    fn export_png_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        ui.label("PNG export path");
+        ui.text_edit_singleline(&mut self.export_path);
+        ui.add(egui::DragValue::new(&mut self.export_scale).range(1..=perveance::MAX_EXPORT_SCALE).prefix("Scale ×"));
+        ui.small("Nearest-neighbor; export does not save the project.");
+        let button = ui.button("Export PNG as new file");
+        if button.clicked() {
+            self.status = match self.project.export_png_scaled_new(Path::new(&self.export_path), self.export_scale) {
+                Ok(()) => format!("Exported {} ({} × {}).", self.export_path,
+                    self.project.width * self.export_scale, self.project.height * self.export_scale),
+                Err(error) => error,
+            };
+        }
+        button
     }
     fn checkpoint(&mut self) {
         self.history.checkpoint_with_selection(&self.project, self.layer);
@@ -502,11 +519,7 @@ impl eframe::App for Studio {
                 let result = self.save_project();
                 self.set_status(result, "Project saved.");
             }
-            if ui.button("Export PNG as new file").clicked() {
-                let output = format!("{}.png", self.path);
-                let result = self.project.export_png_new(Path::new(&output));
-                self.set_status(result, &format!("Exported {output}"));
-            }
+            self.export_png_ui(ui);
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
                     Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.sync_resize_dimensions(); self.allow_resize_clip = false; self.status = "Project opened.".into(); self.confirm_open = false; }
@@ -1075,6 +1088,48 @@ mod tests {
         studio.undo_edit();
         assert_eq!((studio.project.width, studio.project.height), (32,32));
         assert_eq!((studio.resize_width, studio.resize_height), (32,32));
+    }
+
+    #[test]
+    fn scaled_export_control_writes_png_without_marking_project_saved() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Rect {
+            let mut rect = Rect::NOTHING;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { rect = studio.export_png_ui(ui).rect; });
+            });
+            rect
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.set_pixel(0, 1, 1, [33, 44, 55, 255]).unwrap();
+        let original = studio.project.clone();
+        assert!(studio.has_unsaved_changes());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scaled.png");
+        studio.export_path = path.to_str().unwrap().to_owned();
+        studio.export_scale = 2;
+        let ctx = egui::Context::default();
+        let button = frame(&ctx, &mut studio, vec![]).center();
+        click(&ctx, &mut studio, button);
+        let before = std::fs::read(&path).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(&before)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!((info.width, info.height), (64,64));
+        let offset = (2 * 64 + 2) * 4;
+        assert_eq!(&pixels[offset..offset + 4], &[33,44,55,255]);
+        assert_eq!(studio.project, original);
+        assert!(studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+        click(&ctx, &mut studio, button);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.status.contains("create output"));
     }
 
     #[test]

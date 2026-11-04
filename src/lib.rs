@@ -11,6 +11,7 @@ use std::path::Path;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DIMENSION: u32 = 256;
+pub const MAX_EXPORT_SCALE: u32 = 8;
 // Must accommodate the worst valid 256×256×32 RGBA project as JSON, including
 // escaped layer names, not merely its much smaller in-memory pixel payload.
 const MAX_PROJECT_BYTES: u64 = 40 * 1024 * 1024;
@@ -648,10 +649,31 @@ impl Project {
     }
 
     pub fn export_png_new(&self, path: &Path) -> Result<(), String> {
+        self.export_png_scaled_new(path, 1)
+    }
+
+    /// Create a PNG using integer nearest-neighbor enlargement of the visible
+    /// composite. Scale is bounded; artwork and its editable dimensions are unchanged.
+    pub fn export_png_scaled_new(&self, path: &Path, scale: u32) -> Result<(), String> {
+        if scale == 0 || scale > MAX_EXPORT_SCALE {
+            return Err(format!("PNG export scale must be between 1 and {MAX_EXPORT_SCALE}"));
+        }
         let pixels = self.rgba()?;
+        let (width, height) = (self.width * scale, self.height * scale);
+        let pixels = if scale == 1 { pixels } else {
+            let mut result = Vec::with_capacity((width * height * 4) as usize);
+            for source_row in pixels.chunks_exact(self.width as usize * 4) {
+                let mut row = Vec::with_capacity(width as usize * 4);
+                for pixel in source_row.chunks_exact(4) {
+                    for _ in 0..scale { row.extend_from_slice(pixel); }
+                }
+                for _ in 0..scale { result.extend_from_slice(&row); }
+            }
+            result
+        };
         let mut bytes = Vec::new();
         {
-            let mut encoder = png::Encoder::new(&mut bytes, self.width, self.height);
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().map_err(|e| format!("PNG header: {e}"))?;

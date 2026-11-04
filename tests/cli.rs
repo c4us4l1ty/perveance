@@ -505,3 +505,28 @@ fn openrouter_cli_preflight_is_opt_in_and_does_not_leak_secret() {
     assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "prompt-openrouter"));
     assert_eq!(caps["autonomous_execution"], false);
 }
+
+#[test]
+fn cli_scaled_export_reports_dimensions_and_never_overwrites() {
+    let dir = TempDir::new();
+    let project = dir.0.join("base.json");
+    let png = dir.0.join("scaled.png");
+    let invalid = dir.0.join("invalid.png");
+    let p = perveance::Project::new(3, 2).unwrap();
+    p.save_new(&project).unwrap();
+    let result = cli(&["export-png-scaled", project.to_str().unwrap(), png.to_str().unwrap(), "3"]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!((value["width"].as_u64(), value["height"].as_u64(), value["scale"].as_u64()), (Some(9), Some(6), Some(3)));
+    let before = fs::read(&png).unwrap();
+    assert!(!cli(&["export-png-scaled", project.to_str().unwrap(), png.to_str().unwrap(), "2"]).status.success());
+    assert_eq!(fs::read(&png).unwrap(), before);
+    for scale in ["0", "9", "-1", "4294967295", "nan"] {
+        assert!(!cli(&["export-png-scaled", project.to_str().unwrap(), invalid.to_str().unwrap(), scale]).status.success());
+        assert!(!invalid.exists());
+    }
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["limits"]["png_export_scale"], 8);
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "export-png-scaled"));
+    assert_eq!(perveance::Project::load(&project).unwrap(), p);
+}
