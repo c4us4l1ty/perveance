@@ -51,7 +51,7 @@ jobs:
             sleep 1
             kill -0 "$pid"
             scrot /tmp/perveance-shape.png
-            /usr/bin/python3 -c "from PIL import Image; image=Image.open("/tmp/perveance-shape.png").convert("RGB"); pixel=image.getpixel((438,112)); print("rectangle border pixel:", pixel); assert pixel[0] > 120 and pixel[1] > 150 and pixel[2] < 110, pixel"
+            /usr/bin/python3 tools/verify_gui_smoke.py
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
             for file in /tmp/perveance-smoke.log /tmp/perveance-gui.log; do
