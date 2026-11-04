@@ -82,6 +82,8 @@ struct Studio {
     // A snapshot of the last successfully saved/opened project (or initial blank canvas).
     // None means a new/PNG canvas has not yet been saved as a project.
     saved_project: Option<Project>,
+    // Path actually opened/saved, independent of edits to the file path field.
+    saved_path: Option<String>,
     confirm_close: bool,
     allow_close: bool,
     layer: usize,
@@ -125,7 +127,7 @@ struct Studio {
 impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
-        Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
+        Self { saved_project: Some(project.clone()), saved_path: None, project, confirm_close: false, allow_close: false, layer: 0,
             color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
@@ -147,14 +149,16 @@ impl Studio {
         }
     }
     fn replace_canvas(&mut self, replacement: CanvasReplacement) {
-        let (result, is_saved, message) = match replacement {
-            CanvasReplacement::New { width, height } => (Project::new(width, height), false, "New canvas created."),
-            CanvasReplacement::Project(path) => (Project::load(Path::new(&path)), true, "Project opened."),
-            CanvasReplacement::Png(path) => (Project::from_png(Path::new(&path)), false, "PNG opened as a new canvas."),
+        let (result, source_path, message) = match replacement {
+            CanvasReplacement::New { width, height } => (Project::new(width, height), None, "New canvas created."),
+            CanvasReplacement::Project(path) => (Project::load(Path::new(&path)), Some(path), "Project opened."),
+            CanvasReplacement::Png(path) => (Project::from_png(Path::new(&path)), None, "PNG opened as a new canvas."),
         };
         match result {
             Ok(project) => {
-                self.saved_project = if is_saved { Some(project.clone()) } else { None };
+                self.saved_project = source_path.as_ref().map(|_| project.clone());
+                if let Some(path) = &source_path { self.path = path.clone(); }
+                self.saved_path = source_path;
                 self.project = project;
                 self.layer = 0;
                 self.history.clear();
@@ -193,7 +197,61 @@ impl Studio {
     fn save_project(&mut self) -> Result<(), String> {
         self.project.save_new(Path::new(&self.path))?;
         self.saved_project = Some(self.project.clone());
+        self.saved_path = Some(self.path.clone());
         Ok(())
+    }
+    // Version saves never replace the source or any existing file. The snapshot
+    // comparison detects ordinary external edits, not races or malicious paths.
+    fn save_next_version(&mut self) -> Result<(), String> {
+        let source = self.saved_path.as_ref().ok_or("Save or open a project first.")?;
+        let snapshot = self.saved_project.as_ref().ok_or("No saved project snapshot; save as a new file.")?;
+        let on_disk = Project::load(Path::new(source)).map_err(|e| format!("Could not check the saved project: {e}. Save as a new file instead."))?;
+        if &on_disk != snapshot {
+            return Err("The saved project changed on disk. Open it or save your work as a new file instead.".into());
+        }
+        let path = Path::new(source);
+        let stem = path.file_stem().and_then(|s| s.to_str()).ok_or("Invalid project filename")?;
+        let (base, start) = match stem.rsplit_once(".v") {
+            Some((base, digits)) if !base.is_empty() && (3..=4).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) => {
+                let number: u32 = digits.parse().map_err(|_| "Invalid project version")?;
+                (base, number + 1)
+            }
+            _ => (stem, 1),
+        };
+        let extension = path.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+        for number in start..=9999 {
+            let candidate = path.with_file_name(format!("{base}.v{number:03}{extension}"));
+            match std::fs::symlink_metadata(&candidate) {
+                Ok(_) => continue, // Includes directories and dangling symlinks.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => return Err(format!("check version path: {error}")),
+            }
+            // If another writer wins the race, save_new fails rather than clobbering.
+            let candidate_text = candidate.to_str().ok_or("Invalid project filename")?.to_owned();
+            self.project.save_new(&candidate)?;
+            let candidate = candidate_text;
+            self.path = candidate.clone();
+            self.saved_path = Some(candidate);
+            self.saved_project = Some(self.project.clone());
+            return Ok(());
+        }
+        Err("No available version number up to 9999; save as a new file.".into())
+    }
+    fn project_save_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        let save = ui.button("Save as new file");
+        if save.clicked() {
+            let result = self.save_project();
+            self.set_status(result, "Project saved.");
+        }
+        let version = ui.add_enabled(self.saved_path.is_some(), egui::Button::new("Save next version"));
+        if version.clicked() {
+            self.status = match self.save_next_version() {
+                Ok(()) => format!("Project saved as {}.", self.path),
+                Err(error) => error,
+            };
+        }
+        ui.small("Versions create new files; existing files are never overwritten.");
+        (save.rect, version.rect)
     }
     fn export_png_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.label("PNG export path");
@@ -648,10 +706,7 @@ impl eframe::App for Studio {
             ui.separator();
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
-            if ui.button("Save as new file").clicked() {
-                let result = self.save_project();
-                self.set_status(result, "Project saved.");
-            }
+            self.project_save_ui(ui);
             self.export_png_ui(ui);
             if ui.button("Open project").clicked() {
                 self.request_replacement(CanvasReplacement::Project(self.path.clone()));
@@ -1000,6 +1055,146 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn version_saves_keep_history_and_never_overwrite_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("art.perveance.json");
+        let occupied = dir.path().join("art.perveance.v001.json");
+        let version2 = dir.path().join("art.perveance.v002.json");
+        let version3 = dir.path().join("art.perveance.v003.json");
+        let mut studio = Studio::default();
+        assert!(studio.save_next_version().is_err());
+        studio.path = original.to_str().unwrap().into();
+        studio.save_project().unwrap();
+        let original_bytes = std::fs::read(&original).unwrap();
+        std::fs::write(&occupied, b"do not overwrite").unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [1, 1]);
+        assert!(studio.has_unsaved_changes());
+        studio.path = dir.path().join("unrelated.json").to_str().unwrap().into();
+        studio.save_next_version().unwrap();
+        assert_eq!(studio.path, version2.to_str().unwrap());
+        assert_eq!(studio.saved_path.as_deref(), version2.to_str());
+        assert!(!studio.has_unsaved_changes());
+        assert!(studio.history.can_undo());
+        assert_eq!(Project::load(&version2).unwrap(), studio.project);
+        assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+        assert_eq!(std::fs::read(&occupied).unwrap(), b"do not overwrite");
+        studio.commit_shape([2, 2], [2, 2]);
+        studio.save_next_version().unwrap();
+        assert_eq!(studio.path, version3.to_str().unwrap());
+        assert_eq!(Project::load(&version3).unwrap(), studio.project);
+        assert_eq!(Project::load(&version2).unwrap().layers[0].pixels[66], [0; 4]);
+    }
+
+    #[test]
+    fn version_saves_detect_external_changes_and_keep_unsaved_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("art.json");
+        let recovery = dir.path().join("recovered.json");
+        let mut studio = Studio::default();
+        studio.path = original.to_str().unwrap().into();
+        studio.save_project().unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let local = studio.project.clone();
+        let mut external = Project::new(32, 32).unwrap();
+        external.set_pixel(0, 1, 1, [1, 2, 3, 4]).unwrap();
+        // Simulate an external editor changing the saved project.
+        std::fs::write(&original, serde_json::to_vec(&external).unwrap()).unwrap();
+        assert!(studio.save_next_version().unwrap_err().contains("changed on disk"));
+        assert_eq!(studio.project, local);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.history.can_undo());
+        assert_eq!(Project::load(&original).unwrap(), external);
+        assert!(!dir.path().join("art.v001.json").exists());
+        std::fs::remove_file(&original).unwrap();
+        assert!(studio.save_next_version().unwrap_err().contains("Could not check"));
+        assert_eq!(studio.project, local);
+        assert!(studio.has_unsaved_changes());
+        // The explicitly chosen new-file path remains available for recovery.
+        studio.path = recovery.to_str().unwrap().into();
+        studio.save_project().unwrap();
+        assert_eq!(Project::load(&recovery).unwrap(), local);
+        assert!(!studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn version_saves_skip_occupied_paths_and_preserve_state_on_exhaustion() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("art.json");
+        let mut studio = Studio::default();
+        studio.path = source.to_str().unwrap().into();
+        studio.save_project().unwrap();
+        std::fs::create_dir(dir.path().join("art.v001.json")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path().join("missing"), dir.path().join("art.v002.json")).unwrap();
+        #[cfg(not(unix))]
+        std::fs::write(dir.path().join("art.v002.json"), b"occupied").unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        studio.save_next_version().unwrap();
+        assert_eq!(studio.path, dir.path().join("art.v003.json").to_str().unwrap());
+        let max = dir.path().join("art.v9999.json");
+        studio.project.save_new(&max).unwrap();
+        studio.request_replacement(CanvasReplacement::Project(max.to_str().unwrap().into()));
+        studio.commit_shape([1, 1], [1, 1]);
+        let snapshot = studio.saved_project.clone();
+        assert!(studio.save_next_version().unwrap_err().contains("9999"));
+        assert_eq!(studio.path, max.to_str().unwrap());
+        assert_eq!(studio.saved_project, snapshot);
+        assert!(studio.has_unsaved_changes());
+        assert_eq!(Project::load(&max).unwrap(), snapshot.unwrap());
+    }
+
+    #[test]
+    fn version_source_follows_successful_open_and_resets_on_new_or_png() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.v005.json");
+        let png = dir.path().join("input.png");
+        let p = Project::new(2, 2).unwrap();
+        p.save_new(&path).unwrap();
+        p.export_png_new(&png).unwrap();
+        let mut studio = Studio::default();
+        studio.request_replacement(CanvasReplacement::Project(path.to_str().unwrap().into()));
+        studio.path = "changed field".into();
+        studio.save_next_version().unwrap();
+        assert_eq!(studio.path, dir.path().join("source.v006.json").to_str().unwrap());
+        studio.request_replacement(CanvasReplacement::Png(png.to_str().unwrap().into()));
+        assert!(studio.saved_path.is_none());
+        assert!(studio.save_next_version().is_err());
+        studio.resolve_replacement(true); // No pending request: the opened PNG was cleanly substituted.
+        studio.request_replacement(CanvasReplacement::New { width: 1, height: 1 });
+        studio.resolve_replacement(true);
+        assert!(studio.saved_path.is_none());
+    }
+
+    #[test]
+    fn version_save_button_creates_a_reopenable_copy() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| { controls = studio.project_save_ui(ui); }); });
+            controls
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut studio = Studio::default();
+        studio.path = dir.path().join("test.json").to_str().unwrap().into();
+        studio.save_project().unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let ctx = egui::Context::default();
+        let (_, button) = frame(&ctx, &mut studio, vec![]);
+        let pos = button.center();
+        let event = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        frame(&ctx, &mut studio, vec![egui::Event::PointerMoved(pos), event(true)]);
+        frame(&ctx, &mut studio, vec![event(false)]);
+        let version = dir.path().join("test.v001.json");
+        assert_eq!(Project::load(&version).unwrap(), studio.project);
+        assert!(!studio.has_unsaved_changes());
+        assert!(studio.status.contains("saved"));
     }
 
     #[test]
