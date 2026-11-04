@@ -27,6 +27,19 @@ pub struct Project {
     pub layers: Vec<Layer>,
 }
 
+/// A bounded, typed operation accepted by the headless interface.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Operation {
+    AddLayer,
+    SetVisibility { layer: usize, visible: bool },
+    Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
+    Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
+    Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
+}
+
+pub const MAX_OPERATIONS: usize = 1024;
+
 impl Project {
     pub fn new(width: u32, height: u32) -> Result<Self, String> {
         if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
@@ -69,6 +82,79 @@ impl Project {
         let index = (y * self.width + x) as usize;
         let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
         target.pixels[index] = color;
+        Ok(())
+    }
+
+    /// Draw an inclusive, one-pixel-wide Bresenham line on a single layer.
+    pub fn draw_line(&mut self, layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        if layer >= self.layers.len() || from[0] >= self.width || from[1] >= self.height || to[0] >= self.width || to[1] >= self.height {
+            return Err("line endpoint or layer is outside the project".into());
+        }
+        let (mut x, mut y) = (from[0] as i32, from[1] as i32);
+        let (end_x, end_y) = (to[0] as i32, to[1] as i32);
+        let dx = (end_x - x).abs();
+        let dy = -(end_y - y).abs();
+        let sx = if x < end_x { 1 } else { -1 };
+        let sy = if y < end_y { 1 } else { -1 };
+        let mut error = dx + dy;
+        loop {
+            self.layers[layer].pixels[(y as u32 * self.width + x as u32) as usize] = color;
+            if x == end_x && y == end_y { break; }
+            let twice = 2 * error;
+            if twice >= dy { error += dy; x += sx; }
+            if twice <= dx { error += dx; y += sy; }
+        }
+        Ok(())
+    }
+
+    /// Fill a four-connected region of identical RGBA pixels in the selected layer.
+    pub fn fill(&mut self, layer: usize, x: u32, y: u32, color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        if layer >= self.layers.len() || x >= self.width || y >= self.height {
+            return Err("fill point or layer is outside the project".into());
+        }
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let pixels = &mut self.layers[layer].pixels;
+        let index = y as usize * width + x as usize;
+        let original = pixels[index];
+        if original == color { return Ok(()); }
+        pixels[index] = color;
+        let mut pending = vec![index];
+        while let Some(i) = pending.pop() {
+            let px = i % width;
+            let py = i / width;
+            let mut enqueue = |next: usize| {
+                if pixels[next] == original { pixels[next] = color; pending.push(next); }
+            };
+            if px > 0 { enqueue(i - 1); }
+            if px + 1 < width { enqueue(i + 1); }
+            if py > 0 { enqueue(i - width); }
+            if py + 1 < height { enqueue(i + width); }
+        }
+        Ok(())
+    }
+
+    /// All-or-nothing in memory: a failing operation leaves the original unchanged.
+    pub fn apply_operations(&mut self, operations: &[Operation]) -> Result<(), String> {
+        self.validate()?;
+        if operations.len() > MAX_OPERATIONS { return Err("too many operations".into()); }
+        let mut candidate = self.clone();
+        for (index, operation) in operations.iter().enumerate() {
+            let result = match *operation {
+                Operation::AddLayer => candidate.add_layer(),
+                Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(layer) {
+                    Some(item) => { item.visible = visible; Ok(()) },
+                    None => Err("layer does not exist".into()),
+                },
+                Operation::Pixel { layer, x, y, color } => candidate.set_pixel(layer, x, y, color),
+                Operation::Line { layer, from, to, color } => candidate.draw_line(layer, from, to, color),
+                Operation::Fill { layer, x, y, color } => candidate.fill(layer, x, y, color),
+            };
+            result.map_err(|error| format!("operation {index}: {error}"))?;
+        }
+        *self = candidate;
         Ok(())
     }
 
@@ -159,6 +245,23 @@ mod tests {
         assert_eq!(p.rgba().unwrap(), vec![127, 0, 128, 255]);
         p.layers[1].visible = false;
         assert_eq!(p.rgba().unwrap(), vec![255, 0, 0, 255]);
+    }
+    #[test]
+    fn lines_fill_and_batches_are_correct_and_atomic() {
+        let mut p = Project::new(5, 5).unwrap();
+        let red = [255, 0, 0, 255];
+        let blue = [0, 0, 255, 255];
+        p.draw_line(0, [2, 0], [2, 4], red).unwrap();
+        p.fill(0, 0, 0, blue).unwrap();
+        assert_eq!(p.layers[0].pixels[0], blue);
+        assert_eq!(p.layers[0].pixels[4], [0; 4]);
+        assert_eq!(p.layers[0].pixels[22], red);
+        let old = p.clone();
+        let ops = [Operation::AddLayer, Operation::Pixel { layer: 99, x: 0, y: 0, color: red }];
+        assert!(p.apply_operations(&ops).is_err());
+        assert_eq!(p, old);
+        assert!(p.draw_line(0, [0, 0], [5, 0], red).is_err());
+        assert_eq!(p, old);
     }
     #[test]
     fn project_round_trip_and_png_are_valid() {

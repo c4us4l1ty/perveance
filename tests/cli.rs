@@ -56,3 +56,32 @@ fn malformed_projects_fail_without_writing_an_output() {
     let error: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
     assert_eq!(error["ok"], false);
 }
+
+#[test]
+fn batch_can_create_layers_and_failing_batch_leaves_no_output() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("out.json");
+    let rejected = dir.0.join("rejected.json");
+    let operations = dir.0.join("operations.json");
+    assert!(cli(&["new", "4", "4", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"add_layer"},
+        {"op":"fill","layer":1,"x":0,"y":0,"color":[12,34,56,255]},
+        {"op":"line","layer":1,"from":[0,0],"to":[3,3],"color":[255,0,0,255]}
+    ]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), output.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(result.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(parsed["applied"], 3);
+    let project = perveance::Project::load(&output).unwrap();
+    assert_eq!(project.layers.len(), 2);
+    assert_eq!(project.layers[1].pixels[15], [255, 0, 0, 255]);
+    assert_eq!(project.layers[1].pixels[1], [12, 34, 56, 255]);
+
+    fs::write(&operations, r#"[{"op":"add_layer"},{"op":"pixel","layer":50,"x":0,"y":0,"color":[0,0,0,0]}]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), rejected.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(!result.status.success());
+    assert!(!rejected.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap().layers.len(), 1);
+}

@@ -1,7 +1,7 @@
 name: Rust CI
 on:
   push:
-    branches: ["arena/015bd4ba-perveance"]
+    branches: ["main", "arena/015bd4ba-perveance"]
   pull_request:
   workflow_dispatch:
 permissions:
