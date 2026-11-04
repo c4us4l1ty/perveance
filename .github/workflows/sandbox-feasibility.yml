@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -45,3 +45,18 @@ jobs:
         if: matrix.os == 'ubuntu-26.04'
         run: |
           python3 -c 'import json; r=json.load(open("/tmp/perveance-isolation-matrix.json")); assert r["status"] == "passed", "fixed diagnostic did not pass; see previous step"; assert r["autonomous_execution"] == "disabled"'
+      - name: Install prerequisites for staged project test
+        if: matrix.os == 'ubuntu-26.04'
+        run: sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Run fixed worker against real project staging
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          rustup default stable
+          if cargo test --locked --test workspace linux::fixed_staged_project_worker -- --ignored --exact --nocapture > /tmp/perveance-staged-worker.log 2>&1; then
+            cat /tmp/perveance-staged-worker.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-staged-worker.log").read_text(); assert "1 passed; 0 failed" in s; print("::notice::Fixed bubblewrap worker read an actual staged project; no model code or execution authorization")'
+          else
+            cat /tmp/perveance-staged-worker.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-staged-worker.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
