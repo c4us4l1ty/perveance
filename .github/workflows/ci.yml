@@ -86,6 +86,7 @@ jobs:
             done
             exit 1
           fi
+          cat /tmp/perveance-smoke.log
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
       - name: Exercise CLI round trip
