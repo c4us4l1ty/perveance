@@ -120,6 +120,13 @@ jobs:
             done
             exit 1
           fi
+      - name: Exercise native GUI save and reopen workflow
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_project_roundtrip.sh "$RUNNER_TEMP/gui-project-roundtrip" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
+            cat "$RUNNER_TEMP/gui-project-roundtrip/gui.log" 2>/dev/null || true
+            echo "::error::Native GUI project round trip failed; see the step output"
+            exit 1
+          fi
       - name: Test environment probe
         run: |
           if ! python3 -m unittest discover -s tests -v > /tmp/perveance-python-tests.log 2>&1; then
