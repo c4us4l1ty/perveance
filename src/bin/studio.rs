@@ -158,7 +158,7 @@ impl Studio {
         if self.confirm_close || self.pending_replacement.is_some() || self.path_browser.is_some()
             || self.shape_start.is_some() || self.stroke_last.is_some() { return; }
         let initial = match target {
-            BrowserTarget::Project => &self.path,
+            BrowserTarget::Project | BrowserTarget::OpenProject => &self.path,
             BrowserTarget::PngInput => &self.png_path,
             BrowserTarget::PngExport => &self.export_path,
             BrowserTarget::Palette => &self.palette_path,
@@ -174,6 +174,7 @@ impl Studio {
                 if let Some(path) = path.to_str() {
                     match browser.target {
                         BrowserTarget::Project => self.path = path.into(),
+                        BrowserTarget::OpenProject => self.request_replacement(CanvasReplacement::Project(path.into())),
                         BrowserTarget::PngInput => self.png_path = path.into(),
                         BrowserTarget::PngExport => self.export_path = path.into(),
                         BrowserTarget::Palette => self.palette_path = path.into(),
@@ -319,12 +320,15 @@ impl Studio {
         let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
         let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
         let save = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
+        let open = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
         if ctx.input_mut(|input| input.consume_shortcut(&redo) || input.consume_shortcut(&redo_alternate)) {
             self.redo_edit();
         } else if ctx.input_mut(|input| input.consume_shortcut(&undo)) {
             self.undo_edit();
         } else if ctx.input_mut(|input| input.consume_shortcut(&save)) {
             self.save_current_with_status();
+        } else if ctx.input_mut(|input| input.consume_shortcut(&open)) {
+            self.open_path_browser(BrowserTarget::OpenProject);
         }
     }
     fn enable_recovery(&mut self, now: Instant) -> Result<(), String> {
@@ -793,6 +797,7 @@ impl eframe::App for Studio {
             ui.horizontal(|ui| {
                 ui.heading("perveance");
                 ui.label(egui::RichText::new("STUDIO / EARLY PROTOTYPE").small().color(Color32::from_rgb(166, 215, 74)));
+                if ui.button("Open…").on_hover_text("Ctrl+O — open an existing project").clicked() { self.open_path_browser(BrowserTarget::OpenProject); }
                 if ui.button("Save").on_hover_text("Ctrl+S — save a new file or numbered version; never overwrites").clicked() { self.save_current_with_status(); }
                 ui.label(if self.saved_path.is_none() { "Not saved" } else if self.has_unsaved_changes() { "Modified" } else { "Saved" });
                 if ui.add_enabled(self.history.can_undo(), egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.undo_edit(); }
@@ -1282,6 +1287,40 @@ mod tests {
         studio.finish_path_browser(BrowserAction::Use(input.clone()));
         assert_eq!(studio.export_path, input.to_str().unwrap());
         assert_eq!(std::fs::read(&input).unwrap(), before_bytes);
+    }
+
+    #[test]
+    fn direct_open_keeps_dirty_art_until_confirmation_and_preserves_it_on_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("other.json");
+        let other = Project::new(3, 4).unwrap();
+        other.save_new(&path).unwrap();
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let dirty = studio.project.clone();
+        let old_path = studio.path.clone();
+        studio.open_path_browser(BrowserTarget::OpenProject);
+        studio.finish_path_browser(BrowserAction::Use(path.clone()));
+        assert!(studio.pending_replacement.is_some());
+        assert_eq!(studio.path, old_path);
+        assert_eq!(studio.project, dirty);
+        studio.resolve_replacement(false);
+        assert_eq!(studio.project, dirty);
+        assert!(studio.history.can_undo());
+        studio.open_path_browser(BrowserTarget::OpenProject);
+        studio.finish_path_browser(BrowserAction::Use(dir.path().join("missing.json")));
+        studio.resolve_replacement(true);
+        assert_eq!(studio.project, dirty);
+        assert!(studio.history.can_undo());
+        assert!(studio.has_unsaved_changes());
+        studio.open_path_browser(BrowserTarget::OpenProject);
+        studio.finish_path_browser(BrowserAction::Use(path.clone()));
+        studio.resolve_replacement(true);
+        assert_eq!(studio.project, other);
+        assert_eq!(studio.saved_path.as_deref(), path.to_str());
+        assert!(!studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
     }
 
     #[test]

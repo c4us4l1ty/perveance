@@ -314,7 +314,10 @@ def read_region(project, x, y, width, height, layer=None):
         layer = integer(layer, 0, len(project["layers"]) - 1)
         pixels = project["layers"][layer]["pixels"]
     stride = project["width"]
-    rows = [pixels[(y + row) * stride + x:(y + row) * stride + x + width] for row in range(height)]
+    # Return detached pixel values, including for raw layer reads. A consumer
+    # must not be able to mutate its source project through an inspection result.
+    rows = [[pixel.copy() for pixel in pixels[(y + row) * stride + x:(y + row) * stride + x + width]]
+            for row in range(height)]
     return {"ok": True, "revision": project_revision(project), "x": x, "y": y, "width": width, "height": height,
             "source": "composite" if layer is None else "layer", "layer": layer, "pixels": rows}
 

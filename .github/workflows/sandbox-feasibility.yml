@@ -1,9 +1,14 @@
 name: Fixed sandbox feasibility matrix
 on:
   push:
-    branches: ["main", "arena/**"]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
+# Avoid running both push and PR jobs for each feature-branch update. PR runs
+# superseded by a newer commit can be cancelled without cancel API access.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:

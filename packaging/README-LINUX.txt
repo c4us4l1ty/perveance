@@ -18,6 +18,8 @@ To launch from a terminal in a writable directory on an X11 desktop:
 To open an existing UTF-8 project path directly:
   /path/to/perveance-linux-x86_64/bin/perveance /path/to/project.json
 
+Use Open or Ctrl+O to choose and open a project; unsaved artwork requires
+confirmation before replacement. Escape cancels the chooser or confirmation.
 Use Browse beside a file or directory field to select a path. Use path only
 fills the field; opening, saving, importing and exporting need separate actions.
 This is an in-app browser, not a native OS dialog or security boundary. Large
@@ -58,5 +60,8 @@ SHA256SUMS accompanies the archive, not this extracted directory. Verify it
 before extraction using sha256sum -c SHA256SUMS in the downloaded artifact
 directory. A checksum detects corruption, not the identity of the publisher;
 this artifact is not signed. Download only from a GitHub Actions run you trust.
-The complete third-party license inventory and redistribution review remain
-outstanding; this artifact is provided for evaluation, not as a formal release.
+CI artifacts include a separate LICENSE-INVENTORY.json and checksum based on
+Cargo metadata, outside this archive. It is an unverified review aid, not a
+complete inventory of linked code, system libraries or assets, nor a license
+or redistribution review. Local packaging does not generate the sidecar.
+This artifact is provided for evaluation, not as a formal release.

@@ -1,9 +1,14 @@
 name: Rust CI
 on:
   push:
-    branches: ["main", "arena/**"]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
+# Avoid running both push and PR jobs for each feature-branch update. PR runs
+# superseded by a newer commit can be cancelled without cancel API access.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
@@ -128,6 +133,14 @@ jobs:
             echo "::error::Native GUI project round trip failed; see the step output"
             exit 1
           fi
+      - name: Exercise native project opening and unsaved-work protection
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_open_project_smoke.sh "$RUNNER_TEMP/gui-open" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/target/debug/perveance-cli" "$GITHUB_WORKSPACE/tools/send_x11_close.py" > "$RUNNER_TEMP/gui-open-test.log" 2>&1; then
+            cat "$RUNNER_TEMP/gui-open-test.log" "$RUNNER_TEMP/gui-open/gui.log" 2>/dev/null || true
+            tail -n 10 "$RUNNER_TEMP/gui-open-test.log" | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/gui-open-test.log"
       - name: Exercise agent-to-GUI-to-agent handoff
         run: |
           if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_agent_handoff.sh "$RUNNER_TEMP/agent-handoff" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/target/debug/perveance-cli" "$GITHUB_WORKSPACE/tools/arena_art.py" "$GITHUB_WORKSPACE/examples/rocket-operations.json" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
@@ -181,7 +194,9 @@ jobs:
         run: |
           cargo build --locked --release --bins
           tools/package_linux.sh target/release "$RUNNER_TEMP/perveance-distribution"
-          (cd "$RUNNER_TEMP/perveance-distribution" && sha256sum -c SHA256SUMS)
+          cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu > "$RUNNER_TEMP/perveance-cargo-metadata.json"
+          python3 tools/license_inventory.py "$RUNNER_TEMP/perveance-cargo-metadata.json" > "$RUNNER_TEMP/perveance-distribution/LICENSE-INVENTORY.json"
+          (cd "$RUNNER_TEMP/perveance-distribution" && sha256sum LICENSE-INVENTORY.json >> SHA256SUMS && sha256sum -c SHA256SUMS)
       - name: Upload experimental Linux evaluation bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -198,6 +213,7 @@ jobs:
       - name: Verify and exercise the downloaded bundle
         run: |
           (cd "$RUNNER_TEMP/perveance-downloaded" && sha256sum -c SHA256SUMS)
+          python3 -c 'import json,os; p=os.path.join(os.environ["RUNNER_TEMP"],"perveance-downloaded","LICENSE-INVENTORY.json"); i=json.load(open(p)); assert i["format_version"] == 1 and i["dependency_count"] == len(i["dependencies"]) > 0; print("License inventory:", i["dependency_count"], "resolved dependencies,", i["without_license_expression"], "without license expressions; review required")'
           work="$RUNNER_TEMP/perveance-bundle-test"
           mkdir "$work"
           tar -xzf "$RUNNER_TEMP/perveance-downloaded/perveance-linux-x86_64.tar.gz" -C "$work"
