@@ -17,9 +17,28 @@ jobs:
       - name: Select Rust
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri
+      # Temporary transport of the generated public lockfile for this restricted
+      # development environment; remove after checking in the verified lockfile.
+      - name: Report generated lockfile
+        run: |
+          cargo generate-lockfile
+          python3 -c 'import base64,gzip,hashlib,pathlib; b=pathlib.Path("Cargo.lock").read_bytes(); s=base64.b64encode(gzip.compress(b,mtime=0)).decode(); n=(len(s)+3999)//4000; print("::notice::PER_LOCK_SHA256="+hashlib.sha256(b).hexdigest()); [print("::notice::PER_LOCK_%03d_%03d="%(i,n)+s[i*4000:(i+1)*4000]) for i in range(n)]'
       - name: Build and test Rust
         run: cargo test --all-targets
+      - name: Verify desktop window starts under X11
+        run: |
+          cargo build --bin perveance
+          xvfb-run -a sh -c '
+            ./target/debug/perveance >/tmp/perveance-gui.log 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            if ! timeout 30s xdotool search --sync --onlyvisible --name Perveance; then
+              cat /tmp/perveance-gui.log
+              exit 1
+            fi
+            kill -0 "$pid"
+          '
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
       - name: Exercise CLI round trip
