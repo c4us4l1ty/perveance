@@ -1,6 +1,6 @@
 # Perveance
 
-An early Rust prototype for an AI-first art studio. The long-term vision and security model are documented in [Plan/README.md](Plan/README.md).
+An early Rust prototype for an AI-first art studio. The long-term vision and security model are documented in [Plan/README.md](Plan/README.md); the current usable-editor milestone is in [Plan/PIXEL_MVP.md](Plan/PIXEL_MVP.md).
 
 ## Current prototype
 
@@ -14,6 +14,20 @@ This is **not** the finished product: autonomous development, sandbox enforcemen
 ## Development and verification
 
 Use a current stable Rust toolchain and the Linux X11 development dependencies, including the `libxkbcommon-x11` runtime library. `cargo test --locked --all-targets` runs the Rust tests. GitHub Actions compiles and runs these tests and a CLI round trip. The Python diagnostic `python3 tools/phase0_probe.py` reports a few local development prerequisites; it is **not** a sandbox certification. Run its tests with `python3 -m unittest discover -s tests -v`. A separate fixed-test diagnostic, `python3 tools/isolation_probe.py`, checks a few bubblewrap behaviors on Linux and exits nonzero if unavailable or failed. It never runs model code or enables autonomy, and passing is **not** sandbox certification.
+
+### Experimental Linux evaluation bundle
+
+Successful **Rust CI** runs upload an unsigned `perveance-linux-x86_64` Actions artifact containing a compressed archive, checksum, desktop and CLI executables, instructions and example operations. This is an evaluation build, not a formal release. From a successful trusted run, download the artifact from its GitHub Actions page (GitHub sign-in may be required), or with GitHub CLI:
+
+```sh
+gh run download RUN_ID --name perveance-linux-x86_64 --dir perveance-download
+cd perveance-download
+sha256sum -c SHA256SUMS
+tar -xzf perveance-linux-x86_64.tar.gz
+./perveance-linux-x86_64/bin/perveance
+```
+
+Run the GUI from a writable working directory on an x86-64 Linux desktop with compatible glibc and X11/GL runtime libraries. The bundle records its build revision and glibc version in `BUILD-INFO.txt`; it is not a self-contained package and compatibility with other hosts is not established. CI downloads the uploaded artifact, checks the checksum, exercises its CLI save/reopen/export flow and launches its GUI in virtual X11. This is not a real-desktop compatibility test. Artifacts expire after 14 days, require a trusted successful workflow, and are not signed: the checksum detects corruption, not authenticity. The complete third-party license inventory and redistribution review are outstanding. Windows, macOS, ARM and native Wayland are not supported by this bundle. No autonomous execution is enabled.
 
 ### Arena agent: offline data-only bridge
 
