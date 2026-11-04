@@ -178,6 +178,12 @@ The command makes a **paid network request** to the same fixed OpenRouter endpoi
 
 Only local mock HTTP and simulated CLI pipeline tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
 
+### Experimental project staging diagnostic
+
+On Linux, `perveance-cli verify-project-staging project.json TRUSTED_PARENT` stages a validated project in a private temporary directory, verifies that the only staged entry is a regular project file with matching content and revision, then removes the temporary directory. `TRUSTED_PARENT` must be an existing directory controlled by the user and not writable by untrusted processes. The source project path must also be trusted; normal project loading follows symlinks. The staged file includes **all** project data, including hidden pixels and layer names. The command does not copy neighboring files, directories, sockets or symlinks and does not start a worker.
+
+This is a diagnostic and preliminary data-only staging primitive—not a sandbox, an atomic filesystem snapshot, or a defense against a malicious same-user process or a tampered parent directory. Normal cleanup is checked, but a crash or forced termination can leave temporary files. It does not validate future arbitrary workspace copying, attachments, quotas, isolation, credentials or output activation, and it cannot enable autonomous execution. Use only trusted local paths.
+
 ### Isolation feasibility diagnostic
 
 The optional bubblewrap diagnostic creates its own temporary sentinel, workspace, local TCP listener and Unix socket, and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink and `/proc` root links), host IPv4 loopback access, access to a deliberately exposed host Unix socket in the workspace, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled. The planted socket intentionally represents an unsafe workspace input: if the worker can connect to it, the diagnostic fails even if network namespaces otherwise work.

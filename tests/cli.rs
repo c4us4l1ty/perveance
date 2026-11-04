@@ -608,3 +608,39 @@ fn color_replacement_proposal_is_discoverable_atomic_and_preserves_source() {
     let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
     assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "replace_color"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn staging_diagnostic_copies_only_project_and_cleans_up() {
+    let dir = TempDir::new();
+    let parent = dir.0.join("stage-parent");
+    fs::create_dir(&parent).unwrap();
+    let input = dir.0.join("project.json");
+    let mut p = perveance::Project::new(2, 2).unwrap();
+    p.set_pixel(0, 1, 1, [7,8,9,10]).unwrap();
+    p.save_new(&input).unwrap();
+    let sentinel = parent.join("host-secret");
+    fs::write(&sentinel, b"not project data").unwrap();
+    let result = cli(&["verify-project-staging", input.to_str().unwrap(), parent.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["revision"], p.revision().unwrap());
+    assert_eq!(value["staged_files"], 1);
+    assert_eq!(value["persistent"], false);
+    assert_eq!(value["autonomous_execution"], false);
+    assert_eq!(value["security_boundary"], false);
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+    assert_eq!(fs::read(&sentinel).unwrap(), b"not project data");
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["project_staging"]["security_boundary"], false);
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "verify-project-staging"));
+    fs::write(&input, b"not json").unwrap();
+    let failed = cli(&["verify-project-staging", input.to_str().unwrap(), parent.to_str().unwrap()]);
+    assert!(!failed.status.success());
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+    fs::remove_file(&input).unwrap();
+    p.save_new(&input).unwrap();
+    let missing = cli(&["verify-project-staging", input.to_str().unwrap(), parent.join("missing").to_str().unwrap()]);
+    assert!(!missing.status.success());
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+}

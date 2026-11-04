@@ -143,6 +143,10 @@ jobs:
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
           cargo run --locked --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
           cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
+          stage_parent=$(mktemp -d)
+          trap 'rmdir "$stage_parent"' EXIT
+          cargo run --locked --quiet --bin perveance-cli -- verify-project-staging /tmp/perveance-painted.json "$stage_parent"
+          test -z "$(ls -A "$stage_parent")"
           cargo run --locked --quiet --bin perveance-cli -- sample /tmp/perveance-painted.json 2 3 composite
           cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png
           cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-potion-base.json
