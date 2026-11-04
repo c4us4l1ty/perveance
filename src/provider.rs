@@ -180,6 +180,12 @@ mod tests {
     }
 
     #[test]
+    fn provider_cannot_translate_existing_or_new_layers() {
+        assert!(validate_generated(&[Operation::TranslateLayer { layer: 0, dx: 1, dy: 0, clip: true }], 1).is_err());
+        assert!(validate_generated(&[Operation::AddLayer, Operation::TranslateLayer { layer: 1, dx: 1, dy: 0, clip: false }], 1).is_err());
+    }
+
+    #[test]
     fn fake_provider_round_trip_uses_restricted_data_and_typed_edits() {
         let content = r#"{"operations":[{"op":"add_layer"},{"op":"pixel","layer":1,"x":1,"y":1,"color":[1,2,3,255]}]}"#;
         let (url, server) = serve_once("200 OK", response(content, "stop"), "");

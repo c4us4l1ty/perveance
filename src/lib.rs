@@ -189,6 +189,7 @@ pub enum Operation {
     DuplicateLayer { layer: usize },
     ClearLayer { layer: usize },
     FlipLayer { layer: usize, axis: FlipAxis },
+    TranslateLayer { layer: usize, dx: i32, dy: i32, clip: bool },
     SetVisibility { layer: usize, visible: bool },
     RenameLayer { layer: usize, name: String },
     MoveLayer { from: usize, to: usize },
@@ -323,6 +324,34 @@ impl Project {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Translate raw layer pixels in canvas coordinates. Vacated pixels become
+    /// transparent black; out-of-bounds nonzero RGBA is rejected unless clipping
+    /// was explicitly authorized. This applies to hidden and transparent pixels too.
+    pub fn translate_layer(&mut self, layer: usize, dx: i32, dy: i32, clip: bool) -> Result<(), String> {
+        self.validate()?;
+        if !(-256..=256).contains(&dx) || !(-256..=256).contains(&dy) {
+            return Err("translation offsets must be between -256 and 256".into());
+        }
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        if dx == 0 && dy == 0 { return Ok(()); }
+        let width = self.width as i32;
+        let height = self.height as i32;
+        let mut result = vec![[0; 4]; target.pixels.len()];
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = target.pixels[(y * width + x) as usize];
+                let (to_x, to_y) = (x + dx, y + dy);
+                if (0..width).contains(&to_x) && (0..height).contains(&to_y) {
+                    result[(to_y * width + to_x) as usize] = pixel;
+                } else if !clip && pixel != [0; 4] {
+                    return Err("translation would clip nonzero pixel data; enable clipping to proceed".into());
+                }
+            }
+        }
+        target.pixels = result;
         Ok(())
     }
 
@@ -488,6 +517,7 @@ impl Project {
                 Operation::DuplicateLayer { layer } => candidate.duplicate_layer(*layer).map(|_| ()),
                 Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
                 Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
+                Operation::TranslateLayer { layer, dx, dy, clip } => candidate.translate_layer(*layer, *dx, *dy, *clip),
                 Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
                     Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),

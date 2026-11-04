@@ -82,6 +82,7 @@ struct Studio {
     palette: [[u8; 4]; 16],
     palette_slot: usize,
     palette_path: String,
+    allow_translation_clip: bool,
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
@@ -110,7 +111,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
+            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -168,6 +169,29 @@ impl Studio {
         if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.flip_layer(layer, axis)) {
             self.status = error;
         }
+    }
+    fn nudge_selected(&mut self, dx: i32, dy: i32) {
+        let layer = self.layer;
+        let clip = self.allow_translation_clip;
+        match self.history.apply_with_selection(&mut self.project, layer, |p| p.translate_layer(layer, dx, dy, clip)) {
+            Ok(true) => self.status = "Layer moved (undoable); enabled clipping discards pixels outside the canvas.".into(),
+            Ok(false) => self.status = "Layer move made no changes.".into(),
+            Err(error) => self.status = error,
+        }
+    }
+    fn nudge_ui(&mut self, ui: &mut egui::Ui) -> Vec<Rect> {
+        ui.label("Nudge selected layer by 1 pixel");
+        ui.small("Off-canvas pixel data is lost if clipping is enabled.");
+        ui.checkbox(&mut self.allow_translation_clip, "Allow clipping");
+        let mut rects = Vec::new();
+        ui.horizontal(|ui| {
+            for (label, dx, dy) in [("←", -1, 0), ("↑", 0, -1), ("↓", 0, 1), ("→", 1, 0)] {
+                let response = ui.button(label).on_hover_text("Move the selected layer by one pixel");
+                rects.push(response.rect);
+                if response.clicked() { self.nudge_selected(dx, dy); }
+            }
+        });
+        rects
     }
     fn clear_selected(&mut self) {
         let layer = self.layer;
@@ -563,6 +587,8 @@ impl eframe::App for Studio {
                 if ui.button("Flip V").on_hover_text("Mirror selected layer vertically across the canvas").clicked() { self.flip_selected(FlipAxis::Vertical); }
             });
             if ui.button("Clear layer").on_hover_text("Clear selected layer pixels (undoable)").clicked() { self.clear_selected(); }
+            ui.separator();
+            self.nudge_ui(ui);
           });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
@@ -914,6 +940,42 @@ mod tests {
         studio.palette[3] = [0; 4];
         click(&ctx, &mut studio, load.center());
         assert_eq!(studio.palette[3], [3, 5, 9, 18]);
+    }
+
+    #[test]
+    fn layer_nudge_controls_reject_clipping_and_undo_after_opt_in() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Vec<Rect> {
+            let mut controls = Vec::new();
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.nudge_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.set_pixel(0, 0, 0, [1, 2, 3, 0]).unwrap();
+        let original = studio.project.clone();
+        let ctx = egui::Context::default();
+        let rects = frame(&ctx, &mut studio, vec![]);
+        assert_eq!(rects.len(), 4);
+        click(&ctx, &mut studio, rects[0].center());
+        assert_eq!(studio.project, original);
+        assert!(studio.status.contains("clip"));
+        assert!(!studio.history.can_undo());
+        click(&ctx, &mut studio, rects[3].center());
+        assert_eq!(studio.project.sample_layer(0, 1, 0).unwrap(), [1, 2, 3, 0]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        studio.allow_translation_clip = true;
+        click(&ctx, &mut studio, rects[0].center());
+        assert_eq!(studio.project.sample_layer(0, 0, 0).unwrap(), [0; 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
     }
 
     #[test]

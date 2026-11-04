@@ -17,7 +17,7 @@ Use a current stable Rust toolchain and the Linux X11 development dependencies, 
 
 ### Headless batch editing
 
-The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `flip_layer`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
+The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `flip_layer`, `translate_layer`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
 
 ```json
 [
@@ -28,6 +28,18 @@ The prototype CLI can apply a JSON array of up to 1,024 typed operations in one 
 ```
 
 Layer duplicates are inserted immediately above their source and retain its visibility and exact pixel bytes. `flip_layer` mirrors a full layer across the canvas (`"axis":"horizontal"` or `"axis":"vertical"`); `clear_layer` resets all its pixels to transparent black. These edits are undoable in the GUI. Layer indices can change after a duplicate or reorder, so later batch operations use the resulting ordering.
+
+### Moving a raster layer
+
+Use the four **Nudge selected layer** buttons in the Layers panel to move its pixels one canvas pixel at a time. This is undoable and works on hidden layers as well. By default a move is rejected if it would discard any nonzero RGBA data, including RGB bytes of transparent pixels. To permit loss at the canvas edge, enable **Allow clipping** first. Vacated pixels are transparent black; pixels do not wrap. The clipping checkbox is session-only.
+
+For headless batches or revision-checked proposals, use an explicit signed offset and clipping choice:
+
+```json
+{"op":"translate_layer","layer":0,"dx":1,"dy":-2,"clip":false}
+```
+
+Offsets range from -256 to 256 per axis. `clip` is required: `false` rejects data loss atomically; `true` discards out-of-bounds pixels and can clear an entire layer. Back up artwork and review untrusted proposals. This translates raster pixels, not a non-destructive object transform. The experimental OpenRouter adapter does not permit this operation.
 
 All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves and PNG exports stage and sync a temporary file before a no-clobber installation. Guarantees depend on the filesystem and platform; directory durability across power loss is not guaranteed, and a crash can leave a temporary file.
 

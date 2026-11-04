@@ -388,3 +388,40 @@ fn inspect_palette_reports_colors_and_rejects_invalid_files() {
     let error: serde_json::Value = serde_json::from_slice(&failed.stderr).unwrap();
     assert_eq!(error["ok"], false);
 }
+
+#[test]
+fn translation_is_discoverable_and_proposals_require_explicit_clipping() {
+    let dir = TempDir::new();
+    let input = dir.0.join("input.json");
+    let moved = dir.0.join("moved.json");
+    let rejected = dir.0.join("rejected.json");
+    let proposal = dir.0.join("proposal.json");
+    let mut project = perveance::Project::new(3, 2).unwrap();
+    project.set_pixel(0, 0, 0, [1, 2, 3, 0]).unwrap();
+    project.set_pixel(0, 1, 0, [4, 5, 6, 255]).unwrap();
+    project.save_new(&input).unwrap();
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "translate_layer"));
+    let revision = project.revision().unwrap();
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version": 1, "base_revision": revision,
+        "operations": [{"op":"translate_layer", "layer":0, "dx":1, "dy":1, "clip":false}]})).unwrap()).unwrap();
+    let args = ["apply-proposal", input.to_str().unwrap(), moved.to_str().unwrap(), proposal.to_str().unwrap()];
+    let result = cli(&args);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let result = perveance::Project::load(&moved).unwrap();
+    assert_eq!(result.sample_layer(0, 1, 1).unwrap(), [1, 2, 3, 0]);
+    assert_eq!(result.sample_layer(0, 2, 1).unwrap(), [4, 5, 6, 255]);
+    assert_eq!(perveance::Project::load(&input).unwrap(), project);
+    let revision = result.revision().unwrap();
+    for operation in [
+        serde_json::json!({"op":"translate_layer", "layer":0, "dx":1, "dy":0, "clip":false}),
+        serde_json::json!({"op":"translate_layer", "layer":0, "dx":1, "dy":0}),
+        serde_json::json!({"op":"translate_layer", "layer":0, "dx":1, "dy":0, "clip":true, "extra": 1}),
+    ] {
+        fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version": 1, "base_revision": revision, "operations": [operation]})).unwrap()).unwrap();
+        let attempt = cli(&["apply-proposal", moved.to_str().unwrap(), rejected.to_str().unwrap(), proposal.to_str().unwrap()]);
+        assert!(!attempt.status.success());
+        assert!(!rejected.exists());
+    }
+    assert_eq!(perveance::Project::load(moved.as_path()).unwrap(), result);
+}
