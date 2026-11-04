@@ -16,6 +16,7 @@ import zlib
 
 MAX_DIMENSION = 128
 MAX_LAYERS = 16
+MAX_EXPORT_SCALE = 8
 MAX_OPERATIONS = 1024
 MAX_BATCH_BYTES = 256 * 1024
 MAX_PROJECT_BYTES = 8 * 1024 * 1024
@@ -198,13 +199,19 @@ def rgba_composite(project):
     return out
 
 
-def png_bytes(project):
+def png_bytes(project, scale=1):
+    integer(scale, 1, MAX_EXPORT_SCALE)
     pixels = rgba_composite(project)
     w, h = project["width"], project["height"]
-    raw = b"".join(b"\0" + pixels[y * w * 4:(y + 1) * w * 4] for y in range(h))
+    rows = []
+    for y in range(h):
+        start = y * w * 4
+        row = b"".join(bytes(pixels[start + x * 4:start + x * 4 + 4]) * scale for x in range(w))
+        rows.extend([b"\0" + row] * scale)
+    raw = b"".join(rows)
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w * scale, h * scale, 8, 6, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
@@ -244,9 +251,9 @@ def save_project(output, project):
 def main(args):
     if args == ["capabilities"]:
         return {"ok": True, "bridge": "experimental-python-data-only", "project_version": 1,
-                "max_dimension": MAX_DIMENSION, "max_layers": MAX_LAYERS,
+                "max_dimension": MAX_DIMENSION, "max_layers": MAX_LAYERS, "max_export_scale": MAX_EXPORT_SCALE,
                 "operations": ["add_layer", "rename_layer", "set_visibility", "pixel", "line", "rectangle", "fill"],
-                "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "export-png"],
+                "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "export-png", "export-png-scaled"],
                 "autonomous_execution": False, "rust_cli_parity": False}
     if len(args) == 5 and args[0] == "create":
         _, w, h, ops_path, output = args
@@ -298,7 +305,14 @@ def main(args):
         result = png_bytes(project)
         write_new(output, result)
         return {"ok": True, "output": output, "width": project["width"], "height": project["height"]}
-    raise ValueError("usage: arena_art.py capabilities | create WIDTH HEIGHT OPERATIONS_JSON OUTPUT | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | export-png INPUT OUTPUT")
+    if len(args) == 4 and args[0] == "export-png-scaled":
+        _, input_path, output, factor = args
+        scale = integer(int(factor), 1, MAX_EXPORT_SCALE)
+        project = load_json(input_path, MAX_PROJECT_BYTES)
+        result = png_bytes(project, scale)
+        write_new(output, result)
+        return {"ok": True, "output": output, "width": project["width"] * scale, "height": project["height"] * scale, "scale": scale}
+    raise ValueError("usage: arena_art.py capabilities | create WIDTH HEIGHT OPERATIONS_JSON OUTPUT | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE")
 
 
 if __name__ == "__main__":

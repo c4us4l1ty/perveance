@@ -1,0 +1,281 @@
+[
+  {
+    "op": "rename_layer",
+    "layer": 0,
+    "name": "Night sky"
+  },
+  {
+    "op": "rectangle",
+    "layer": 0,
+    "x": 0,
+    "y": 0,
+    "width": 32,
+    "height": 32,
+    "color": [
+      14,
+      22,
+      45,
+      255
+    ]
+  },
+  {
+    "op": "add_layer"
+  },
+  {
+    "op": "rename_layer",
+    "layer": 1,
+    "name": "Stars"
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 3,
+    "y": 5,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 9,
+    "y": 3,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 25,
+    "y": 5,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 28,
+    "y": 13,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 4,
+    "y": 20,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 9,
+    "y": 26,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 27,
+    "y": 25,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 19,
+    "y": 3,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 3,
+    "y": 29,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "pixel",
+    "layer": 1,
+    "x": 23,
+    "y": 29,
+    "color": [
+      221,
+      237,
+      246,
+      255
+    ]
+  },
+  {
+    "op": "add_layer"
+  },
+  {
+    "op": "rename_layer",
+    "layer": 2,
+    "name": "Ship"
+  },
+  {
+    "op": "rectangle",
+    "layer": 2,
+    "x": 13,
+    "y": 7,
+    "width": 6,
+    "height": 16,
+    "color": [
+      217,
+      229,
+      236,
+      255
+    ]
+  },
+  {
+    "op": "rectangle",
+    "layer": 2,
+    "x": 14,
+    "y": 5,
+    "width": 4,
+    "height": 3,
+    "color": [
+      217,
+      229,
+      236,
+      255
+    ]
+  },
+  {
+    "op": "rectangle",
+    "layer": 2,
+    "x": 11,
+    "y": 17,
+    "width": 2,
+    "height": 7,
+    "color": [
+      87,
+      144,
+      173,
+      255
+    ]
+  },
+  {
+    "op": "rectangle",
+    "layer": 2,
+    "x": 19,
+    "y": 17,
+    "width": 2,
+    "height": 7,
+    "color": [
+      87,
+      144,
+      173,
+      255
+    ]
+  },
+  {
+    "op": "rectangle",
+    "layer": 2,
+    "x": 14,
+    "y": 11,
+    "width": 4,
+    "height": 4,
+    "color": [
+      64,
+      172,
+      205,
+      255
+    ]
+  },
+  {
+    "op": "line",
+    "layer": 2,
+    "from": [
+      13,
+      22
+    ],
+    "to": [
+      18,
+      22
+    ],
+    "color": [
+      92,
+      126,
+      145,
+      255
+    ]
+  },
+  {
+    "op": "add_layer"
+  },
+  {
+    "op": "rename_layer",
+    "layer": 3,
+    "name": "Engine glow"
+  },
+  {
+    "op": "rectangle",
+    "layer": 3,
+    "x": 14,
+    "y": 23,
+    "width": 4,
+    "height": 3,
+    "color": [
+      246,
+      169,
+      85,
+      255
+    ]
+  },
+  {
+    "op": "rectangle",
+    "layer": 3,
+    "x": 15,
+    "y": 26,
+    "width": 2,
+    "height": 3,
+    "color": [
+      251,
+      220,
+      137,
+      255
+    ]
+  }
+]
