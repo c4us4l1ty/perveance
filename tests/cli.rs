@@ -196,3 +196,37 @@ fn sample_reports_raw_layer_or_visible_composite_without_mutation() {
     }
     assert_eq!(fs::read(&edited).unwrap(), before);
 }
+
+#[test]
+fn batch_layer_transforms_reopen_and_fail_atomically() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("transformed.json");
+    let rejected = dir.0.join("rejected.json");
+    let operations = dir.0.join("operations.json");
+    assert!(cli(&["new", "4", "3", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"pixel","layer":0,"x":0,"y":0,"color":[5,6,7,255]},
+        {"op":"duplicate_layer","layer":0},
+        {"op":"flip_layer","layer":1,"axis":"horizontal"},
+        {"op":"flip_layer","layer":1,"axis":"vertical"},
+        {"op":"clear_layer","layer":0}
+    ]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), output.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let project = perveance::Project::load(&output).unwrap();
+    assert_eq!(project.layers.len(), 2);
+    assert_eq!(project.layers[1].name, "Layer 1 copy");
+    assert_eq!(project.layers[0].pixels[0], [0; 4]);
+    assert_eq!(project.layers[1].pixels[11], [5, 6, 7, 255]);
+    fs::write(&operations, r#"[{"op":"duplicate_layer","layer":0},{"op":"clear_layer","layer":9}]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), rejected.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(!result.status.success());
+    assert!(!rejected.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap().layers.len(), 1);
+    let capabilities: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    for operation in ["duplicate_layer", "clear_layer", "flip_layer"] {
+        assert!(capabilities["batch_operations"].as_array().unwrap().iter().any(|value| value == operation));
+        assert_eq!(capabilities["batch_examples"][operation]["op"], operation);
+    }
+}

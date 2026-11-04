@@ -132,11 +132,19 @@ impl History {
     }
 }
 
+/// Axis of reflection across the full layer's canvas bounds.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FlipAxis { Horizontal, Vertical }
+
 /// A bounded, typed operation accepted by the headless interface.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     AddLayer,
+    DuplicateLayer { layer: usize },
+    ClearLayer { layer: usize },
+    FlipLayer { layer: usize, axis: FlipAxis },
     SetVisibility { layer: usize, visible: bool },
     RenameLayer { layer: usize, name: String },
     MoveLayer { from: usize, to: usize },
@@ -205,6 +213,51 @@ impl Project {
             name: format!("Layer {}", self.layers.len() + 1), visible: true,
             pixels: vec![[0; 4]; (self.width * self.height) as usize],
         });
+        Ok(())
+    }
+
+    /// Insert an exact pixel/visibility copy immediately above the source layer.
+    /// The copy's name is suffixed without breaking the 256-byte UTF-8 limit.
+    pub fn duplicate_layer(&mut self, layer: usize) -> Result<usize, String> {
+        self.validate()?;
+        let source = self.layers.get(layer).ok_or("layer does not exist")?;
+        if self.layers.len() >= 32 { return Err("layer limit reached".into()); }
+        let mut copy = source.clone();
+        const SUFFIX: &str = " copy";
+        if copy.name.len() + SUFFIX.len() > 256 {
+            let mut end = 256 - SUFFIX.len();
+            while !copy.name.is_char_boundary(end) { end -= 1; }
+            copy.name.truncate(end);
+        }
+        copy.name.push_str(SUFFIX);
+        self.layers.insert(layer + 1, copy);
+        Ok(layer + 1)
+    }
+
+    /// Clear all pixels of a layer, including RGB of transparent pixels.
+    pub fn clear_layer(&mut self, layer: usize) -> Result<(), String> {
+        self.validate()?;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        target.pixels.fill([0; 4]);
+        Ok(())
+    }
+
+    /// Reflect an entire layer in its canvas bounds; preserve exact RGBA bytes.
+    pub fn flip_layer(&mut self, layer: usize, axis: FlipAxis) -> Result<(), String> {
+        self.validate()?;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        let width = self.width as usize;
+        let height = self.height as usize;
+        match axis {
+            FlipAxis::Horizontal => {
+                for row in target.pixels.chunks_exact_mut(width) { row.reverse(); }
+            }
+            FlipAxis::Vertical => {
+                for y in 0..height / 2 {
+                    for x in 0..width { target.pixels.swap(y * width + x, (height - 1 - y) * width + x); }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -367,6 +420,9 @@ impl Project {
         for (index, operation) in operations.iter().enumerate() {
             let result = match operation {
                 Operation::AddLayer => candidate.add_layer(),
+                Operation::DuplicateLayer { layer } => candidate.duplicate_layer(*layer).map(|_| ()),
+                Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
+                Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
                 Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
                     Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),
@@ -707,6 +763,55 @@ mod tests {
         assert!(p.sample_composite(2, 0).is_err());
         assert!(p.sample_layer(2, 0, 0).is_err());
     }
+    #[test]
+    fn duplicate_flip_and_clear_preserve_layer_data_and_validate() {
+        let mut p = Project::new(3, 2).unwrap();
+        p.layers[0].name = "é".repeat(128);
+        p.layers[0].visible = false;
+        for (i, pixel) in p.layers[0].pixels.iter_mut().enumerate() { *pixel = [i as u8, 9, 8, 0]; }
+        let original = p.layers[0].clone();
+        p.add_layer().unwrap();
+        assert_eq!(p.duplicate_layer(0).unwrap(), 1);
+        assert_eq!(p.layers[1].pixels, original.pixels);
+        assert!(!p.layers[1].visible);
+        assert!(p.layers[1].name.ends_with(" copy"));
+        assert!(p.layers[1].name.len() <= 256);
+        p.flip_layer(1, FlipAxis::Horizontal).unwrap();
+        assert_eq!(p.layers[1].pixels.iter().map(|p| p[0]).collect::<Vec<_>>(), [2, 1, 0, 5, 4, 3]);
+        p.flip_layer(1, FlipAxis::Vertical).unwrap();
+        assert_eq!(p.layers[1].pixels.iter().map(|p| p[0]).collect::<Vec<_>>(), [5, 4, 3, 2, 1, 0]);
+        p.flip_layer(1, FlipAxis::Vertical).unwrap();
+        p.flip_layer(1, FlipAxis::Horizontal).unwrap();
+        assert_eq!(p.layers[1].pixels, original.pixels);
+        p.clear_layer(1).unwrap();
+        assert!(p.layers[1].pixels.iter().all(|pixel| *pixel == [0; 4]));
+        assert_eq!(p.layers[0], original);
+        let before = p.clone();
+        assert!(p.duplicate_layer(99).is_err());
+        assert!(p.flip_layer(99, FlipAxis::Horizontal).is_err());
+        assert!(p.clear_layer(99).is_err());
+        assert_eq!(p, before);
+        while p.layers.len() < 32 { p.add_layer().unwrap(); }
+        let full = p.clone();
+        assert!(p.duplicate_layer(0).is_err());
+        assert_eq!(p, full);
+    }
+
+    #[test]
+    fn layer_transforms_are_atomic_in_batches_and_noops_preserve_redo() {
+        let mut p = Project::new(2, 2).unwrap();
+        let mut history = History::default();
+        history.apply(&mut p, |p| p.set_pixel(0, 0, 0, [1, 2, 3, 4])).unwrap();
+        assert!(history.undo(&mut p));
+        assert!(!history.apply(&mut p, |p| p.clear_layer(0)).unwrap());
+        assert!(history.can_redo());
+        let before = p.clone();
+        let ops = [Operation::DuplicateLayer { layer: 0 }, Operation::FlipLayer { layer: 99, axis: FlipAxis::Vertical }];
+        assert!(p.apply_operations(&ops).is_err());
+        assert_eq!(p, before);
+        assert!(serde_json::from_str::<Operation>(r#"{"op":"flip_layer","layer":0,"axis":"diagonal"}"#).is_err());
+    }
+
     #[test]
     fn project_round_trip_and_png_are_valid() {
         let mut p = Project::new(2, 2).unwrap();

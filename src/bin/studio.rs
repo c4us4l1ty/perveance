@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{History, Project};
+use perveance::{FlipAxis, History, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -117,6 +117,26 @@ impl Studio {
             _ => Err("not a shape tool".into()),
         });
         if let Err(error) = result { self.status = error; }
+    }
+    fn duplicate_selected(&mut self) {
+        let layer = self.layer;
+        match self.history.apply_with_selection(&mut self.project, layer, |p| p.duplicate_layer(layer).map(|_| ())) {
+            Ok(true) => { self.layer = layer + 1; self.rename_buffer = self.project.layers[self.layer].name.clone(); }
+            Ok(false) => {}
+            Err(error) => self.status = error,
+        }
+    }
+    fn flip_selected(&mut self, axis: FlipAxis) {
+        let layer = self.layer;
+        if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.flip_layer(layer, axis)) {
+            self.status = error;
+        }
+    }
+    fn clear_selected(&mut self) {
+        let layer = self.layer;
+        if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.clear_layer(layer)) {
+            self.status = error;
+        }
     }
     fn pick_color(&mut self, point: [u32; 2]) {
         match self.project.sample_composite(point[0], point[1]) {
@@ -308,6 +328,13 @@ impl eframe::App for Studio {
                     }
                 }
             });
+            ui.separator();
+            if ui.add_enabled(self.project.layers.len() < 32, egui::Button::new("Duplicate layer")).on_hover_text("Insert a copy above the selected layer").clicked() { self.duplicate_selected(); }
+            ui.horizontal(|ui| {
+                if ui.button("Flip H").on_hover_text("Mirror selected layer horizontally across the canvas").clicked() { self.flip_selected(FlipAxis::Horizontal); }
+                if ui.button("Flip V").on_hover_text("Mirror selected layer vertically across the canvas").clicked() { self.flip_selected(FlipAxis::Vertical); }
+            });
+            if ui.button("Clear layer").on_hover_text("Clear selected layer pixels (undoable)").clicked() { self.clear_selected(); }
           });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
@@ -484,6 +511,29 @@ mod tests {
         studio.redo_edit();
         assert_eq!(studio.project.layers[0].pixels[(3 * 32 + 2) as usize], studio.color);
     }
+    #[test]
+    fn layer_controls_restore_selection_and_pixels_on_undo() {
+        let mut studio = Studio::default();
+        studio.project.set_pixel(0, 0, 0, [1, 2, 3, 4]).unwrap();
+        studio.duplicate_selected();
+        assert_eq!(studio.layer, 1);
+        assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 4]);
+        studio.flip_selected(FlipAxis::Horizontal);
+        assert_eq!(studio.project.layers[1].pixels[31], [1, 2, 3, 4]);
+        studio.clear_selected();
+        assert_eq!(studio.project.layers[1].pixels[31], [0; 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[1].pixels[31], [1, 2, 3, 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 4]);
+        studio.undo_edit();
+        assert_eq!(studio.layer, 0);
+        assert_eq!(studio.project.layers.len(), 1);
+        studio.redo_edit();
+        assert_eq!(studio.layer, 1);
+        assert_eq!(studio.rename_buffer, "Layer 1 copy");
+    }
+
     #[test]
     fn line_gesture_and_composite_eyedropper() {
         let mut studio = Studio::default();
