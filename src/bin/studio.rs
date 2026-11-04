@@ -5,6 +5,37 @@ use std::path::Path;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool { Pencil, Eraser, Fill }
 
+fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str) {
+    ui.horizontal(|ui| {
+        let (icon, response) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
+        if response.on_hover_text(label).clicked() { *current = target; }
+        let tint = if *current == target { Color32::from_rgb(166, 215, 74) } else { Color32::from_gray(175) };
+        let stroke = egui::Stroke::new(1.5, tint);
+        let p = |x: f32, y: f32| Pos2::new(icon.min.x + x, icon.min.y + y);
+        match target {
+            Tool::Pencil => {
+                ui.painter().line_segment([p(3.0, 15.0), p(14.0, 4.0)], stroke);
+                ui.painter().line_segment([p(5.0, 16.0), p(16.0, 5.0)], stroke);
+                ui.painter().line_segment([p(3.0, 15.0), p(5.0, 16.0)], stroke);
+            }
+            Tool::Eraser => {
+                ui.painter().line_segment([p(3.0, 11.0), p(9.0, 4.0)], stroke);
+                ui.painter().line_segment([p(9.0, 4.0), p(15.0, 9.0)], stroke);
+                ui.painter().line_segment([p(15.0, 9.0), p(9.0, 15.0)], stroke);
+                ui.painter().line_segment([p(9.0, 15.0), p(3.0, 11.0)], stroke);
+            }
+            Tool::Fill => {
+                ui.painter().line_segment([p(3.0, 8.0), p(8.0, 3.0)], stroke);
+                ui.painter().line_segment([p(8.0, 3.0), p(14.0, 9.0)], stroke);
+                ui.painter().line_segment([p(14.0, 9.0), p(9.0, 14.0)], stroke);
+                ui.painter().line_segment([p(9.0, 14.0), p(3.0, 8.0)], stroke);
+                ui.painter().circle_filled(p(15.0, 14.0), 1.5, tint);
+            }
+        }
+        if ui.selectable_label(*current == target, label).clicked() { *current = target; }
+    });
+}
+
 struct Studio {
     project: Project,
     layer: usize,
@@ -61,9 +92,9 @@ impl eframe::App for Studio {
         egui::SidePanel::left("tools").default_width(190.0).show(ctx, |ui| {
             ui.heading("Tools");
             ui.add_space(8.0);
-            ui.selectable_value(&mut self.tool, Tool::Pencil, "✎  Pencil");
-            ui.selectable_value(&mut self.tool, Tool::Eraser, "◌  Eraser");
-            ui.selectable_value(&mut self.tool, Tool::Fill, "▣  Fill");
+            tool_button(ui, &mut self.tool, Tool::Pencil, "Pencil");
+            tool_button(ui, &mut self.tool, Tool::Eraser, "Eraser");
+            tool_button(ui, &mut self.tool, Tool::Fill, "Fill");
             ui.separator();
             ui.label("Color");
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
@@ -129,11 +160,11 @@ impl eframe::App for Studio {
                 }
             }
             ui.horizontal(|ui| {
-                if ui.add_enabled(self.layer + 1 < self.project.layers.len(), egui::Button::new("↑")).on_hover_text("Move layer up").clicked() {
+                if ui.add_enabled(self.layer + 1 < self.project.layers.len(), egui::Button::new("Up")).on_hover_text("Move layer up").clicked() {
                     self.checkpoint();
                     if self.project.move_layer(self.layer, self.layer + 1).is_ok() { self.layer += 1; }
                 }
-                if ui.add_enabled(self.layer > 0, egui::Button::new("↓")).on_hover_text("Move layer down").clicked() {
+                if ui.add_enabled(self.layer > 0, egui::Button::new("Down")).on_hover_text("Move layer down").clicked() {
                     self.checkpoint();
                     if self.project.move_layer(self.layer, self.layer - 1).is_ok() { self.layer -= 1; }
                 }
@@ -149,6 +180,7 @@ impl eframe::App for Studio {
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+              ui.vertical_centered(|ui| {
                 ui.add_space(12.0);
                 ui.label("CANVAS");
                 ui.add_space(8.0);
@@ -213,6 +245,7 @@ impl eframe::App for Studio {
                     }
                 }
                 if response.drag_stopped() || response.clicked() { self.stroke_last = None; }
+              });
             });
         });
     }
@@ -226,7 +259,14 @@ fn main() -> eframe::Result<()> {
     eframe::run_native("Perveance", options, Box::new(|cc| {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
+        style.visuals.panel_fill = Color32::from_rgb(21, 21, 21);
+        style.visuals.window_fill = Color32::from_rgb(29, 29, 29);
         style.visuals.selection.bg_fill = Color32::from_rgb(91, 125, 46);
+        style.spacing.item_spacing = Vec2::new(8.0, 7.0);
+        style.spacing.button_padding = Vec2::new(8.0, 4.0);
+        if let Some(font) = style.text_styles.get_mut(&egui::TextStyle::Body) { font.size = 14.0; }
+        if let Some(font) = style.text_styles.get_mut(&egui::TextStyle::Button) { font.size = 14.0; }
+        if let Some(font) = style.text_styles.get_mut(&egui::TextStyle::Heading) { font.size = 19.0; }
         cc.egui_ctx.set_style(style);
         Ok(Box::new(Studio::default()))
     }))
