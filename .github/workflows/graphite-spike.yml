@@ -21,4 +21,14 @@ jobs:
         run: |
           rustup default stable
           rustc --version
-          cargo check --locked -p graphene-cli --no-default-features
+          if cargo check --locked -p graphene-cli --no-default-features > /tmp/graphite-check.log 2>&1; then
+            tail -n 20 /tmp/graphite-check.log
+          else
+            echo "::error::Graphite check failed with $(rustc --version)"
+            tail -n 30 /tmp/graphite-check.log | while IFS= read -r line; do
+              line=${line//%/%25}
+              line=${line//$'\r'/%0D}
+              echo "::error::$line"
+            done
+            exit 1
+          fi
