@@ -1,0 +1,287 @@
+//! Small, deliberately limited pixel-art prototype shared by the GUI and CLI.
+//! It does not execute AI-generated code or implement a sandbox.
+
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File};
+use std::io::{BufReader, BufWriter, Read, Write};
+use std::path::Path;
+
+pub const FORMAT_VERSION: u32 = 1;
+pub const MAX_DIMENSION: u32 = 256;
+const MAX_PROJECT_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Layer {
+    pub name: String,
+    pub visible: bool,
+    /// Straight-alpha RGBA pixels, in row-major order.
+    pub pixels: Vec<[u8; 4]>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Project {
+    pub version: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Bottom to top.
+    pub layers: Vec<Layer>,
+}
+
+/// A bounded, typed operation accepted by the headless interface.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Operation {
+    AddLayer,
+    SetVisibility { layer: usize, visible: bool },
+    Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
+    Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
+    Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
+}
+
+pub const MAX_OPERATIONS: usize = 1024;
+
+impl Project {
+    pub fn new(width: u32, height: u32) -> Result<Self, String> {
+        if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+            return Err(format!("dimensions must be between 1 and {MAX_DIMENSION}"));
+        }
+        Ok(Self {
+            version: FORMAT_VERSION,
+            width,
+            height,
+            layers: vec![Layer { name: "Layer 1".into(), visible: true, pixels: vec![[0; 4]; (width * height) as usize] }],
+        })
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.version != FORMAT_VERSION { return Err("unsupported project version".into()); }
+        if self.width == 0 || self.height == 0 || self.width > MAX_DIMENSION || self.height > MAX_DIMENSION {
+            return Err("invalid canvas dimensions".into());
+        }
+        if self.layers.is_empty() || self.layers.len() > 32 { return Err("project must contain 1 to 32 layers".into()); }
+        let len = (self.width * self.height) as usize;
+        if self.layers.iter().any(|layer| layer.pixels.len() != len || layer.name.len() > 256) {
+            return Err("invalid layer data".into());
+        }
+        Ok(())
+    }
+
+    pub fn add_layer(&mut self) -> Result<(), String> {
+        self.validate()?;
+        if self.layers.len() >= 32 { return Err("layer limit reached".into()); }
+        self.layers.push(Layer {
+            name: format!("Layer {}", self.layers.len() + 1), visible: true,
+            pixels: vec![[0; 4]; (self.width * self.height) as usize],
+        });
+        Ok(())
+    }
+
+    pub fn set_pixel(&mut self, layer: usize, x: u32, y: u32, color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        if x >= self.width || y >= self.height { return Err("pixel is outside canvas".into()); }
+        let index = (y * self.width + x) as usize;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        target.pixels[index] = color;
+        Ok(())
+    }
+
+    /// Draw an inclusive, one-pixel-wide Bresenham line on a single layer.
+    pub fn draw_line(&mut self, layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        if layer >= self.layers.len() || from[0] >= self.width || from[1] >= self.height || to[0] >= self.width || to[1] >= self.height {
+            return Err("line endpoint or layer is outside the project".into());
+        }
+        let (mut x, mut y) = (from[0] as i32, from[1] as i32);
+        let (end_x, end_y) = (to[0] as i32, to[1] as i32);
+        let dx = (end_x - x).abs();
+        let dy = -(end_y - y).abs();
+        let sx = if x < end_x { 1 } else { -1 };
+        let sy = if y < end_y { 1 } else { -1 };
+        let mut error = dx + dy;
+        loop {
+            self.layers[layer].pixels[(y as u32 * self.width + x as u32) as usize] = color;
+            if x == end_x && y == end_y { break; }
+            let twice = 2 * error;
+            if twice >= dy { error += dy; x += sx; }
+            if twice <= dx { error += dx; y += sy; }
+        }
+        Ok(())
+    }
+
+    /// Fill a four-connected region of identical RGBA pixels in the selected layer.
+    pub fn fill(&mut self, layer: usize, x: u32, y: u32, color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        if layer >= self.layers.len() || x >= self.width || y >= self.height {
+            return Err("fill point or layer is outside the project".into());
+        }
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let pixels = &mut self.layers[layer].pixels;
+        let index = y as usize * width + x as usize;
+        let original = pixels[index];
+        if original == color { return Ok(()); }
+        pixels[index] = color;
+        let mut pending = vec![index];
+        while let Some(i) = pending.pop() {
+            let px = i % width;
+            let py = i / width;
+            let mut enqueue = |next: usize| {
+                if pixels[next] == original { pixels[next] = color; pending.push(next); }
+            };
+            if px > 0 { enqueue(i - 1); }
+            if px + 1 < width { enqueue(i + 1); }
+            if py > 0 { enqueue(i - width); }
+            if py + 1 < height { enqueue(i + width); }
+        }
+        Ok(())
+    }
+
+    /// All-or-nothing in memory: a failing operation leaves the original unchanged.
+    pub fn apply_operations(&mut self, operations: &[Operation]) -> Result<(), String> {
+        self.validate()?;
+        if operations.len() > MAX_OPERATIONS { return Err("too many operations".into()); }
+        let mut candidate = self.clone();
+        for (index, operation) in operations.iter().enumerate() {
+            let result = match *operation {
+                Operation::AddLayer => candidate.add_layer(),
+                Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(layer) {
+                    Some(item) => { item.visible = visible; Ok(()) },
+                    None => Err("layer does not exist".into()),
+                },
+                Operation::Pixel { layer, x, y, color } => candidate.set_pixel(layer, x, y, color),
+                Operation::Line { layer, from, to, color } => candidate.draw_line(layer, from, to, color),
+                Operation::Fill { layer, x, y, color } => candidate.fill(layer, x, y, color),
+            };
+            result.map_err(|error| format!("operation {index}: {error}"))?;
+        }
+        *self = candidate;
+        Ok(())
+    }
+
+    pub fn rgba(&self) -> Result<Vec<u8>, String> {
+        self.validate()?;
+        let mut output = vec![0; (self.width * self.height * 4) as usize];
+        for layer in self.layers.iter().filter(|layer| layer.visible) {
+            for (pixel, dest) in layer.pixels.iter().zip(output.chunks_exact_mut(4)) {
+                blend(dest, *pixel);
+            }
+        }
+        Ok(output)
+    }
+
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("open project: {e}"))?;
+        let mut bytes = Vec::new();
+        BufReader::new(file).take(MAX_PROJECT_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("read project: {e}"))?;
+        if bytes.len() as u64 > MAX_PROJECT_BYTES { return Err("project exceeds size limit".into()); }
+        let project: Project = serde_json::from_slice(&bytes).map_err(|e| format!("parse project: {e}"))?;
+        project.validate()?;
+        Ok(project)
+    }
+
+    /// Create a new file only. This prototype never silently overwrites artwork.
+    pub fn save_new(&self, path: &Path) -> Result<(), String> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(|e| format!("serialize project: {e}"))?;
+        if bytes.len() as u64 > MAX_PROJECT_BYTES { return Err("project exceeds size limit".into()); }
+        write_new(path, &bytes)
+    }
+
+    pub fn export_png_new(&self, path: &Path) -> Result<(), String> {
+        let pixels = self.rgba()?;
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, self.width, self.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().map_err(|e| format!("PNG header: {e}"))?;
+            writer.write_image_data(&pixels).map_err(|e| format!("PNG pixels: {e}"))?;
+            writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
+        }
+        write_new(path, &bytes)
+    }
+}
+
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let file = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| format!("create output: {e}"))?;
+    let result = (|| { let mut output = BufWriter::new(file); output.write_all(bytes)?; output.flush() })();
+    if let Err(error) = result {
+        // Leave an incomplete file for the user to inspect or remove. Removing by path
+        // here could delete a different file if another process replaced the entry.
+        return Err(format!("write output: {error}; incomplete output may remain"));
+    }
+    Ok(())
+}
+
+fn blend(dest: &mut [u8], src: [u8; 4]) {
+    let sa = src[3] as u32;
+    let da = dest[3] as u32;
+    let alpha_numerator = sa * 255 + da * (255 - sa);
+    if alpha_numerator == 0 { dest.copy_from_slice(&[0; 4]); return; }
+    for channel in 0..3 {
+        let numerator = src[channel] as u32 * sa * 255 + dest[channel] as u32 * da * (255 - sa);
+        dest[channel] = ((numerator + alpha_numerator / 2) / alpha_numerator) as u8;
+    }
+    dest[3] = ((alpha_numerator + 127) / 255) as u8;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn limits_and_invalid_data_are_rejected() {
+        assert!(Project::new(0, 5).is_err());
+        assert!(Project::new(257, 5).is_err());
+        let mut p = Project::new(2, 2).unwrap();
+        p.layers[0].pixels.pop();
+        assert!(p.validate().is_err());
+    }
+    #[test]
+    fn layers_composite_and_visibility_is_respected() {
+        let mut p = Project::new(1, 1).unwrap();
+        p.set_pixel(0, 0, 0, [255, 0, 0, 255]).unwrap();
+        p.add_layer().unwrap();
+        p.set_pixel(1, 0, 0, [0, 0, 255, 128]).unwrap();
+        assert_eq!(p.rgba().unwrap(), vec![127, 0, 128, 255]);
+        p.layers[1].visible = false;
+        assert_eq!(p.rgba().unwrap(), vec![255, 0, 0, 255]);
+    }
+    #[test]
+    fn lines_fill_and_batches_are_correct_and_atomic() {
+        let mut p = Project::new(5, 5).unwrap();
+        let red = [255, 0, 0, 255];
+        let blue = [0, 0, 255, 255];
+        p.draw_line(0, [2, 0], [2, 4], red).unwrap();
+        p.fill(0, 0, 0, blue).unwrap();
+        assert_eq!(p.layers[0].pixels[0], blue);
+        assert_eq!(p.layers[0].pixels[4], [0; 4]);
+        assert_eq!(p.layers[0].pixels[22], red);
+        let old = p.clone();
+        let ops = [Operation::AddLayer, Operation::Pixel { layer: 99, x: 0, y: 0, color: red }];
+        assert!(p.apply_operations(&ops).is_err());
+        assert_eq!(p, old);
+        assert!(p.draw_line(0, [0, 0], [5, 0], red).is_err());
+        assert_eq!(p, old);
+    }
+    #[test]
+    fn project_round_trip_and_png_are_valid() {
+        let mut p = Project::new(2, 2).unwrap();
+        p.set_pixel(0, 1, 1, [1, 2, 3, 128]).unwrap();
+        let json = serde_json::to_vec(&p).unwrap();
+        assert_eq!(serde_json::from_slice::<Project>(&json).unwrap(), p);
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, p.width, p.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&p.rgba().unwrap()).unwrap();
+        }
+        let decoder = png::Decoder::new(bytes.as_slice());
+        let mut reader = decoder.read_info().unwrap();
+        let mut decoded = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut decoded).unwrap();
+        assert_eq!((info.width, info.height), (2, 2));
+        assert_eq!(&decoded[..info.buffer_size()], p.rgba().unwrap());
+    }
+}

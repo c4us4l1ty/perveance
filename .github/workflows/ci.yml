@@ -1,0 +1,31 @@
+name: Rust CI
+on:
+  push:
+    branches: ["main", "arena/015bd4ba-perveance"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Select Rust
+        run: rustup default stable
+      - name: Install Linux GUI build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Build and test Rust
+        run: cargo test --all-targets
+      - name: Test environment probe
+        run: python3 -m unittest discover -s tests -v
+      - name: Exercise CLI round trip
+        run: |
+          cargo run --quiet --bin perveance-cli -- capabilities
+          cargo run --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
+          cargo run --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
+          cargo run --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
+          cargo run --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png

@@ -1,0 +1,34 @@
+name: Graphite feasibility spike
+on:
+  push:
+    branches: ["arena/015bd4ba-perveance"]
+    paths: [".github/workflows/graphite-spike.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-graphene-cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the reviewed upstream revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: GraphiteEditor/Graphite
+          ref: 708cca339de55b6bbb3f6257769c45dffa492c3e
+          persist-credentials: false
+      - name: Check the upstream headless CLI
+        run: |
+          rustup default stable
+          rustc --version
+          if cargo check --locked -p graphene-cli > /tmp/graphite-check.log 2>&1; then
+            tail -n 20 /tmp/graphite-check.log
+          else
+            echo "::error::Graphite check failed with $(rustc --version)"
+            tail -n 30 /tmp/graphite-check.log | while IFS= read -r line; do
+              line=${line//%/%25}
+              line=${line//$'\r'/%0D}
+              echo "::error::$line"
+            done
+            exit 1
+          fi
