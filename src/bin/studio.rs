@@ -1,6 +1,8 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
 use perveance::{EditProposal, FlipAxis, History, Operation, Palette, Project};
 use std::path::Path;
+use std::time::Instant;
+use perveance::recovery::{RecoverySession, RECOVERY_LIMIT};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper }
@@ -84,6 +86,9 @@ struct Studio {
     saved_project: Option<Project>,
     // Path actually opened/saved, independent of edits to the file path field.
     saved_path: Option<String>,
+    recovery_dir: String,
+    recovery: Option<RecoverySession>,
+    recovery_status: String,
     confirm_close: bool,
     allow_close: bool,
     layer: usize,
@@ -127,7 +132,7 @@ struct Studio {
 impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
-        Self { saved_project: Some(project.clone()), saved_path: None, project, confirm_close: false, allow_close: false, layer: 0,
+        Self { saved_project: Some(project.clone()), saved_path: None, recovery_dir: ".".into(), recovery: None, recovery_status: "Recovery checkpoints are off.".into(), project, confirm_close: false, allow_close: false, layer: 0,
             color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
@@ -160,6 +165,7 @@ impl Studio {
                 if let Some(path) = &source_path { self.path = path.clone(); }
                 self.saved_path = source_path;
                 self.project = project;
+                if let Some(recovery) = self.recovery.as_mut() { recovery.forget_last_snapshot(); }
                 self.layer = 0;
                 self.history.clear();
                 self.shape_start = None;
@@ -276,6 +282,54 @@ impl Studio {
         } else if ctx.input_mut(|input| input.consume_shortcut(&save)) {
             self.save_current_with_status();
         }
+    }
+    fn enable_recovery(&mut self, now: Instant) -> Result<(), String> {
+        let session = RecoverySession::new(Path::new(&self.recovery_dir), now)?;
+        self.recovery = Some(session);
+        self.recovery_status = format!("Recovery enabled in {}; files are retained until you remove them.", self.recovery_dir);
+        Ok(())
+    }
+    fn recovery_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label("Recovery directory (trusted, existing)");
+        ui.add_enabled(self.recovery.is_none(), egui::TextEdit::singleline(&mut self.recovery_dir));
+        let mut enabled = self.recovery.is_some();
+        if ui.checkbox(&mut enabled, "Enable recovery checkpoints").changed() {
+            if enabled {
+                if let Err(error) = self.enable_recovery(Instant::now()) { self.recovery_status = error; }
+            } else {
+                self.recovery = None;
+                self.recovery_status = "Recovery off; existing checkpoint files remain.".into();
+            }
+        }
+        ui.small("Opt-in: every 15 seconds when changed, up to 8 files per session. Includes hidden layers. No automatic deletion.");
+        ui.small(&self.recovery_status);
+    }
+    fn tick_recovery(&mut self, ctx: &egui::Context, now: Instant) {
+        if self.recovery.is_none() { return; }
+        let dirty = self.has_unsaved_changes();
+        let eligible = !self.confirm_close && !self.allow_close && self.pending_replacement.is_none()
+            && self.shape_start.is_none() && self.stroke_last.is_none() && !ctx.input(|input| input.pointer.any_down());
+        let session = self.recovery.as_mut().expect("checked above");
+        let result = session.checkpoint_if_due(&self.project, dirty, eligible, now);
+        match result {
+            Ok(Some(path)) => {
+                self.recovery_status = format!("Checkpoint saved: {}", path.display());
+                if session.is_full() {
+                    self.recovery_status = format!("Checkpoint saved: {}. Limit of {RECOVERY_LIMIT} reached; recovery stopped.", path.display());
+                    self.status = self.recovery_status.clone();
+                    self.recovery = None;
+                    return;
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.recovery_status = format!("{error} Recovery stopped; your project is still unsaved.");
+                self.status = self.recovery_status.clone();
+                self.recovery = None;
+                return;
+            }
+        }
+        if let Some(session) = &self.recovery { ctx.request_repaint_after(session.delay(now)); }
     }
     fn project_save_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
         let save = ui.button("Save as new file");
@@ -739,6 +793,7 @@ impl eframe::App for Studio {
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
             self.project_save_ui(ui);
+            egui::CollapsingHeader::new("Recovery checkpoints").show(ui, |ui| { self.recovery_ui(ui); });
             self.export_png_ui(ui);
             if ui.button("Open project").clicked() {
                 self.request_replacement(CanvasReplacement::Project(self.path.clone()));
@@ -984,6 +1039,7 @@ impl eframe::App for Studio {
                 self.confirm_close = false;
             }
         }
+        self.tick_recovery(ctx, Instant::now());
     }
 }
 
@@ -996,22 +1052,49 @@ fn studio_for_path(path: Option<String>) -> Result<Studio, String> {
     Ok(studio)
 }
 
+#[derive(Default)]
+struct StartupArgs { project: Option<String>, recovery_dir: Option<String>, help: bool }
+
+fn parse_startup_args(args: impl Iterator<Item = std::ffi::OsString>) -> Result<StartupArgs, String> {
+    let mut parsed = StartupArgs::default();
+    let mut args = args.peekable();
+    let mut positional_only = false;
+    while let Some(arg) = args.next() {
+        let arg = arg.into_string().map_err(|_| "Arguments must be valid UTF-8.")?;
+        if !positional_only && arg == "--" { positional_only = true; continue; }
+        if !positional_only && (arg == "--help" || arg == "-h") { parsed.help = true; continue; }
+        if !positional_only && arg == "--recovery-dir" {
+            if parsed.recovery_dir.is_some() { return Err("Recovery directory specified twice.".into()); }
+            let dir = args.next().ok_or("--recovery-dir requires a directory")?.into_string().map_err(|_| "Arguments must be valid UTF-8.")?;
+            if dir.is_empty() { return Err("Recovery directory must not be empty.".into()); }
+            parsed.recovery_dir = Some(dir);
+        } else if !positional_only && arg.starts_with('-') {
+            return Err(format!("Unknown option: {arg}"));
+        } else if parsed.project.replace(arg).is_some() {
+            return Err("Only one project may be opened.".into());
+        }
+    }
+    if parsed.help && (parsed.project.is_some() || parsed.recovery_dir.is_some()) { return Err("--help cannot be combined with other arguments.".into()); }
+    Ok(parsed)
+}
+
 fn main() -> eframe::Result<()> {
-    let mut args = std::env::args_os().skip(1);
-    let path = args.next();
-    if args.next().is_some() { eprintln!("Usage: perveance [PROJECT.json]"); std::process::exit(2); }
-    if path.as_ref().and_then(|arg| arg.to_str()).map_or(false, |arg| arg == "--help" || arg == "-h") {
-        println!("Usage: perveance [PROJECT.json]\nOpen an editable project or start a blank canvas.");
+    let args = match parse_startup_args(std::env::args_os().skip(1)) {
+        Ok(args) => args,
+        Err(error) => { eprintln!("{error}\nUsage: perveance [--recovery-dir DIR] [PROJECT.json]"); std::process::exit(2); }
+    };
+    if args.help {
+        println!("Usage: perveance [--recovery-dir DIR] [PROJECT.json]\nOpen an editable project or start a blank canvas. Recovery is opt-in.");
         return Ok(());
     }
-    let path = match path.map(|arg| arg.into_string()).transpose() {
-        Ok(path) => path,
-        Err(_) => { eprintln!("Project path must be valid UTF-8."); std::process::exit(2); }
-    };
-    let studio = match studio_for_path(path) {
+    let mut studio = match studio_for_path(args.project) {
         Ok(studio) => studio,
         Err(error) => { eprintln!("Could not open project: {error}"); std::process::exit(2); }
     };
+    if let Some(directory) = args.recovery_dir {
+        studio.recovery_dir = directory;
+        if let Err(error) = studio.enable_recovery(Instant::now()) { eprintln!("{error}"); std::process::exit(2); }
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_min_inner_size([900.0, 600.0]),
         ..Default::default()
@@ -1111,6 +1194,68 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn recovery_is_opt_in_defers_gestures_and_does_not_mark_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut studio = Studio::default();
+        assert!(studio.recovery.is_none());
+        studio.recovery_dir = dir.path().to_str().unwrap().into();
+        let now = Instant::now();
+        studio.enable_recovery(now).unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        studio.stroke_last = Some([0, 0]);
+        let ctx = egui::Context::default();
+        studio.tick_recovery(&ctx, now + perveance::recovery::RECOVERY_INTERVAL);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        studio.stroke_last = None;
+        studio.tick_recovery(&ctx, now + perveance::recovery::RECOVERY_INTERVAL + std::time::Duration::from_secs(1));
+        let path = std::fs::read_dir(dir.path()).unwrap().next().unwrap().unwrap().path();
+        assert_eq!(Project::load(&path).unwrap(), studio.project);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.saved_path.is_none());
+        assert!(studio.history.can_undo());
+        studio.tick_recovery(&ctx, now + perveance::recovery::RECOVERY_INTERVAL * 3);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        studio.recovery = None; // Disabling never removes previous files.
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn recovery_write_failure_disables_session_and_preserves_unsaved_art() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("recover");
+        std::fs::create_dir(&folder).unwrap();
+        let mut studio = Studio::default();
+        studio.recovery_dir = folder.to_str().unwrap().into();
+        let now = Instant::now();
+        studio.enable_recovery(now).unwrap();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        let before = studio.project.clone();
+        std::fs::remove_dir(&folder).unwrap();
+        studio.tick_recovery(&egui::Context::default(), now + perveance::recovery::RECOVERY_INTERVAL);
+        assert!(studio.recovery.is_none());
+        assert!(studio.status.contains("Recovery stopped"));
+        assert_eq!(studio.project, before);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.history.can_undo());
+    }
+
+    #[test]
+    fn startup_recovery_options_are_explicit_and_validated() {
+        let parse = |args: &[&str]| parse_startup_args(args.iter().map(|s| std::ffi::OsString::from(*s)));
+        let a = parse(&["--recovery-dir", "safe", "project.json"]).unwrap();
+        assert_eq!(a.recovery_dir.as_deref(), Some("safe"));
+        assert_eq!(a.project.as_deref(), Some("project.json"));
+        assert!(parse(&[]).unwrap().recovery_dir.is_none());
+        assert_eq!(parse(&["--", "-file.json"]).unwrap().project.as_deref(), Some("-file.json"));
+        assert!(parse(&["--recovery-dir"]).is_err());
+        assert!(parse(&["--recovery-dir", "a", "--recovery-dir", "b"]).is_err());
+        assert!(parse(&["one", "two"]).is_err());
+        assert!(parse(&["--unknown"]).is_err());
     }
 
     #[test]
