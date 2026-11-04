@@ -86,6 +86,7 @@ struct Studio {
     allow_close: bool,
     layer: usize,
     color: [u8; 4],
+    replace_from: [u8; 4],
     palette: [[u8; 4]; 16],
     palette_slot: usize,
     palette_path: String,
@@ -125,7 +126,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
+            color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -327,6 +328,39 @@ impl Studio {
             }
         });
         rects
+    }
+    fn replace_selected_color(&mut self) {
+        let layer = self.layer;
+        let from = self.replace_from;
+        let to = self.color;
+        let mut count = 0usize;
+        match self.history.apply_with_selection(&mut self.project, layer, |p| {
+            count = p.replace_color(layer, from, to)?;
+            Ok(())
+        }) {
+            Ok(true) => self.status = format!("Replaced {count} pixels on selected layer (undoable)."),
+            Ok(false) => self.status = "No pixels changed on selected layer.".into(),
+            Err(error) => self.status = error,
+        }
+    }
+    fn replace_color_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.small("Replace every exact RGBA match on the selected layer, including transparent pixels. Undo is bounded.");
+        ui.label("Match RGBA");
+        for row in 0..2 {
+            ui.horizontal(|ui| {
+                for col in 0..2 {
+                    let i = row * 2 + col;
+                    let label = ["R ", "G ", "B ", "A "][i];
+                    ui.add(egui::DragValue::new(&mut self.replace_from[i]).range(0..=255).prefix(label));
+                }
+            });
+        }
+        let sample = ui.button("Use current color as match");
+        if sample.clicked() { self.replace_from = self.color; }
+        ui.small(format!("Replacement: current drawing color {:?}", self.color));
+        let replace = ui.button("Replace matches (undoable)");
+        if replace.clicked() { self.replace_selected_color(); }
+        (sample.rect, replace.rect)
     }
     fn clear_selected(&mut self) {
         let layer = self.layer;
@@ -721,6 +755,7 @@ impl eframe::App for Studio {
             if ui.button("Clear layer").on_hover_text("Clear selected layer pixels (undoable)").clicked() { self.clear_selected(); }
             ui.separator();
             self.nudge_ui(ui);
+            egui::CollapsingHeader::new("Replace layer color").show(ui, |ui| { self.replace_color_ui(ui); });
           });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
@@ -1342,6 +1377,53 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert!(studio.has_unsaved_changes());
         assert!(studio.status.contains("create output"));
+    }
+
+    #[test]
+    fn layer_recolor_controls_use_exact_values_and_preserve_redo_for_noops() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.replace_color_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.add_layer().unwrap();
+        studio.layer = 1;
+        studio.project.layers[1].visible = false;
+        studio.project.set_pixel(1, 0, 0, [9,8,7,0]).unwrap();
+        studio.project.set_pixel(1, 1, 0, [9,8,7,0]).unwrap();
+        let original = studio.project.clone();
+        studio.color = [9,8,7,0];
+        let ctx = egui::Context::default();
+        let (match_button, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, match_button.center());
+        assert_eq!(studio.replace_from, [9,8,7,0]);
+        studio.color = [30,60,90,128];
+        let (_, replace_button) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, replace_button.center());
+        assert_eq!(studio.project.sample_layer(1, 0, 0).unwrap(), [30,60,90,128]);
+        assert!(studio.status.contains("2 pixels"));
+        assert!(!studio.project.layers[1].visible);
+        let changed = studio.project.clone();
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        assert_eq!(studio.layer, 1);
+        assert!(studio.history.can_redo());
+        studio.color = studio.replace_from;
+        click(&ctx, &mut studio, replace_button.center());
+        assert!(studio.history.can_redo());
+        studio.redo_edit();
+        assert_eq!(studio.project, changed);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
     }
 
     #[test]

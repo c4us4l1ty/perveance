@@ -190,6 +190,7 @@ pub enum Operation {
     AddLayer,
     DuplicateLayer { layer: usize },
     ClearLayer { layer: usize },
+    ReplaceColor { layer: usize, from: [u8; 4], to: [u8; 4] },
     FlipLayer { layer: usize, axis: FlipAxis },
     TranslateLayer { layer: usize, dx: i32, dy: i32, clip: bool },
     ResizeCanvas { width: u32, height: u32, clip: bool },
@@ -349,6 +350,23 @@ impl Project {
         let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
         target.pixels.fill([0; 4]);
         Ok(())
+    }
+
+    /// Replace exact straight-alpha RGBA matches throughout one raw layer,
+    /// including hidden layers and RGB bytes in fully transparent pixels.
+    /// Returns the number of pixels actually changed (zero when colors match).
+    pub fn replace_color(&mut self, layer: usize, from: [u8; 4], to: [u8; 4]) -> Result<usize, String> {
+        self.validate()?;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        if from == to { return Ok(0); }
+        let mut count = 0;
+        for pixel in &mut target.pixels {
+            if *pixel == from {
+                *pixel = to;
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     /// Reflect an entire layer in its canvas bounds; preserve exact RGBA bytes.
@@ -577,6 +595,7 @@ impl Project {
                 Operation::AddLayer => candidate.add_layer(),
                 Operation::DuplicateLayer { layer } => candidate.duplicate_layer(*layer).map(|_| ()),
                 Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
+                Operation::ReplaceColor { layer, from, to } => candidate.replace_color(*layer, *from, *to).map(|_| ()),
                 Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
                 Operation::TranslateLayer { layer, dx, dy, clip } => candidate.translate_layer(*layer, *dx, *dy, *clip),
                 Operation::ResizeCanvas { width, height, clip } => candidate.resize_canvas(*width, *height, *clip),

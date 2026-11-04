@@ -574,3 +574,37 @@ fn brush_operations_are_discoverable_transactional_and_exportable() {
     assert_eq!(caps["limits"]["brush_size"], 16);
     assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "brush_line"));
 }
+
+#[test]
+fn color_replacement_proposal_is_discoverable_atomic_and_preserves_source() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("edited.json");
+    let bad = dir.0.join("bad.json");
+    let proposal = dir.0.join("proposal.json");
+    let mut p = perveance::Project::new(2, 2).unwrap();
+    p.set_pixel(0, 0, 0, [1,2,3,0]).unwrap();
+    p.set_pixel(0, 1, 0, [1,2,3,0]).unwrap();
+    p.save_new(&initial).unwrap();
+    let revision = p.revision().unwrap();
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[
+        {"op":"replace_color","layer":0,"from":[1,2,3,0],"to":[20,30,40,128]}]})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", initial.to_str().unwrap(), output.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let edited = perveance::Project::load(&output).unwrap();
+    assert_eq!(edited.sample_layer(0, 0, 0).unwrap(), [20,30,40,128]);
+    assert_eq!(edited.sample_layer(0, 1, 0).unwrap(), [20,30,40,128]);
+    assert_eq!(edited.sample_layer(0, 0, 1).unwrap(), [0;4]);
+    assert_eq!(perveance::Project::load(&initial).unwrap(), p);
+    for operation in [
+        serde_json::json!({"op":"replace_color","layer":99,"from":[0,0,0,0],"to":[1,2,3,4]}),
+        serde_json::json!({"op":"replace_color","layer":0,"from":[1,2,3,256],"to":[1,2,3,4]}),
+        serde_json::json!({"op":"replace_color","layer":0,"from":[0,0,0,0],"to":[1,2,3,4],"extra":true}),
+    ] {
+        fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[operation]})).unwrap()).unwrap();
+        assert!(!cli(&["apply-proposal", initial.to_str().unwrap(), bad.to_str().unwrap(), proposal.to_str().unwrap()]).status.success());
+        assert!(!bad.exists());
+    }
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "replace_color"));
+}

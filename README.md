@@ -17,7 +17,7 @@ Use a current stable Rust toolchain and the Linux X11 development dependencies, 
 
 ### Headless batch editing
 
-The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
+The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
 
 ```json
 [
@@ -34,6 +34,12 @@ Layer duplicates are inserted immediately above their source and retain its visi
 Select Pencil or Eraser and adjust **Brush size** from 1 to 16 pixels. Strokes stamp a solid square along an inclusive pixel line; stamps are clipped at the canvas edges. Even sizes are biased one pixel toward the top and left of the pointer. The pencil replaces raw RGBA rather than blending; the eraser writes transparent black. A continuous stroke is one undoable edit. Brush size is session-only and does not change the separate line or shape tools.
 
 Agents can use `{"op":"brush_line","layer":0,"from":[1,1],"to":[8,8],"size":3,"color":[255,0,0,255]}` in a batch or revision-bound proposal. Size 1 matches `line`. The experimental OpenRouter adapter does not accept `brush_line`.
+
+### Replace a layer color
+
+In the Layers panel, expand **Replace layer color**. Set the exact match RGBA bytes manually, or pick a color and click **Use current color as match**. Then choose the replacement as the current drawing color and click **Replace matches**. The operation affects every matching raw pixel on the selected layer, including hidden layers and fully transparent pixels. It is undoable; undo history is bounded, so keep backups.
+
+For agents, `{"op":"replace_color","layer":0,"from":[1,2,3,255],"to":[4,5,6,128]}` works in batches and revision-bound proposals. Matching is exact in all four straight-alpha bytes, not a tolerance or visible-composite match. It can turn transparent pixels opaque or vice versa. The experimental OpenRouter adapter does not accept this operation.
 
 ### Moving a raster layer
 

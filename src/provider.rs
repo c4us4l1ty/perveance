@@ -267,6 +267,12 @@ mod tests {
     }
 
     #[test]
+    fn provider_cannot_recolor_old_or_new_layers() {
+        assert!(validate_generated(&[Operation::ReplaceColor { layer: 0, from: [0;4], to: [1;4] }], 1).is_err());
+        assert!(validate_generated(&[Operation::AddLayer, Operation::ReplaceColor { layer: 1, from: [0;4], to: [1;4] }], 1).is_err());
+    }
+
+    #[test]
     fn provider_cannot_use_unlisted_brush_operations() {
         let brush = Operation::BrushLine { layer: 1, from: [0,0], to: [1,1], size: 3, color: [1;4] };
         assert!(validate_generated(&[Operation::AddLayer, brush], 1).is_err());
