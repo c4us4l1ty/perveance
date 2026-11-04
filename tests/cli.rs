@@ -644,3 +644,41 @@ fn staging_diagnostic_copies_only_project_and_cleans_up() {
     assert!(!missing.status.success());
     assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
 }
+
+#[test]
+fn autonomy_intake_is_strict_revision_bound_and_cannot_start_a_job() {
+    let dir = TempDir::new();
+    let project = dir.0.join("input.json");
+    let req = dir.0.join("request.json");
+    let policy = dir.0.join("policy.json");
+    let p = perveance::Project::new(1, 1).unwrap();
+    p.save_new(&project).unwrap();
+    let request = serde_json::json!({"version": 1, "base_revision": p.revision().unwrap(), "prompt": "private task text", "budgets": {
+        "wall_seconds": 10, "cpu_seconds": 10, "memory_mib": 32, "scratch_mib": 32,
+        "processes": 2, "model_calls": 1, "model_cost_microusd": 1000
+    }});
+    fs::write(&req, serde_json::to_vec(&request).unwrap()).unwrap();
+    fs::write(&policy, serde_json::to_vec(&perveance::supervisor::IntakePolicy::default()).unwrap()).unwrap();
+    let before = fs::read(&project).unwrap();
+    let result = cli(&["inspect-autonomy-request", project.to_str().unwrap(), req.to_str().unwrap(), policy.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["intake"]["status"], "blocked");
+    assert_eq!(report["intake"]["autonomous_execution"], false);
+    assert_eq!(report["intake"]["budgets_enforced"], false);
+    assert_eq!(report["intake"]["persistent_task_created"], false);
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("private task text"));
+    assert_eq!(fs::read(&project).unwrap(), before);
+    assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 3);
+    assert!(cli(&["inspect-autonomy-request", project.to_str().unwrap(), req.to_str().unwrap()]).status.success());
+    let mut stale = request.clone(); stale["base_revision"] = "stale".into();
+    fs::write(&req, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert!(!cli(&["inspect-autonomy-request", project.to_str().unwrap(), req.to_str().unwrap()]).status.success());
+    let mut attack = request; attack["enable_sandbox"] = true.into();
+    fs::write(&req, serde_json::to_vec(&attack).unwrap()).unwrap();
+    assert!(!cli(&["inspect-autonomy-request", project.to_str().unwrap(), req.to_str().unwrap()]).status.success());
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["autonomy_intake"]["budgets_enforced"], false);
+    assert_eq!(caps["autonomous_execution"], false);
+}

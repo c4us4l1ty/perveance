@@ -178,6 +178,29 @@ The command makes a **paid network request** to the same fixed OpenRouter endpoi
 
 Only local mock HTTP and simulated CLI pipeline tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
 
+### Experimental autonomy intake inspection
+
+`perveance-cli inspect-autonomy-request PROJECT REQUEST_JSON [TRUSTED_POLICY_JSON]` validates a proposed task against a loaded project revision and budget ceilings. It is a **data-only inspection**: a valid request returns exit code 0 and `ok: true`, but `intake.status` is always `blocked`. No task is saved, no agent or worker runs, no network request is made, and the declared budgets are **not enforced or tracked**. A valid inspection is not an authorization to run. Existing `prompt-openrouter` is separate and is not governed by this inspection or its budgets.
+
+Get `base_revision` from `perveance-cli inspect PROJECT`. Example request JSON:
+
+```json
+{
+  "version": 1,
+  "base_revision": "replace with revision from inspect",
+  "prompt": "Make a tiny spaceship",
+  "budgets": {
+    "wall_seconds": 120, "cpu_seconds": 120, "memory_mib": 256,
+    "scratch_mib": 128, "processes": 8, "model_calls": 4,
+    "model_cost_microusd": 500000
+  }
+}
+```
+
+The optional trusted policy JSON has `version: 1` and a `maximum` object with exactly the same seven budget fields. Omitting it uses the ceilings in `capabilities.autonomy_intake.default_maximum`. Time values are seconds, storage/memory values are MiB, and cost is millionths of a US dollar. Wall/CPU/memory/scratch/process requests must be positive; model calls and cost may be zero. A zero maximum prohibits any positive request for that resource. These ceilings are prototype intake configuration, not an OS resource policy or guaranteed spend cap. Unknown/missing/duplicate fields, unsupported versions, over-budget requests, empty or over-4,000-byte UTF-8 prompts and stale revisions are rejected. The whole request is limited to 32 KiB and policy to 4 KiB.
+
+The report omits the prompt, but the input file contains it; protect that file accordingly. Pass only trusted regular local files: path-based loading follows symlinks and special files can block. Revision checking compares a loaded snapshot; it is not a lock against later disk changes or unsaved GUI edits. It is not a durable job system, supervisor isolation, a credential broker or an activation mechanism.
+
 ### Experimental project staging diagnostic
 
 On Linux, `perveance-cli verify-project-staging project.json TRUSTED_PARENT` stages a validated project in a private temporary directory, verifies that the only staged entry is a regular project file with matching content and revision, then removes the temporary directory. `TRUSTED_PARENT` must be an existing directory controlled by the user and not writable by untrusted processes. The source project path must also be trusted; normal project loading follows symlinks. The staged file includes **all** project data, including hidden pixels and layer names. The command does not copy neighboring files, directories, sockets or symlinks and does not start a worker.

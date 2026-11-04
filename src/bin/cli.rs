@@ -86,11 +86,20 @@ fn prompt_openrouter(input: &str, output: &str, model: &str, prompt_path: &str, 
     prompt_to_project(Path::new(input), Path::new(output), model, &prompt, &key, include_composite, provider::propose_openrouter)
 }
 
+fn inspect_autonomy_request(input: &str, request: &str, policy: Option<&str>) -> Result<serde_json::Value, String> {
+    use perveance::supervisor::{inspect_request, IntakePolicy, TaskRequest};
+    let policy = match policy { Some(path) => IntakePolicy::load(Path::new(path))?, None => IntakePolicy::default() };
+    let request = TaskRequest::load(Path::new(request))?;
+    let project = Project::load(Path::new(input))?;
+    let report = inspect_request(&project, &request, &policy)?;
+    Ok(json!({"ok": true, "intake": report}))
+}
+
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "inspect-autonomy-request", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "png_export_scale": perveance::MAX_EXPORT_SCALE, "brush_size": perveance::MAX_BRUSH_SIZE, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
@@ -114,6 +123,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
             "experimental_prompt_openrouter": {"key_input": "stdin only; pipe or redirected input, not a terminal", "prompt_input": "UTF-8 file", "max_prompt_bytes": provider::MAX_PROMPT_BYTES, "visible_composite_opt_in": "--include-composite", "max_composite_pixels": provider::MAX_COMPOSITE_CONTEXT_PIXELS, "model_compatibility": "unverified", "network": "fixed OpenRouter HTTPS endpoint", "cost": "may incur charges; no spend cap", "execution": "data-only typed edits on new layers; no generated code"},
+            "autonomy_intake": {"operation": "inspect-autonomy-request", "version": perveance::supervisor::INTAKE_VERSION, "default_maximum": perveance::supervisor::IntakePolicy::default().maximum, "task_created": false, "budgets_enforced": false, "autonomous_execution": false},
             "project_staging": {"operation": "verify-project-staging", "platform": "linux", "contents": "one validated project snapshot", "persistent": false, "autonomous_execution": false, "security_boundary": false},
             "palette_format": {"version": perveance::PALETTE_VERSION, "slots": perveance::PALETTE_SLOTS, "max_bytes": perveance::MAX_PALETTE_BYTES, "color": "straight-alpha RGBA bytes"},
             "proposal_version": perveance::PROPOSAL_VERSION,
@@ -136,6 +146,12 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.import_png_layer(Path::new(png_path))?;
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "layer": project.layers.len() - 1}))
+        }
+        [command, input, request] if command == "inspect-autonomy-request" => {
+            inspect_autonomy_request(input, request, None)
+        }
+        [command, input, request, policy] if command == "inspect-autonomy-request" => {
+            inspect_autonomy_request(input, request, Some(policy))
         }
         [command, input, parent] if command == "verify-project-staging" => {
             let project = Project::load(Path::new(input))?;
@@ -221,7 +237,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 
