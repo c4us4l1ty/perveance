@@ -105,6 +105,7 @@ struct Studio {
     ai_prompt: String,
     ai_model: String,
     ai_key: String,
+    ai_include_composite: bool,
     ai_pending: Option<std::sync::mpsc::Receiver<Result<EditProposal, String>>>,
     status: String,
     history: History,
@@ -124,7 +125,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
+            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -347,13 +348,24 @@ impl Studio {
             Err(error) => self.status = error,
         }
     }
+    fn prepare_ai_context(&mut self) -> Result<perveance::provider::TaskContext, String> {
+        let context = if self.ai_include_composite {
+            perveance::provider::TaskContext::from_project_with_composite(&self.project)?
+        } else {
+            perveance::provider::TaskContext::from_project(&self.project)?
+        };
+        // Consent is one request only. Validation failure retains the checkbox.
+        self.ai_include_composite = false;
+        Ok(context)
+    }
     fn start_ai(&mut self, ctx: &egui::Context) {
         if self.ai_pending.is_some() { return; }
         if let Err(error) = perveance::provider::validate_request(&self.ai_model, &self.ai_key, &self.ai_prompt) {
             self.status = error;
             return;
         }
-        let task = match perveance::provider::TaskContext::from_project(&self.project) {
+        let sharing_composite = self.ai_include_composite;
+        let task = match self.prepare_ai_context() {
             Ok(task) => task,
             Err(error) => { self.status = error; return; }
         };
@@ -364,7 +376,7 @@ impl Studio {
         let key = std::mem::take(&mut self.ai_key);
         let (send, receive) = std::sync::mpsc::channel();
         self.ai_pending = Some(receive);
-        self.status = "Requesting pixel edits from OpenRouter...".into();
+        self.status = if sharing_composite { "Requesting pixel edits from OpenRouter with visible artwork..." } else { "Requesting pixel edits from OpenRouter without artwork..." }.into();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = perveance::provider::propose_openrouter(&task, &model, &key, &prompt);
@@ -453,13 +465,15 @@ impl Studio {
     }
     fn ai_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.heading("Prompt to pixels (experimental)");
-        ui.small("Sends your prompt, canvas size and layer count to OpenRouter and your chosen model. Fees may apply; no spend cap. Pixels and layer names are not sent.");
+        ui.small("Sends your prompt, canvas size and layer count to OpenRouter and your chosen model. Fees may apply; no spend cap. Layer names are not sent.");
         ui.label("Model ID");
         ui.text_edit_singleline(&mut self.ai_model);
         ui.label("OpenRouter API key (not saved)");
         ui.add(egui::TextEdit::singleline(&mut self.ai_key).password(true));
         ui.label("Art prompt");
         ui.add(egui::TextEdit::multiline(&mut self.ai_prompt).desired_rows(3));
+        ui.checkbox(&mut self.ai_include_composite, "Send visible artwork for this request");
+        ui.small("Optional: sends visible composite pixels (max 1,024 pixels) to OpenRouter and the model. This may increase costs; hidden layers are excluded. Resets after a request starts.");
         let send = ui.add_enabled(self.ai_pending.is_none(), egui::Button::new("Send to OpenRouter"));
         if send.clicked() { self.start_ai(ui.ctx()); }
         ui.small("Adds and paints new layers only. Request may be charged even if rejected or the app closes. Live provider compatibility is unverified.");
@@ -1362,6 +1376,26 @@ mod tests {
         assert!(studio.status.contains("stale"));
         studio.undo_edit();
         assert_eq!(studio.project.layers[0].pixels[33], [0; 4]);
+    }
+
+    #[test]
+    fn visible_artwork_sharing_is_one_request_and_fails_before_network_when_too_large() {
+        let mut studio = Studio::default();
+        assert!(!studio.ai_include_composite);
+        studio.ai_include_composite = true;
+        assert!(studio.prepare_ai_context().is_ok());
+        assert!(!studio.ai_include_composite);
+        studio.project = Project::new(33, 32).unwrap();
+        studio.ai_include_composite = true;
+        studio.ai_model = "test/model".into();
+        studio.ai_key = "fake-secret".into();
+        studio.ai_prompt = "draw art".into();
+        studio.start_ai(&egui::Context::default());
+        assert!(studio.ai_pending.is_none());
+        assert!(studio.status.contains("1024"));
+        assert!(!studio.status.contains("fake-secret"));
+        assert!(studio.ai_include_composite);
+        assert_eq!(studio.ai_key, "fake-secret");
     }
 
     #[test]

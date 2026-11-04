@@ -493,6 +493,15 @@ fn openrouter_cli_preflight_is_opt_in_and_does_not_leak_secret() {
     assert!(!message.contains("private-fake-key"));
     assert!(!message.contains("private test scene"));
     assert!(!output.exists());
+    let flagged = invoke(&["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), "invalid model", prompt.to_str().unwrap(), "--include-composite"], b"private-fake-key\n");
+    assert!(!flagged.status.success());
+    let flagged_error = String::from_utf8(flagged.stderr).unwrap();
+    assert!(flagged_error.contains("invalid model ID"));
+    assert!(!flagged_error.contains("private-fake-key"));
+    assert!(!output.exists());
+    let unknown = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), "test/model", prompt.to_str().unwrap(), "--typo"]).output().unwrap();
+    assert!(!unknown.status.success());
+    assert!(!output.exists());
     let invalid = run("invalid model", &[b'x'; 513]);
     assert!(!invalid.status.success());
     assert!(!output.exists());
@@ -504,6 +513,8 @@ fn openrouter_cli_preflight_is_opt_in_and_does_not_leak_secret() {
     let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
     assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "prompt-openrouter"));
     assert_eq!(caps["autonomous_execution"], false);
+    assert_eq!(caps["experimental_prompt_openrouter"]["max_composite_pixels"], 1024);
+    assert_eq!(caps["experimental_prompt_openrouter"]["visible_composite_opt_in"], "--include-composite");
 }
 
 #[test]

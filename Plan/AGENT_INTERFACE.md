@@ -35,3 +35,5 @@ Use project revisions and explicit transaction preconditions for headless access
 ## Experimental headless prompt-to-pixels
 
 The opt-in `prompt-openrouter` CLI command reads a UTF-8 prompt file and a key from non-terminal stdin, asks the same fixed OpenRouter adapter for restricted typed edits, checks and applies them to one loaded snapshot, and writes a create-new project. It is not an agent harness, credential broker, sandbox, code execution system or live-validated provider integration. Network requests can incur charges and no spend cap exists; output preflight is not a reservation, and input changes after loading are not detected. See README for confidentiality and operational limitations.
+
+An explicit `--include-composite` option supplies at most 1,024 visible composite pixels as RGBA hex text to the provider; hidden layer pixels, layer names, paths and the project revision are not sent; dimensions and layer count are still sent. It is off by default and can increase token costs. The GUI offers a separate one-request opt-in. This is not vision-model integration or live-validated visual understanding.

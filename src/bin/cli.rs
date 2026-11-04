@@ -58,7 +58,7 @@ fn read_prompt(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "prompt must be valid UTF-8".into())
 }
 
-fn prompt_to_project<F>(input: &Path, output: &Path, model: &str, prompt: &str, key: &str, request: F) -> Result<serde_json::Value, String>
+fn prompt_to_project<F>(input: &Path, output: &Path, model: &str, prompt: &str, key: &str, include_composite: bool, request: F) -> Result<serde_json::Value, String>
 where F: FnOnce(&provider::TaskContext, &str, &str, &str) -> Result<EditProposal, String> {
     provider::validate_request(model, key, prompt)?;
     // A preflight avoids an obvious charge on an occupied path. This is NOT a
@@ -70,12 +70,20 @@ where F: FnOnce(&provider::TaskContext, &str, &str, &str) -> Result<EditProposal
     }
     let mut project = Project::load(input)?;
     let base_revision = project.revision()?;
-    let context = provider::TaskContext::from_project(&project)?;
+    let context = if include_composite { provider::TaskContext::from_project_with_composite(&project)? } else { provider::TaskContext::from_project(&project)? };
     let proposal = request(&context, model, key, prompt)?;
     provider::apply_generated(&mut project, &proposal)?;
     let revision = project.revision()?;
     project.save_new(output)?;
-    Ok(json!({"ok": true, "output": output.to_string_lossy(), "applied": proposal.operations.len(), "base_revision": base_revision, "revision": revision}))
+    Ok(json!({"ok": true, "output": output.to_string_lossy(), "applied": proposal.operations.len(), "base_revision": base_revision, "revision": revision, "shared_composite": include_composite}))
+}
+
+fn prompt_openrouter(input: &str, output: &str, model: &str, prompt_path: &str, include_composite: bool) -> Result<serde_json::Value, String> {
+    let prompt = read_prompt(Path::new(prompt_path))?;
+    let stdin = io::stdin();
+    if stdin.is_terminal() { return Err("API key must come from a pipe or redirected stdin, not a terminal".into()); }
+    let key = read_key(stdin.lock())?;
+    prompt_to_project(Path::new(input), Path::new(output), model, &prompt, &key, include_composite, provider::propose_openrouter)
 }
 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
@@ -104,7 +112,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "ellipse": {"op": "ellipse", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "filled": true, "color": [255, 0, 0, 255]},
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
-            "experimental_prompt_openrouter": {"key_input": "stdin only; pipe or redirected input, not a terminal", "prompt_input": "UTF-8 file", "max_prompt_bytes": provider::MAX_PROMPT_BYTES, "model_compatibility": "unverified", "network": "fixed OpenRouter HTTPS endpoint", "cost": "may incur charges; no spend cap", "execution": "data-only typed edits on new layers; no generated code"},
+            "experimental_prompt_openrouter": {"key_input": "stdin only; pipe or redirected input, not a terminal", "prompt_input": "UTF-8 file", "max_prompt_bytes": provider::MAX_PROMPT_BYTES, "visible_composite_opt_in": "--include-composite", "max_composite_pixels": provider::MAX_COMPOSITE_CONTEXT_PIXELS, "model_compatibility": "unverified", "network": "fixed OpenRouter HTTPS endpoint", "cost": "may incur charges; no spend cap", "execution": "data-only typed edits on new layers; no generated code"},
             "palette_format": {"version": perveance::PALETTE_VERSION, "slots": perveance::PALETTE_SLOTS, "max_bytes": perveance::MAX_PALETTE_BYTES, "color": "straight-alpha RGBA bytes"},
             "proposal_version": perveance::PROPOSAL_VERSION,
             "proposal_example": {"version": 1, "base_revision": "<revision from inspect>", "operations": [{"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}]},
@@ -159,11 +167,10 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             read_region(&project, number(x)?, number(y)?, number(width)?, number(height)?, Some(index))
         }
         [command, input, output, model, prompt_path] if command == "prompt-openrouter" => {
-            let prompt = read_prompt(Path::new(prompt_path))?;
-            let stdin = io::stdin();
-            if stdin.is_terminal() { return Err("API key must come from a pipe or redirected stdin, not a terminal".into()); }
-            let key = read_key(stdin.lock())?;
-            prompt_to_project(Path::new(input), Path::new(output), model, &prompt, &key, provider::propose_openrouter)
+            prompt_openrouter(input, output, model, prompt_path, false)
+        }
+        [command, input, output, model, prompt_path, flag] if command == "prompt-openrouter" && flag == "--include-composite" => {
+            prompt_openrouter(input, output, model, prompt_path, true)
         }
         [command, input, output, layer, x, y, r, g, b, a] if command == "paint" => {
             let mut project = Project::load(Path::new(input))?;
@@ -204,7 +211,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 
@@ -235,6 +242,41 @@ mod tests {
     }
 
     #[test]
+    fn opt_in_context_is_bounded_before_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.json");
+        let output = dir.path().join("output.json");
+        let p = Project::new(33, 32).unwrap();
+        p.save_new(&input).unwrap();
+        let called = Cell::new(false);
+        let result = prompt_to_project(&input, &output, "test/model", "draw", "fake-key", true, |_, _, _, _| {
+            called.set(true); unreachable!()
+        });
+        assert!(result.unwrap_err().contains("1024"));
+        assert!(!called.get());
+        assert!(!output.exists());
+        let revision = p.revision().unwrap();
+        let result = prompt_to_project(&input, &output, "test/model", "draw", "fake-key", false, |_, _, _, _| {
+            Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision, operations: vec![Operation::AddLayer] })
+        }).unwrap();
+        assert_eq!(result["shared_composite"], false);
+    }
+
+    #[test]
+    fn opt_in_context_flag_is_reported_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.json");
+        let output = dir.path().join("output.json");
+        let p = Project::new(2, 2).unwrap();
+        p.save_new(&input).unwrap();
+        let revision = p.revision().unwrap();
+        let result = prompt_to_project(&input, &output, "test/model", "draw", "fake-key", true, |_, _, _, _| {
+            Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision, operations: vec![Operation::AddLayer] })
+        }).unwrap();
+        assert_eq!(result["shared_composite"], true);
+    }
+
+    #[test]
     fn prompt_pipeline_applies_only_new_layers_and_preserves_input() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input.json");
@@ -245,7 +287,7 @@ mod tests {
         p.save_new(&input).unwrap();
         let original = std::fs::read(&input).unwrap();
         let revision = p.revision().unwrap();
-        let value = prompt_to_project(&input, &output, "test/model", "draw a star", "fake-key", |_, model, key, prompt| {
+        let value = prompt_to_project(&input, &output, "test/model", "draw a star", "fake-key", false, |_, model, key, prompt| {
             assert_eq!((model, key, prompt), ("test/model", "fake-key", "draw a star"));
             Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision.clone(), operations: vec![
                 Operation::AddLayer,
@@ -260,7 +302,7 @@ mod tests {
         assert_eq!(result.layers[0], p.layers[0]);
         assert_eq!(result.sample_layer(1, 1, 1).unwrap(), [1, 2, 3, 255]);
         let called = Cell::new(false);
-        assert!(prompt_to_project(&input, &output, "test/model", "draw", "fake-key", |_, _, _, _| {
+        assert!(prompt_to_project(&input, &output, "test/model", "draw", "fake-key", false, |_, _, _, _| {
             called.set(true); unreachable!()
         }).is_err());
         assert!(!called.get());
@@ -269,13 +311,13 @@ mod tests {
             vec![Operation::AddLayer, Operation::ResizeCanvas { width: 1, height: 1, clip: true }],
             vec![Operation::AddLayer, Operation::Pixel { layer: 1, x: 99, y: 0, color: [1; 4] }],
         ] {
-            let failure = prompt_to_project(&input, &rejected, "test/model", "draw", "fake-key", |_, _, _, _| {
+            let failure = prompt_to_project(&input, &rejected, "test/model", "draw", "fake-key", false, |_, _, _, _| {
                 Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision.clone(), operations: ops })
             });
             assert!(failure.is_err());
             assert!(!rejected.exists());
         }
-        let stale = prompt_to_project(&input, &rejected, "test/model", "draw", "fake-key", |_, _, _, _| {
+        let stale = prompt_to_project(&input, &rejected, "test/model", "draw", "fake-key", false, |_, _, _, _| {
             Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: format!("sha256-json-v1:{}", "0".repeat(64)), operations: vec![Operation::AddLayer] })
         });
         assert!(stale.is_err());

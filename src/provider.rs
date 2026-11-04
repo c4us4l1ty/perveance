@@ -10,25 +10,49 @@ use std::time::Duration;
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 pub const MAX_PROMPT_BYTES: usize = 4000;
 pub const MAX_API_KEY_BYTES: usize = 512;
+pub const MAX_COMPOSITE_CONTEXT_PIXELS: u32 = 1024;
 const MAX_RESPONSE_BYTES: u64 = 256 * 1024;
 const MAX_AI_OPERATIONS: usize = 256;
 const MAX_OUTPUT_TOKENS: u32 = 2048;
 
-/// The only project data sent to the provider are dimensions and layer count.
-/// The revision stays local and is attached to the resulting proposal.
+/// Dimensions/layer count are always sent; visible composite pixels are optional.
+/// Hidden layers, names and the revision are not sent. Revision stays local.
 #[derive(Clone)]
 pub struct TaskContext {
     width: u32,
     height: u32,
     layers: usize,
     revision: String,
+    composite_rows: Option<Vec<String>>,
 }
 
 impl TaskContext {
     pub fn from_project(project: &Project) -> Result<Self, String> {
         project.validate()?;
         if project.layers.len() >= 32 { return Err("AI needs room for a new layer (limit 32)".into()); }
-        Ok(Self { width: project.width, height: project.height, layers: project.layers.len(), revision: project.revision()? })
+        Ok(Self { width: project.width, height: project.height, layers: project.layers.len(), revision: project.revision()?, composite_rows: None })
+    }
+
+    /// Explicitly opt in to sending a bounded visible composite, encoded as
+    /// rows of hexadecimal straight-alpha RGBA bytes. No hidden-layer data.
+    pub fn from_project_with_composite(project: &Project) -> Result<Self, String> {
+        let mut context = Self::from_project(project)?;
+        if project.width * project.height > MAX_COMPOSITE_CONTEXT_PIXELS {
+            return Err(format!("visible composite context is limited to {MAX_COMPOSITE_CONTEXT_PIXELS} pixels"));
+        }
+        let rgba = project.rgba()?;
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut rows = Vec::with_capacity(project.height as usize);
+        for row in rgba.chunks_exact(project.width as usize * 4) {
+            let mut text = String::with_capacity(row.len() * 2);
+            for byte in row {
+                text.push(HEX[(byte >> 4) as usize] as char);
+                text.push(HEX[(byte & 15) as usize] as char);
+            }
+            rows.push(text);
+        }
+        context.composite_rows = Some(rows);
+        Ok(context)
     }
 }
 
@@ -54,7 +78,7 @@ pub fn propose_openrouter(context: &TaskContext, model: &str, key: &str, prompt:
 
 fn request(context: &TaskContext, model: &str, key: &str, prompt: &str, url: &str, https_only: bool) -> Result<EditProposal, String> {
     validate_request(model, key, prompt)?;
-    let system = format!(
+    let mut system = format!(
         "You create pixel art using JSON operations only. Output exactly an object with an operations array, no prose or code. \
         Canvas is {} by {} pixels. Existing layers are indexed 0 through {}; you must not edit them. \
         Add new layers with {{\"op\":\"add_layer\"}}; the first new layer has index {}. \
@@ -67,11 +91,16 @@ fn request(context: &TaskContext, model: &str, key: &str, prompt: &str, url: &st
         {{\"op\":\"rectangle\",\"layer\":{},\"x\":0,\"y\":0,\"width\":1,\"height\":1,\"color\":[255,0,0,255]}}, \
         {{\"op\":\"rectangle_outline\",\"layer\":{},\"x\":0,\"y\":0,\"width\":1,\"height\":1,\"color\":[255,0,0,255]}}, \
         {{\"op\":\"ellipse\",\"layer\":{},\"x\":0,\"y\":0,\"width\":1,\"height\":1,\"filled\":true,\"color\":[255,0,0,255]}}, \
-        {{\"op\":\"fill\",\"layer\":{},\"x\":0,\"y\":0,\"color\":[255,0,0,255]}}. \
-        You do not see existing pixels or layer names.",
+        {{\"op\":\"fill\",\"layer\":{},\"x\":0,\"y\":0,\"color\":[255,0,0,255]}}. ",
         context.width, context.height, context.layers - 1, context.layers,
         context.layers, context.layers, context.layers, context.layers, context.layers, context.layers, context.layers,
     );
+    if let Some(rows) = &context.composite_rows {
+        system.push_str("The user opted to share the visible composite. Rows below are top to bottom; each row contains left-to-right RGBA pixels, eight hexadecimal characters per pixel. Transparent composite pixels are 00000000. Existing layer names and hidden layers are not provided.\n");
+        for row in rows { system.push_str(row); system.push('\n'); }
+    } else {
+        system.push_str("You do not see existing pixels or layer names.");
+    }
     let body = json!({
         "model": model, "messages": [{"role":"system", "content":system}, {"role":"user", "content":prompt}],
         "response_format":{"type":"json_object"}, "max_tokens":MAX_OUTPUT_TOKENS, "stream":false, "n":1
@@ -186,6 +215,55 @@ mod tests {
             request
         });
         (format!("http://{address}/api"), handle)
+    }
+
+    #[test]
+    fn visible_composite_opt_in_sends_only_composited_rgba() {
+        let content = r#"{"operations":[{"op":"add_layer"},{"op":"pixel","layer":2,"x":1,"y":1,"color":[1,2,3,255]}]}"#;
+        let (url, server) = serve_once("200 OK", response(content, "stop"), "");
+        let mut project = Project::new(2, 2).unwrap();
+        project.rename_layer(0, "private-name-sentinel").unwrap();
+        project.set_pixel(0, 0, 0, [43, 67, 89, 135]).unwrap();
+        project.set_pixel(0, 1, 0, [14, 15, 16, 0]).unwrap();
+        project.add_layer().unwrap();
+        project.rename_layer(1, "hidden-name-sentinel").unwrap();
+        project.set_pixel(1, 0, 0, [222, 173, 190, 239]).unwrap();
+        project.layers[1].visible = false;
+        let ctx = TaskContext::from_project_with_composite(&project).unwrap();
+        assert_eq!(ctx.composite_rows.as_ref().unwrap(), &["2b43598700000000", "0000000000000000"]);
+        let proposal = request(&ctx, "test/model", "fake-key", "draw a star", &url, false).unwrap();
+        let received = server.join().unwrap();
+        let header_end = received.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        let payload: serde_json::Value = serde_json::from_slice(&received[header_end..]).unwrap();
+        let system = payload["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("\n2b43598700000000\n0000000000000000\n"));
+        assert!(!system.contains("private-name-sentinel"));
+        assert!(!system.contains("hidden-name-sentinel"));
+        assert!(!system.contains("deadbeef"));
+        assert!(!system.contains(&project.revision().unwrap()));
+        assert!(!system.contains("fake-key"));
+        assert_eq!(payload["messages"][1]["content"], "draw a star");
+        let original = project.layers.clone();
+        apply_generated(&mut project, &proposal).unwrap();
+        assert_eq!(&project.layers[..2], original.as_slice());
+        assert_eq!(project.sample_layer(2, 1, 1).unwrap(), [1,2,3,255]);
+    }
+
+    #[test]
+    fn visible_context_is_explicit_and_bounded_by_pixel_count() {
+        let max = Project::new(32, 32).unwrap();
+        let normal = TaskContext::from_project(&max).unwrap();
+        assert!(normal.composite_rows.is_none());
+        let included = TaskContext::from_project_with_composite(&max).unwrap();
+        assert_eq!(included.composite_rows.as_ref().unwrap().len(), 32);
+        assert!(included.composite_rows.as_ref().unwrap().iter().all(|row| row.len() == 32 * 8));
+        assert_eq!(included.revision, normal.revision);
+        let large = Project::new(33, 32).unwrap();
+        assert!(TaskContext::from_project(&large).is_ok());
+        assert!(TaskContext::from_project_with_composite(&large).err().unwrap().contains("1024"));
+        let mut invalid = max;
+        invalid.layers[0].pixels.pop();
+        assert!(TaskContext::from_project_with_composite(&invalid).is_err());
     }
 
     #[test]
