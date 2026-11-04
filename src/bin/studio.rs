@@ -200,15 +200,20 @@ impl Studio {
         self.saved_path = Some(self.path.clone());
         Ok(())
     }
-    // Version saves never replace the source or any existing file. The snapshot
-    // comparison detects ordinary external edits, not races or malicious paths.
-    fn save_next_version(&mut self) -> Result<(), String> {
+    // This comparison detects ordinary external edits, not races or malicious paths.
+    fn check_saved_source(&self) -> Result<(), String> {
         let source = self.saved_path.as_ref().ok_or("Save or open a project first.")?;
         let snapshot = self.saved_project.as_ref().ok_or("No saved project snapshot; save as a new file.")?;
         let on_disk = Project::load(Path::new(source)).map_err(|e| format!("Could not check the saved project: {e}. Save as a new file instead."))?;
         if &on_disk != snapshot {
             return Err("The saved project changed on disk. Open it or save your work as a new file instead.".into());
         }
+        Ok(())
+    }
+    // Version saves never replace the source or any existing file.
+    fn save_next_version(&mut self) -> Result<(), String> {
+        self.check_saved_source()?;
+        let source = self.saved_path.as_ref().ok_or("Save or open a project first.")?;
         let path = Path::new(source);
         let stem = path.file_stem().and_then(|s| s.to_str()).ok_or("Invalid project filename")?;
         let (base, start) = match stem.rsplit_once(".v") {
@@ -236,6 +241,41 @@ impl Studio {
             return Ok(());
         }
         Err("No available version number up to 9999; save as a new file.".into())
+    }
+    // Saving is intentionally versioned: never replace an existing path.
+    fn save_current(&mut self) -> Result<String, String> {
+        if self.shape_start.is_some() || self.stroke_last.is_some() {
+            return Err("Finish the current drawing gesture before saving.".into());
+        }
+        if self.saved_path.is_none() {
+            self.save_project()?;
+            Ok(format!("Project saved as {}.", self.path))
+        } else if self.has_unsaved_changes() {
+            self.save_next_version()?;
+            Ok(format!("Project saved as {}.", self.path))
+        } else {
+            self.check_saved_source()?;
+            Ok("No project changes to save.".into())
+        }
+    }
+    fn save_current_with_status(&mut self) {
+        self.status = match self.save_current() { Ok(message) => message, Err(error) => error };
+    }
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        // Do not intercept shortcuts in dialogs, text fields, or drawing gestures.
+        if self.confirm_close || self.pending_replacement.is_some() || self.shape_start.is_some() || self.stroke_last.is_some()
+            || ctx.wants_keyboard_input() || ctx.input(|input| input.pointer.any_down()) { return; }
+        let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
+        let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
+        let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+        let save = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
+        if ctx.input_mut(|input| input.consume_shortcut(&redo) || input.consume_shortcut(&redo_alternate)) {
+            self.redo_edit();
+        } else if ctx.input_mut(|input| input.consume_shortcut(&undo)) {
+            self.undo_edit();
+        } else if ctx.input_mut(|input| input.consume_shortcut(&save)) {
+            self.save_current_with_status();
+        }
     }
     fn project_save_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
         let save = ui.button("Save as new file");
@@ -640,28 +680,20 @@ impl eframe::App for Studio {
         // A native close request is cancellable; this does not protect against a crash,
         // force-quit, or an operating system that terminates the process outright.
         if ctx.input(|input| input.viewport().close_requested()) && !self.allow_close {
-            if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() {
+            if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() || self.stroke_last.is_some() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.confirm_close = true;
                 self.pending_replacement = None;
             }
         }
         self.poll_ai(ctx);
-        // Do not intercept shortcuts while a dialog, text field, or brush gesture is active.
-        if !self.confirm_close && self.pending_replacement.is_none() && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
-            let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
-            let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
-            let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
-            if ctx.input_mut(|input| input.consume_shortcut(&redo) || input.consume_shortcut(&redo_alternate)) {
-                self.redo_edit();
-            } else if ctx.input_mut(|input| input.consume_shortcut(&undo)) {
-                self.undo_edit();
-            }
-        }
+        self.handle_shortcuts(ctx);
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("perveance");
                 ui.label(egui::RichText::new("STUDIO / EARLY PROTOTYPE").small().color(Color32::from_rgb(166, 215, 74)));
+                if ui.button("Save").on_hover_text("Ctrl+S — save a new file or numbered version; never overwrites").clicked() { self.save_current_with_status(); }
+                ui.label(if self.saved_path.is_none() { "Not saved" } else if self.has_unsaved_changes() { "Modified" } else { "Saved" });
                 if ui.add_enabled(self.history.can_undo(), egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.undo_edit(); }
                 if ui.add_enabled(self.history.can_redo(), egui::Button::new("Redo")).on_hover_text("Ctrl+Shift+Z or Ctrl+Y").clicked() { self.redo_edit(); }
                 ui.separator();
@@ -955,12 +987,36 @@ impl eframe::App for Studio {
     }
 }
 
+fn studio_for_path(path: Option<String>) -> Result<Studio, String> {
+    let mut studio = Studio::default();
+    if let Some(path) = path {
+        studio.replace_canvas(CanvasReplacement::Project(path.clone()));
+        if studio.saved_path.as_deref() != Some(path.as_str()) { return Err(studio.status); }
+    }
+    Ok(studio)
+}
+
 fn main() -> eframe::Result<()> {
+    let mut args = std::env::args_os().skip(1);
+    let path = args.next();
+    if args.next().is_some() { eprintln!("Usage: perveance [PROJECT.json]"); std::process::exit(2); }
+    if path.as_ref().and_then(|arg| arg.to_str()).map_or(false, |arg| arg == "--help" || arg == "-h") {
+        println!("Usage: perveance [PROJECT.json]\nOpen an editable project or start a blank canvas.");
+        return Ok(());
+    }
+    let path = match path.map(|arg| arg.into_string()).transpose() {
+        Ok(path) => path,
+        Err(_) => { eprintln!("Project path must be valid UTF-8."); std::process::exit(2); }
+    };
+    let studio = match studio_for_path(path) {
+        Ok(studio) => studio,
+        Err(error) => { eprintln!("Could not open project: {error}"); std::process::exit(2); }
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]).with_min_inner_size([900.0, 600.0]),
         ..Default::default()
     };
-    eframe::run_native("Perveance", options, Box::new(|cc| {
+    eframe::run_native("Perveance", options, Box::new(move |cc| {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.panel_fill = Color32::from_rgb(21, 21, 21);
@@ -972,7 +1028,7 @@ fn main() -> eframe::Result<()> {
         if let Some(font) = style.text_styles.get_mut(&egui::TextStyle::Button) { font.size = 14.0; }
         if let Some(font) = style.text_styles.get_mut(&egui::TextStyle::Heading) { font.size = 19.0; }
         cc.egui_ctx.set_style(style);
-        Ok(Box::new(Studio::default()))
+        Ok(Box::new(studio))
     }))
 }
 
@@ -1055,6 +1111,64 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn save_action_creates_first_file_and_versions_only_dirty_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("art.json");
+        let version = dir.path().join("art.v001.json");
+        let mut studio = Studio::default();
+        studio.path = base.to_str().unwrap().into();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        studio.save_current().unwrap();
+        assert_eq!(Project::load(&base).unwrap(), studio.project);
+        assert!(!studio.has_unsaved_changes());
+        assert!(studio.save_current().unwrap().contains("No project changes"));
+        assert!(!version.exists());
+        studio.commit_shape([1, 1], [1, 1]);
+        studio.save_current().unwrap();
+        assert_eq!(Project::load(&version).unwrap(), studio.project);
+        assert!(studio.history.can_undo());
+        assert_ne!(Project::load(&base).unwrap(), studio.project);
+        // Even a clean document reports an externally changed source on Save.
+        std::fs::write(&version, serde_json::to_vec(&Project::new(2, 2).unwrap()).unwrap()).unwrap();
+        assert!(studio.save_current().unwrap_err().contains("changed on disk"));
+        assert!(!dir.path().join("art.v002.json").exists());
+    }
+
+    #[test]
+    fn save_action_rejects_gestures_and_existing_initial_path_without_changing_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("art.json");
+        std::fs::write(&path, b"keep").unwrap();
+        let mut studio = Studio::default();
+        studio.path = path.to_str().unwrap().into();
+        studio.shape_start = Some([0, 0]);
+        assert!(studio.save_current().unwrap_err().contains("gesture"));
+        studio.shape_start = None;
+        studio.stroke_last = Some([0, 0]);
+        assert!(studio.save_current().unwrap_err().contains("gesture"));
+        studio.stroke_last = None;
+        assert!(studio.save_current().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+        assert!(studio.saved_path.is_none());
+    }
+
+    #[test]
+    fn startup_project_loads_and_invalid_input_fails_without_blank_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("art.json");
+        let mut source = Project::new(3, 2).unwrap();
+        source.set_pixel(0, 1, 1, [1, 2, 3, 4]).unwrap();
+        source.save_new(&path).unwrap();
+        let studio = studio_for_path(Some(path.to_str().unwrap().into())).unwrap();
+        assert_eq!(studio.project, source);
+        assert_eq!(studio.saved_path.as_deref(), path.to_str());
+        assert!(!studio.has_unsaved_changes());
+        assert!(studio_for_path(Some(dir.path().join("missing").to_str().unwrap().into())).is_err());
+        assert!(studio_for_path(None).unwrap().saved_path.is_none());
     }
 
     #[test]

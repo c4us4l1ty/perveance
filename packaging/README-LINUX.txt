@@ -15,6 +15,13 @@ macOS, ARM and native Wayland are not supported by this bundle.
 To launch from a terminal in a writable directory on an X11 desktop:
   /path/to/perveance-linux-x86_64/bin/perveance
 
+To open an existing UTF-8 project path directly:
+  /path/to/perveance-linux-x86_64/bin/perveance /path/to/project.json
+
+Use Save or Ctrl+S to create the first file (using the GUI's File path field),
+or a numbered version after edits. Existing files are never overwritten.
+Ctrl+S is ignored in text fields, dialogs and active drawing gestures.
+
 The GUI uses the current working directory for its default project and PNG
 paths. Save projects and exports in a directory you can write to. Project
 and PNG saves never overwrite existing files. The project format is experimental;
