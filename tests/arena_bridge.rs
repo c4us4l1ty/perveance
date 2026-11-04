@@ -191,3 +191,68 @@ fn bridge_read_region_matches_rust_and_rejects_invalid_regions() {
         assert!(!py.status.success()); assert!(!rust.status.success());
     }
 }
+
+#[test]
+fn bridge_layer_and_canvas_operations_match_rust_at_every_batch_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let ops = dir.path().join("ops.json");
+    let exe = env!("CARGO_BIN_EXE_perveance-cli");
+    let mut project = Project::new(4, 3).unwrap();
+    project.rename_layer(0, &"雪".repeat(84)).unwrap();
+    project.set_pixel(0, 1, 1, [12, 34, 56, 0]).unwrap();
+    project.layers[0].visible = false;
+    project.save_new(&base).unwrap();
+    let batch = vec![
+        serde_json::json!({"op":"duplicate_layer","layer":0}),
+        serde_json::json!({"op":"flip_layer","layer":1,"axis":"horizontal"}),
+        serde_json::json!({"op":"flip_layer","layer":1,"axis":"vertical"}),
+        serde_json::json!({"op":"replace_color","layer":1,"from":[12,34,56,0],"to":[99,11,22,123]}),
+        serde_json::json!({"op":"translate_layer","layer":1,"dx":-1,"dy":1,"clip":false}),
+        serde_json::json!({"op":"resize_canvas","width":6,"height":5,"clip":false}),
+        serde_json::json!({"op":"add_layer"}),
+        serde_json::json!({"op":"pixel","layer":2,"x":5,"y":4,"color":[9,8,7,0]}),
+        serde_json::json!({"op":"move_layer","from":2,"to":0}),
+        serde_json::json!({"op":"translate_layer","layer":0,"dx":1,"dy":0,"clip":true}),
+        serde_json::json!({"op":"clear_layer","layer":0}),
+        serde_json::json!({"op":"resize_canvas","width":3,"height":2,"clip":true}),
+        serde_json::json!({"op":"remove_layer","layer":1}),
+    ];
+    for end in 1..=batch.len() {
+        let py = dir.path().join(format!("py-{end}.json"));
+        let rust = dir.path().join(format!("rust-{end}.json"));
+        std::fs::write(&ops, serde_json::to_vec(&batch[..end]).unwrap()).unwrap();
+        python(&["apply", base.to_str().unwrap(), py.to_str().unwrap(), ops.to_str().unwrap()]);
+        let result = Command::new(exe).args(["apply", base.to_str().unwrap(), rust.to_str().unwrap(), ops.to_str().unwrap()]).output().unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        assert_eq!(Project::load(&py).unwrap(), Project::load(&rust).unwrap(), "batch prefix {end}");
+    }
+}
+
+#[test]
+fn bridge_transform_failures_match_rust_without_creating_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let ops = dir.path().join("ops.json");
+    let mut project = Project::new(2, 2).unwrap();
+    project.set_pixel(0, 1, 1, [9, 0, 0, 0]).unwrap();
+    project.layers[0].visible = false;
+    project.save_new(&base).unwrap();
+    let bad = vec![
+        serde_json::json!({"op":"translate_layer","layer":0,"dx":1,"dy":0,"clip":false}),
+        serde_json::json!({"op":"resize_canvas","width":1,"height":1,"clip":false}),
+        serde_json::json!({"op":"resize_canvas","width":1,"height":1,"clip":1}),
+        serde_json::json!({"op":"flip_layer","layer":0,"axis":"diagonal"}),
+        serde_json::json!({"op":"remove_layer","layer":0}),
+    ];
+    for (index, operation) in bad.into_iter().enumerate() {
+        let py = dir.path().join(format!("bad-py-{index}.json"));
+        let rust = dir.path().join(format!("bad-rust-{index}.json"));
+        std::fs::write(&ops, serde_json::to_vec(&vec![serde_json::json!({"op":"add_layer"}), serde_json::json!({"op":"remove_layer","layer":1}), operation]).unwrap()).unwrap();
+        let a = Command::new("python3").arg("tools/arena_art.py").args(["apply", base.to_str().unwrap(), py.to_str().unwrap(), ops.to_str().unwrap()]).output().unwrap();
+        let b = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["apply", base.to_str().unwrap(), rust.to_str().unwrap(), ops.to_str().unwrap()]).output().unwrap();
+        assert!(!a.status.success()); assert!(!b.status.success());
+        assert!(!py.exists()); assert!(!rust.exists());
+        assert_eq!(Project::load(&base).unwrap(), project);
+    }
+}

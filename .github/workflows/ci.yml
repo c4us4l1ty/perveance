@@ -29,7 +29,7 @@ jobs:
           fi
       - name: Exercise desktop tools under X11
         run: |
-          cargo build --locked --bin perveance
+          cargo build --locked --bin perveance --bin perveance-cli
           if ! xvfb-run -a -s "-screen 0 1280x1024x24" sh -c '
             set -eu
             export LIBGL_ALWAYS_SOFTWARE=1
@@ -125,6 +125,13 @@ jobs:
           if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_project_roundtrip.sh "$RUNNER_TEMP/gui-project-roundtrip" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
             cat "$RUNNER_TEMP/gui-project-roundtrip/gui.log" 2>/dev/null || true
             echo "::error::Native GUI project round trip failed; see the step output"
+            exit 1
+          fi
+      - name: Exercise agent-to-GUI-to-agent handoff
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_agent_handoff.sh "$RUNNER_TEMP/agent-handoff" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/target/debug/perveance-cli" "$GITHUB_WORKSPACE/tools/arena_art.py" "$GITHUB_WORKSPACE/examples/rocket-operations.json" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
+            cat "$RUNNER_TEMP/agent-handoff/gui.log" 2>/dev/null || true
+            echo "::error::Agent GUI handoff test failed; see the step output"
             exit 1
           fi
       - name: Test recovery after forced GUI termination

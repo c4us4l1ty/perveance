@@ -109,6 +109,49 @@ class ArenaArtTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             art.read_region(big, 0, 0, 65, 64)
 
+    def test_layer_operations_and_resize_preserve_raw_pixels(self):
+        p = art.create_project(3, 2, [
+            {"op": "pixel", "layer": 0, "x": 2, "y": 1, "color": [5, 6, 7, 0]},
+            {"op": "rename_layer", "layer": 0, "name": "雪" * 84},
+            {"op": "set_visibility", "layer": 0, "visible": False},
+            {"op": "duplicate_layer", "layer": 0},
+            {"op": "flip_layer", "layer": 1, "axis": "horizontal"},
+            {"op": "replace_color", "layer": 1, "from": [5, 6, 7, 0], "to": [8, 9, 10, 0]},
+            {"op": "translate_layer", "layer": 1, "dx": 1, "dy": -1, "clip": False},
+            {"op": "resize_canvas", "width": 4, "height": 3, "clip": False},
+            {"op": "move_layer", "from": 1, "to": 0},
+        ])
+        self.assertEqual((p["width"], p["height"]), (4, 3))
+        self.assertEqual(p["layers"][0]["name"], "雪" * 83 + " copy")
+        self.assertFalse(p["layers"][0]["visible"])
+        self.assertEqual(p["layers"][0]["pixels"][1], [8, 9, 10, 0])
+        self.assertEqual(p["layers"][1]["pixels"][6], [5, 6, 7, 0])
+        q = art.apply_operations(p, [{"op": "clear_layer", "layer": 0}, {"op": "remove_layer", "layer": 1}])
+        self.assertEqual(len(q["layers"]), 1)
+        self.assertTrue(all(pixel == [0, 0, 0, 0] for pixel in q["layers"][0]["pixels"]))
+        self.assertEqual(len(p["layers"]), 2)
+
+    def test_transforms_reject_clipping_of_hidden_transparent_rgb_atomically(self):
+        p = art.create_project(2, 2, [
+            {"op": "pixel", "layer": 0, "x": 1, "y": 1, "color": [7, 0, 0, 0]},
+            {"op": "set_visibility", "layer": 0, "visible": False},
+        ])
+        before = json.dumps(p)
+        for bad in [
+            {"op": "translate_layer", "layer": 0, "dx": 1, "dy": 0, "clip": False},
+            {"op": "resize_canvas", "width": 1, "height": 2, "clip": False},
+            {"op": "resize_canvas", "width": 1, "height": 2, "clip": 1},
+            {"op": "translate_layer", "layer": 0, "dx": True, "dy": 0, "clip": True},
+            {"op": "flip_layer", "layer": 0, "axis": "diagonal"},
+            {"op": "remove_layer", "layer": 0},
+            {"op": "move_layer", "from": 0, "to": 1},
+        ]:
+            with self.assertRaises(ValueError):
+                art.apply_operations(p, [{"op": "add_layer"}, {"op": "remove_layer", "layer": 1}, bad])
+            self.assertEqual(json.dumps(p), before)
+        q = art.apply_operations(p, [{"op": "resize_canvas", "width": 1, "height": 1, "clip": True}])
+        self.assertEqual(q["layers"][0]["pixels"], [[0, 0, 0, 0]])
+
     def test_shape_validation_and_batch_failure_are_atomic(self):
         p = art.create_project(4, 4, [])
         before = json.dumps(p)
