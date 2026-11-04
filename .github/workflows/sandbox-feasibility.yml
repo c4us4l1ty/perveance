@@ -1,0 +1,60 @@
+name: Fixed sandbox feasibility matrix
+on:
+  push:
+    branches: ["main", "arena/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install diagnostic tool
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Observe host prerequisites without changing security policy
+        run: |
+          uname -sr
+          . /etc/os-release; printf 'OS: %s\n' "$PRETTY_NAME"
+          test "$(command -v bwrap)" = /usr/bin/bwrap
+          stat -c 'bwrap mode: %a' /usr/bin/bwrap
+          if command -v getcap >/dev/null; then getcap /usr/bin/bwrap; fi
+          for path in /proc/sys/kernel/apparmor_restrict_unprivileged_userns /proc/sys/kernel/unprivileged_userns_clone /proc/sys/user/max_user_namespaces; do
+            if test -r "$path"; then printf '%s: ' "$path"; cat "$path"; fi
+          done
+          # Do not run a setuid, setgid or file-capability-enabled helper.
+          python3 -c 'import os,stat; s=os.stat("/usr/bin/bwrap"); assert not s.st_mode & (stat.S_ISUID|stat.S_ISGID); caps=os.getxattr("/usr/bin/bwrap", "security.capability") if "security.capability" in os.listxattr("/usr/bin/bwrap") else b""; assert not caps'
+          bwrap --version
+          python3 -c 'import os,platform,subprocess; paths=("/proc/sys/kernel/apparmor_restrict_unprivileged_userns","/proc/sys/kernel/unprivileged_userns_clone","/proc/sys/user/max_user_namespaces"); values=[os.path.basename(p)+"="+(open(p).read().strip() if os.path.isfile(p) else "missing") for p in paths]; print("::notice::Runner "+platform.release()+"; "+subprocess.check_output(["/usr/bin/bwrap","--version"],text=True).strip()+"; "+"; ".join(values))'
+      - name: Run fixed probe and report observations
+        run: |
+          if python3 tools/isolation_probe.py > /tmp/perveance-isolation-matrix.json; then code=0; else code=$?; fi
+          cat /tmp/perveance-isolation-matrix.json
+          python3 -c 'import json,sys; r=json.load(open("/tmp/perveance-isolation-matrix.json")); assert r["status"] in ("passed","failed","unavailable"); assert r["autonomous_execution"] == "disabled"; assert (int(sys.argv[1]) == 0) == (r["status"] == "passed"); print("::notice::Fixed probe "+sys.argv[2]+": "+r["status"]+"; "+r["reason"]+"; no execution authorized")' "$code" '${{ matrix.os }}'
+      - name: Require the fixed checks on the selected CI diagnostic image
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          python3 -c 'import json; r=json.load(open("/tmp/perveance-isolation-matrix.json")); assert r["status"] == "passed", "fixed diagnostic did not pass; see previous step"; assert r["autonomous_execution"] == "disabled"'
+      - name: Install prerequisites for staged project test
+        if: matrix.os == 'ubuntu-26.04'
+        run: sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Run fixed worker against real project staging
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          rustup default stable
+          if cargo test --locked --test workspace linux::fixed_staged_project_worker -- --ignored --exact --nocapture > /tmp/perveance-staged-worker.log 2>&1; then
+            cat /tmp/perveance-staged-worker.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-staged-worker.log").read_text(); assert "1 passed; 0 failed" in s; print("::notice::Fixed bubblewrap worker read an actual staged project; no model code or execution authorization")'
+          else
+            cat /tmp/perveance-staged-worker.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-staged-worker.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi

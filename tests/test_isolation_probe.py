@@ -42,6 +42,7 @@ class IsolationProbeTests(unittest.TestCase):
         self.assertEqual(result["autonomous_execution"], "disabled")
 
     def test_launch_uses_fixed_code_and_required_namespaces(self):
+        workspaces = []
         def fake_popen(command, **kwargs):
             self.assertEqual(command[0], "/test/bwrap")
             for option in ("--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--clearenv", "--tmpfs"):
@@ -51,14 +52,37 @@ class IsolationProbeTests(unittest.TestCase):
             self.assertEqual(command[command.index("--bind") + 2], "/work")
             self.assertEqual(kwargs["env"]["PERVEANCE_PROBE_SECRET"], "probe-only-environment-sentinel")
             self.assertNotIn("HOME", kwargs["env"])
-            kwargs["stdout"].write(json.dumps({name: True for name in probe.CHECKS}).encode())
+            checks = {name: True for name in probe.CHECKS}
+            workspace = Path(command[command.index("--bind") + 1])
+            workspaces.append(workspace.name)
+            self.assertEqual((workspace / "input.fixture").read_bytes(), b"fixed-probe-input")
+            self.assertEqual((workspace / "host.sock").exists(), workspace.name == "unsafe-workspace")
+            if workspace.name == "unsafe-workspace":
+                checks["workspace_host_socket_unreachable"] = False
+            kwargs["stdout"].write(json.dumps(checks).encode())
             process = Mock()
             process.wait.return_value = 0
             return process
         with patch.object(probe.subprocess, "Popen", side_effect=fake_popen):
             result = probe.run_fixed_probe("/test/bwrap")
         self.assertEqual(result["status"], "passed")
+        self.assertEqual(workspaces, ["clean-workspace", "unsafe-workspace"])
+        self.assertFalse(result["unsafe_workspace_control"]["workspace_host_socket_unreachable"])
         self.assertEqual(result["autonomous_execution"], "disabled")
+
+    def test_unsafe_control_is_required_and_strict(self):
+        def fake_popen(command, **kwargs):
+            # A missing or falsely safe control must never become a pass.
+            checks = {name: True for name in probe.CHECKS}
+            kwargs["stdout"].write(json.dumps(checks).encode())
+            process = Mock()
+            process.wait.return_value = 0
+            return process
+        with patch.object(probe.subprocess, "Popen", side_effect=fake_popen):
+            result = probe.run_fixed_probe("/test/bwrap")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["autonomous_execution"], "disabled")
+        self.assertTrue(result["unsafe_workspace_control"]["workspace_host_socket_unreachable"])
 
     def test_fixed_worker_detects_unisolated_access(self):
         # This deliberately runs only the fixed probe code without bubblewrap, against
@@ -70,19 +94,21 @@ class IsolationProbeTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             (workspace / "outside-link").symlink_to(sentinel)
+            (workspace / "input.fixture").write_bytes(b"fixed-probe-input")
             unix_listener.bind(str(workspace / "host.sock"))
             unix_listener.listen(1)
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
             result = subprocess.run(
-                [sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace)],
+                [sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace), str(workspace / "host.sock")],
                 env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"},
                 capture_output=True, check=True, timeout=10,
             )
             checks = json.loads(result.stdout)
             self.assertEqual(probe.classify(checks), "failed")
             self.assertTrue(checks["workspace_read_write"])
-            for name in set(probe.CHECKS) - {"workspace_read_write"}:
+            self.assertTrue(checks["staged_input_readable"])
+            for name in set(probe.CHECKS) - {"workspace_read_write", "staged_input_readable"}:
                 self.assertFalse(checks[name], name)
             self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
 
@@ -97,6 +123,7 @@ class IsolationProbeTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             (workspace / "outside-link").symlink_to(sentinel)
+            (workspace / "input.fixture").write_bytes(b"fixed-probe-input")
             unix_listener.bind(str(workspace / "host.sock"))
             unix_listener.listen(2)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
@@ -106,7 +133,7 @@ class IsolationProbeTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
             result = subprocess.run(
-                [shutil.which("unshare"), "-Urn", sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace)],
+                [shutil.which("unshare"), "-Urn", sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace), str(workspace / "host.sock")],
                 env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"},
                 capture_output=True, timeout=10,
             )
@@ -115,7 +142,7 @@ class IsolationProbeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
             checks = json.loads(result.stdout)
             self.assertTrue(checks["host_loopback_blocked"])
-            self.assertFalse(checks["workspace_host_socket_blocked"])
+            self.assertFalse(checks["workspace_host_socket_unreachable"])
             self.assertEqual(probe.classify(checks), "failed")
             self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
 
