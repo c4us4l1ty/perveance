@@ -27,7 +27,7 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-rust-test.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
-      - name: Verify desktop window starts under X11
+      - name: Exercise desktop tools under X11
         run: |
           cargo build --locked --bin perveance
           if ! xvfb-run -a -s "-screen 0 1280x1024x24" sh -c '
