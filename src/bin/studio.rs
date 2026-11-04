@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::Project;
+use perveance::{History, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -45,7 +45,7 @@ struct Studio {
     path: String,
     png_path: String,
     status: String,
-    undo: Vec<Project>,
+    history: History,
     confirm_open: bool,
     new_width: u32,
     new_height: u32,
@@ -59,15 +59,14 @@ impl Default for Studio {
     fn default() -> Self {
         Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
             color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, path: "art.perveance.json".into(), png_path: "image.png".into(),
-            status: "Prototype: save and export create new files only.".into(), undo: Vec::new(), confirm_open: false,
+            status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
 }
 
 impl Studio {
     fn checkpoint(&mut self) {
-        if self.undo.len() == 20 { self.undo.remove(0); }
-        self.undo.push(self.project.clone());
+        self.history.checkpoint(&self.project);
     }
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
@@ -80,8 +79,13 @@ impl eframe::App for Studio {
             ui.horizontal(|ui| {
                 ui.heading("perveance");
                 ui.label(egui::RichText::new("STUDIO / EARLY PROTOTYPE").small().color(Color32::from_rgb(166, 215, 74)));
-                if ui.button("Undo").clicked() {
-                    if let Some(previous) = self.undo.pop() { self.project = previous; self.layer = self.layer.min(self.project.layers.len() - 1); self.rename_buffer = self.project.layers[self.layer].name.clone(); }
+                if ui.add_enabled(self.history.can_undo(), egui::Button::new("Undo")).clicked() && self.history.undo(&mut self.project) {
+                    self.layer = self.layer.min(self.project.layers.len() - 1);
+                    self.rename_buffer = self.project.layers[self.layer].name.clone();
+                }
+                if ui.add_enabled(self.history.can_redo(), egui::Button::new("Redo")).clicked() && self.history.redo(&mut self.project) {
+                    self.layer = self.layer.min(self.project.layers.len() - 1);
+                    self.rename_buffer = self.project.layers[self.layer].name.clone();
                 }
                 ui.separator();
                 ui.label(format!("{} × {}", self.project.width, self.project.height));
@@ -109,7 +113,7 @@ impl eframe::App for Studio {
             ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
             if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
                 match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.undo.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
+                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
                     Err(error) => self.status = error,
                 }
             }
@@ -127,7 +131,7 @@ impl eframe::App for Studio {
             }
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.undo.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
+                    Ok(project) => { self.project = project; self.layer = 0; self.history.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
                     Err(error) => self.status = error,
                 }
             }
@@ -152,7 +156,7 @@ impl eframe::App for Studio {
                     Ok(project) => {
                         self.project = project;
                         self.layer = 0;
-                        self.undo.clear();
+                        self.history.clear();
                         self.rename_buffer = self.project.layers[0].name.clone();
                         self.confirm_open = false;
                         self.status = "PNG opened as a new canvas.".into();

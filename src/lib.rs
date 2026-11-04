@@ -30,6 +30,63 @@ pub struct Project {
     pub layers: Vec<Layer>,
 }
 
+/// Undo/redo snapshots for the local editor. Each stack is limited by count and
+/// estimated pixel/name payload, not a precise process-memory ceiling.
+#[derive(Default)]
+pub struct History {
+    undo: Vec<Project>,
+    redo: Vec<Project>,
+}
+
+const HISTORY_MAX_SNAPSHOTS: usize = 20;
+const HISTORY_MAX_PAYLOAD_BYTES: usize = 32 * 1024 * 1024;
+
+impl History {
+    pub fn can_undo(&self) -> bool { !self.undo.is_empty() }
+    pub fn can_redo(&self) -> bool { !self.redo.is_empty() }
+
+    /// Call immediately before a successful edit. New edits discard the redo branch.
+    pub fn checkpoint(&mut self, project: &Project) {
+        self.redo.clear();
+        Self::push_bounded(&mut self.undo, project.clone());
+    }
+
+    pub fn undo(&mut self, project: &mut Project) -> bool {
+        match self.undo.pop() {
+            Some(previous) => {
+                let current = std::mem::replace(project, previous);
+                Self::push_bounded(&mut self.redo, current);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn redo(&mut self, project: &mut Project) -> bool {
+        match self.redo.pop() {
+            Some(next) => {
+                let current = std::mem::replace(project, next);
+                Self::push_bounded(&mut self.undo, current);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn clear(&mut self) { self.undo.clear(); self.redo.clear(); }
+
+    fn push_bounded(stack: &mut Vec<Project>, project: Project) {
+        stack.push(project);
+        while stack.len() > 1 && (stack.len() > HISTORY_MAX_SNAPSHOTS || stack.iter().map(Self::estimated_payload).sum::<usize>() > HISTORY_MAX_PAYLOAD_BYTES) {
+            stack.remove(0);
+        }
+    }
+
+    fn estimated_payload(project: &Project) -> usize {
+        project.layers.iter().map(|layer| layer.pixels.len().saturating_mul(4).saturating_add(layer.name.len())).sum()
+    }
+}
+
 /// A bounded, typed operation accepted by the headless interface.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -424,6 +481,38 @@ mod tests {
         let operations = [Operation::AddLayer, Operation::RenameLayer { layer: 1, name: "".into() }];
         assert!(p.apply_operations(&operations).is_err());
         assert_eq!(p, original);
+    }
+    #[test]
+    fn history_undo_redo_and_branching_are_consistent() {
+        let mut project = Project::new(1, 1).unwrap();
+        let mut history = History::default();
+        assert!(!history.can_undo());
+        history.checkpoint(&project);
+        project.set_pixel(0, 0, 0, [1, 2, 3, 255]).unwrap();
+        assert!(history.undo(&mut project));
+        assert_eq!(project.layers[0].pixels[0], [0; 4]);
+        assert!(history.can_redo());
+        assert!(history.redo(&mut project));
+        assert_eq!(project.layers[0].pixels[0], [1, 2, 3, 255]);
+        assert!(history.undo(&mut project));
+        history.checkpoint(&project);
+        project.set_pixel(0, 0, 0, [9, 8, 7, 255]).unwrap();
+        assert!(!history.can_redo());
+        history.clear();
+        assert!(!history.can_undo());
+    }
+    #[test]
+    fn history_limits_snapshot_count() {
+        let mut project = Project::new(1, 1).unwrap();
+        let mut history = History::default();
+        for i in 0..30 {
+            history.checkpoint(&project);
+            project.set_pixel(0, 0, 0, [i, 0, 0, 255]).unwrap();
+        }
+        let mut count = 0;
+        while history.undo(&mut project) { count += 1; }
+        assert_eq!(count, 20);
+        assert!(history.can_redo());
     }
     #[test]
     fn project_round_trip_and_png_are_valid() {
