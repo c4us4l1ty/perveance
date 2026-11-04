@@ -121,6 +121,8 @@ fn discovery_reports_batch_support_and_version() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["api_version"], 1);
     assert_eq!(value["autonomous_execution"], false);
+    assert_eq!(value["autonomy_status"]["state"], "disabled");
+    assert_eq!(value["autonomy_status"]["diagnostic_can_enable_execution"], false);
     assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "rectangle"));
 }
 

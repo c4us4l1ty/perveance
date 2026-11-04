@@ -1,7 +1,10 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import socket
 import subprocess
+import tempfile
 import sys
 import unittest
 from unittest.mock import Mock, patch
@@ -53,6 +56,30 @@ class IsolationProbeTests(unittest.TestCase):
             result = probe.run_fixed_probe("/test/bwrap")
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["autonomous_execution"], "disabled")
+
+    def test_fixed_worker_detects_unisolated_access(self):
+        # This deliberately runs only the fixed probe code without bubblewrap, against
+        # disposable fixtures. It proves the checks detect an unconfined environment.
+        with tempfile.TemporaryDirectory() as tmp, socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            root = Path(tmp)
+            sentinel = root / "host-sentinel"
+            sentinel.write_bytes(b"probe-only-secret")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            (workspace / "outside-link").symlink_to(sentinel)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace)],
+                env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"},
+                capture_output=True, check=True, timeout=10,
+            )
+            checks = json.loads(result.stdout)
+            self.assertEqual(probe.classify(checks), "failed")
+            self.assertTrue(checks["workspace_read_write"])
+            for name in set(probe.CHECKS) - {"workspace_read_write"}:
+                self.assertFalse(checks[name], name)
+            self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
 
     def test_tool_failure_and_timeout_fail_closed(self):
         process = Mock()

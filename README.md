@@ -102,6 +102,6 @@ Only local mock HTTP tests have run; a real OpenRouter request and any specific 
 
 ### Isolation feasibility diagnostic
 
-The optional bubblewrap diagnostic creates its own temporary sentinel and workspace and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink), host IPv4 loopback access, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled.
+The optional bubblewrap diagnostic creates its own temporary sentinel and workspace and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink and `/proc` root links), host IPv4 loopback access, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled.
 
 These are narrow observations, not a safety guarantee. In particular, the test binds host system directories read-only and does not test kernel escapes, all network paths, resource quotas, credential brokering or malicious build scripts. Do not use the diagnostic command as a sandbox for untrusted code. The tested build-and-activation supervisor still needs to be designed and independently validated.

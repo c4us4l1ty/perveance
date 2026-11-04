@@ -19,7 +19,7 @@ from typing import Any
 
 CHECKS = (
     "workspace_read_write", "host_secret_hidden", "host_write_blocked",
-    "symlink_escape_blocked", "host_loopback_blocked", "environment_cleared",
+    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "environment_cleared",
 )
 LIMITATIONS = [
     "Fixed test code only; a pass is not a sandbox certification or an execution authorization.",
@@ -35,7 +35,7 @@ WORKER = r'''
 import json, os, pathlib, socket, sys
 secret = pathlib.Path(sys.argv[1])
 port = int(sys.argv[2])
-work = pathlib.Path('/work')
+work = pathlib.Path(sys.argv[3])
 checks = {}
 p = work / 'scratch.txt'
 try:
@@ -55,9 +55,22 @@ except OSError:
     checks['host_write_blocked'] = True
 try:
     (work / 'outside-link').read_bytes()
-    checks['symlink_escape_blocked'] = False
+    symlink_read_blocked = False
 except OSError:
-    checks['symlink_escape_blocked'] = True
+    symlink_read_blocked = True
+try:
+    (work / 'outside-link').write_bytes(b'changed-by-symlink')
+    symlink_write_blocked = False
+except OSError:
+    symlink_write_blocked = True
+checks['symlink_escape_blocked'] = symlink_read_blocked and symlink_write_blocked
+checks['proc_root_escape_blocked'] = True
+for prefix in ('/proc/1/root', '/proc/self/root'):
+    try:
+        pathlib.Path(prefix + str(secret)).read_bytes()
+        checks['proc_root_escape_blocked'] = False
+    except OSError:
+        pass
 try:
     with socket.create_connection(('127.0.0.1', port), timeout=1):
         checks['host_loopback_blocked'] = False
@@ -111,7 +124,7 @@ def run_fixed_probe(bwrap: str) -> dict[str, Any]:
                     command.extend(["--ro-bind", path, path])
             command.extend(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
                             "--bind", str(workspace), "/work", "--chdir", "/work",
-                            "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port)])
+                            "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port), "/work"])
             # Files avoid unbounded in-memory output; a Linux file-size rlimit bounds each.
             # This helper is single-threaded and only invokes a fixed diagnostic command.
             import resource

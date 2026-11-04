@@ -8,6 +8,7 @@ fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
+            "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
             "operations": ["new", "new-from-png", "inspect", "sample", "paint", "apply", "apply-proposal", "import-png", "export-png"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
