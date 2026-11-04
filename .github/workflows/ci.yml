@@ -1,7 +1,7 @@
 name: Rust CI
 on:
   push:
-    branches: ["main", "arena/015bd4ba-perveance"]
+    branches: ["main", "arena/**"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -17,15 +17,51 @@ jobs:
       - name: Select Rust
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth
       - name: Build and test Rust
-        run: cargo test --all-targets
+        run: |
+          if cargo test --locked --all-targets > /tmp/perveance-rust-test.log 2>&1; then
+            tail -n 25 /tmp/perveance-rust-test.log
+          else
+            cat /tmp/perveance-rust-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-rust-test.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+      - name: Verify desktop window starts under X11
+        run: |
+          cargo build --locked --bin perveance
+          if ! xvfb-run -a sh -c '
+            set -eu
+            export LIBGL_ALWAYS_SOFTWARE=1
+            ./target/debug/perveance >/tmp/perveance-gui.log 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            timeout 30s xdotool search --sync --onlyvisible --name Perveance
+            kill -0 "$pid"
+            sleep 2
+            kill -0 "$pid"
+          ' >/tmp/perveance-smoke.log 2>&1; then
+            cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
+            for file in /tmp/perveance-smoke.log /tmp/perveance-gui.log; do
+              if [ -f "$file" ]; then
+                tail -n 12 "$file" | while IFS= read -r line; do
+                  line=${line//%/%25}
+                  line=${line//$'\r'/%0D}
+                  echo "::error::$line"
+                done
+              fi
+            done
+            exit 1
+          fi
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
       - name: Exercise CLI round trip
         run: |
-          cargo run --quiet --bin perveance-cli -- capabilities
-          cargo run --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
-          cargo run --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
-          cargo run --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
-          cargo run --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png
+          cargo run --locked --quiet --bin perveance-cli -- capabilities
+          cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-ci.json
+          cargo run --locked --quiet --bin perveance-cli -- paint /tmp/perveance-ci.json /tmp/perveance-painted.json 0 2 3 255 0 0 255
+          cargo run --locked --quiet --bin perveance-cli -- inspect /tmp/perveance-painted.json
+          cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-painted.json /tmp/perveance-ci.png
+          cargo run --locked --quiet --bin perveance-cli -- new 16 16 /tmp/perveance-potion-base.json
+          cargo run --locked --quiet --bin perveance-cli -- apply /tmp/perveance-potion-base.json /tmp/perveance-potion.json examples/potion-operations.json
+          cargo run --locked --quiet --bin perveance-cli -- export-png /tmp/perveance-potion.json /tmp/perveance-potion.png

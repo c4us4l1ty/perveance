@@ -8,11 +8,37 @@ fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
-            "operations": ["new", "inspect", "paint", "apply", "export-png"], "limitations": ["create-new outputs only", "no vector support", "no AI"]})),
+            "operations": ["new", "new-from-png", "inspect", "paint", "apply", "import-png", "export-png"],
+            "batch_operations": ["add_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "fill"],
+            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "png_bytes": perveance::MAX_PNG_BYTES},
+            "batch_examples": {
+                "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
+                "move_layer": {"op": "move_layer", "from": 0, "to": 1},
+                "remove_layer": {"op": "remove_layer", "layer": 0},
+                "set_visibility": {"op": "set_visibility", "layer": 0, "visible": true},
+                "add_layer": {"op": "add_layer"},
+                "pixel": {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]},
+                "line": {"op": "line", "layer": 0, "from": [0, 0], "to": [1, 1], "color": [255, 0, 0, 255]},
+                "rectangle": {"op": "rectangle", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "color": [255, 0, 0, 255]},
+                "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
+            },
+            "batch_semantics": "Layer indices are bottom-to-top. RGBA channels are straight-alpha bytes. Rectangle dimensions are positive and must fit the canvas. Operations apply in order to a clone; on failure no output is created.",
+            "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "no AI"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output}))
+        }
+        [command, png_path, output] if command == "new-from-png" => {
+            let project = Project::from_png(Path::new(png_path))?;
+            project.save_new(Path::new(output))?;
+            Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height, "layer": 0}))
+        }
+        [command, input, png_path, output] if command == "import-png" => {
+            let mut project = Project::load(Path::new(input))?;
+            project.import_png_layer(Path::new(png_path))?;
+            project.save_new(Path::new(output))?;
+            Ok(json!({"ok": true, "output": output, "layer": project.layers.len() - 1}))
         }
         [command, input] if command == "inspect" => {
             let project = Project::load(Path::new(input))?;
@@ -43,7 +69,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | inspect INPUT | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
     }
 }
 

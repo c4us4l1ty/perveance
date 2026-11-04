@@ -2,15 +2,19 @@
 //! It does not execute AI-generated code or implement a sandbox.
 
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::fs::File;
+use std::io::{BufReader, Cursor, Read, Write};
 use std::path::Path;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DIMENSION: u32 = 256;
-const MAX_PROJECT_BYTES: u64 = 16 * 1024 * 1024;
+// Must accommodate the worst valid 256×256×32 RGBA project as JSON, including
+// escaped layer names, not merely its much smaller in-memory pixel payload.
+const MAX_PROJECT_BYTES: u64 = 40 * 1024 * 1024;
+pub const MAX_PNG_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Layer {
     pub name: String,
     pub visible: bool,
@@ -19,6 +23,7 @@ pub struct Layer {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Project {
     pub version: u32,
     pub width: u32,
@@ -27,14 +32,118 @@ pub struct Project {
     pub layers: Vec<Layer>,
 }
 
+/// Undo/redo snapshots for the local editor. Each stack is limited by count and
+/// estimated pixel/name payload, not a precise process-memory ceiling.
+#[derive(Default)]
+pub struct History {
+    undo: Vec<HistorySnapshot>,
+    redo: Vec<HistorySnapshot>,
+}
+
+struct HistorySnapshot {
+    project: Project,
+    selected_layer: Option<usize>,
+}
+
+const HISTORY_MAX_SNAPSHOTS: usize = 20;
+const HISTORY_MAX_PAYLOAD_BYTES: usize = 32 * 1024 * 1024;
+
+impl History {
+    pub fn can_undo(&self) -> bool { !self.undo.is_empty() }
+    pub fn can_redo(&self) -> bool { !self.redo.is_empty() }
+
+    /// Call immediately before a successful edit. New edits discard the redo branch.
+    pub fn checkpoint(&mut self, project: &Project) { self.checkpoint_inner(project, None); }
+
+    /// Also retain the editor's selected layer so layer reorder undo restores selection.
+    pub fn checkpoint_with_selection(&mut self, project: &Project, selected_layer: usize) {
+        self.checkpoint_inner(project, Some(selected_layer));
+    }
+
+    fn checkpoint_inner(&mut self, project: &Project, selected_layer: Option<usize>) {
+        self.redo.clear();
+        Self::push_bounded(&mut self.undo, HistorySnapshot { project: project.clone(), selected_layer });
+    }
+
+    /// Apply a discrete edit transactionally. No-ops and errors do not discard redo.
+    pub fn apply<F>(&mut self, project: &mut Project, edit: F) -> Result<bool, String>
+    where F: FnOnce(&mut Project) -> Result<(), String> {
+        self.apply_inner(project, None, edit)
+    }
+
+    pub fn apply_with_selection<F>(&mut self, project: &mut Project, selected_layer: usize, edit: F) -> Result<bool, String>
+    where F: FnOnce(&mut Project) -> Result<(), String> {
+        self.apply_inner(project, Some(selected_layer), edit)
+    }
+
+    fn apply_inner<F>(&mut self, project: &mut Project, selected_layer: Option<usize>, edit: F) -> Result<bool, String>
+    where F: FnOnce(&mut Project) -> Result<(), String> {
+        let mut candidate = project.clone();
+        edit(&mut candidate)?;
+        candidate.validate()?;
+        if candidate == *project { return Ok(false); }
+        self.checkpoint_inner(project, selected_layer);
+        *project = candidate;
+        Ok(true)
+    }
+
+    pub fn undo(&mut self, project: &mut Project) -> bool {
+        Self::restore(&mut self.undo, &mut self.redo, project, None)
+    }
+
+    pub fn redo(&mut self, project: &mut Project) -> bool {
+        Self::restore(&mut self.redo, &mut self.undo, project, None)
+    }
+
+    pub fn undo_with_selection(&mut self, project: &mut Project, selected_layer: &mut usize) -> bool {
+        Self::restore(&mut self.undo, &mut self.redo, project, Some(selected_layer))
+    }
+
+    pub fn redo_with_selection(&mut self, project: &mut Project, selected_layer: &mut usize) -> bool {
+        Self::restore(&mut self.redo, &mut self.undo, project, Some(selected_layer))
+    }
+
+    fn restore(source: &mut Vec<HistorySnapshot>, destination: &mut Vec<HistorySnapshot>, project: &mut Project, selected_layer: Option<&mut usize>) -> bool {
+        match source.pop() {
+            Some(snapshot) => {
+                let current_selection = selected_layer.as_deref().copied();
+                let current_project = std::mem::replace(project, snapshot.project);
+                Self::push_bounded(destination, HistorySnapshot { project: current_project, selected_layer: current_selection });
+                if let (Some(selection), Some(previous)) = (selected_layer, snapshot.selected_layer) {
+                    *selection = previous.min(project.layers.len().saturating_sub(1));
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn clear(&mut self) { self.undo.clear(); self.redo.clear(); }
+
+    fn push_bounded(stack: &mut Vec<HistorySnapshot>, snapshot: HistorySnapshot) {
+        stack.push(snapshot);
+        while stack.len() > 1 && (stack.len() > HISTORY_MAX_SNAPSHOTS || stack.iter().map(|entry| Self::estimated_payload(&entry.project)).sum::<usize>() > HISTORY_MAX_PAYLOAD_BYTES) {
+            stack.remove(0);
+        }
+    }
+
+    fn estimated_payload(project: &Project) -> usize {
+        project.layers.iter().map(|layer| layer.pixels.len().saturating_mul(4).saturating_add(layer.name.len())).sum()
+    }
+}
+
 /// A bounded, typed operation accepted by the headless interface.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     AddLayer,
     SetVisibility { layer: usize, visible: bool },
+    RenameLayer { layer: usize, name: String },
+    MoveLayer { from: usize, to: usize },
+    RemoveLayer { layer: usize },
     Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
     Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
+    Rectangle { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
 }
 
@@ -51,6 +160,27 @@ impl Project {
             height,
             layers: vec![Layer { name: "Layer 1".into(), visible: true, pixels: vec![[0; 4]; (width * height) as usize] }],
         })
+    }
+
+    /// Open a static PNG as a new project. Pixel metadata and color profiles are not retained.
+    pub fn from_png(path: &Path) -> Result<Self, String> {
+        let image = decode_png(path)?;
+        let mut project = Self::new(image.width, image.height)?;
+        project.layers[0].name = "Imported PNG".into();
+        project.layers[0].pixels = image.pixels;
+        Ok(project)
+    }
+
+    /// Import a same-sized static PNG as a new topmost layer. Failure leaves the project unchanged.
+    pub fn import_png_layer(&mut self, path: &Path) -> Result<(), String> {
+        self.validate()?;
+        if self.layers.len() >= 32 { return Err("layer limit reached".into()); }
+        let image = decode_png(path)?;
+        if image.width != self.width || image.height != self.height {
+            return Err(format!("PNG is {}×{} but the canvas is {}×{}", image.width, image.height, self.width, self.height));
+        }
+        self.layers.push(Layer { name: "Imported PNG".into(), visible: true, pixels: image.pixels });
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -73,6 +203,49 @@ impl Project {
             name: format!("Layer {}", self.layers.len() + 1), visible: true,
             pixels: vec![[0; 4]; (self.width * self.height) as usize],
         });
+        Ok(())
+    }
+
+    pub fn rename_layer(&mut self, layer: usize, name: &str) -> Result<(), String> {
+        self.validate()?;
+        if name.trim().is_empty() || name.len() > 256 { return Err("layer name must be 1 to 256 bytes and not blank".into()); }
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        target.name = name.to_owned();
+        Ok(())
+    }
+
+    /// Move a layer to an index in the resulting bottom-to-top ordering.
+    pub fn move_layer(&mut self, from: usize, to: usize) -> Result<(), String> {
+        self.validate()?;
+        if from >= self.layers.len() || to >= self.layers.len() { return Err("layer does not exist".into()); }
+        if from != to {
+            let layer = self.layers.remove(from);
+            self.layers.insert(to, layer);
+        }
+        Ok(())
+    }
+
+    pub fn remove_layer(&mut self, layer: usize) -> Result<(), String> {
+        self.validate()?;
+        if layer >= self.layers.len() { return Err("layer does not exist".into()); }
+        if self.layers.len() == 1 { return Err("cannot remove the last layer".into()); }
+        self.layers.remove(layer);
+        Ok(())
+    }
+
+    /// Fill a rectangle, entirely inside the canvas, with exclusive right/bottom edges.
+    pub fn rectangle(&mut self, layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        let right = x.checked_add(width).ok_or("rectangle out of bounds")?;
+        let bottom = y.checked_add(height).ok_or("rectangle out of bounds")?;
+        if layer >= self.layers.len() || width == 0 || height == 0 || right > self.width || bottom > self.height {
+            return Err("rectangle or layer is outside the project".into());
+        }
+        for row in y..bottom {
+            let start = (row * self.width + x) as usize;
+            let end = start + width as usize;
+            self.layers[layer].pixels[start..end].fill(color);
+        }
         Ok(())
     }
 
@@ -142,15 +315,19 @@ impl Project {
         if operations.len() > MAX_OPERATIONS { return Err("too many operations".into()); }
         let mut candidate = self.clone();
         for (index, operation) in operations.iter().enumerate() {
-            let result = match *operation {
+            let result = match operation {
                 Operation::AddLayer => candidate.add_layer(),
-                Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(layer) {
-                    Some(item) => { item.visible = visible; Ok(()) },
+                Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
+                    Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),
                 },
-                Operation::Pixel { layer, x, y, color } => candidate.set_pixel(layer, x, y, color),
-                Operation::Line { layer, from, to, color } => candidate.draw_line(layer, from, to, color),
-                Operation::Fill { layer, x, y, color } => candidate.fill(layer, x, y, color),
+                Operation::RenameLayer { layer, name } => candidate.rename_layer(*layer, name),
+                Operation::MoveLayer { from, to } => candidate.move_layer(*from, *to),
+                Operation::RemoveLayer { layer } => candidate.remove_layer(*layer),
+                Operation::Pixel { layer, x, y, color } => candidate.set_pixel(*layer, *x, *y, *color),
+                Operation::Line { layer, from, to, color } => candidate.draw_line(*layer, *from, *to, *color),
+                Operation::Rectangle { layer, x, y, width, height, color } => candidate.rectangle(*layer, *x, *y, *width, *height, *color),
+                Operation::Fill { layer, x, y, color } => candidate.fill(*layer, *x, *y, *color),
             };
             result.map_err(|error| format!("operation {index}: {error}"))?;
         }
@@ -202,14 +379,67 @@ impl Project {
     }
 }
 
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let file = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| format!("create output: {e}"))?;
-    let result = (|| { let mut output = BufWriter::new(file); output.write_all(bytes)?; output.flush() })();
-    if let Err(error) = result {
-        // Leave an incomplete file for the user to inspect or remove. Removing by path
-        // here could delete a different file if another process replaced the entry.
-        return Err(format!("write output: {error}; incomplete output may remain"));
+struct DecodedPng {
+    width: u32,
+    height: u32,
+    pixels: Vec<[u8; 4]>,
+}
+
+/// Decode only a bounded single-frame PNG to straight-alpha RGBA8.
+fn decode_png(path: &Path) -> Result<DecodedPng, String> {
+    let file = File::open(path).map_err(|e| format!("open PNG: {e}"))?;
+    let mut bytes = Vec::new();
+    BufReader::new(file).take(MAX_PNG_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("read PNG: {e}"))?;
+    if bytes.len() as u64 > MAX_PNG_BYTES { return Err("PNG exceeds input size limit".into()); }
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_limits(png::Limits { bytes: 8 * 1024 * 1024 });
+    decoder.set_ignore_text_chunk(true);
+    decoder.set_ignore_iccp_chunk(true);
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().map_err(|e| format!("invalid PNG header: {e}"))?;
+    let info = reader.info();
+    let (width, height) = (info.width, info.height);
+    if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+        return Err(format!("PNG dimensions must be between 1 and {MAX_DIMENSION}"));
     }
+    if info.animation_control.is_some() { return Err("animated PNG is not supported".into()); }
+    let max_output = (width as usize) * (height as usize) * 4;
+    if reader.output_buffer_size() > max_output { return Err("PNG decoded output is too large".into()); }
+    let mut raw = vec![0; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut raw).map_err(|e| format!("decode PNG: {e}"))?;
+    if frame.width != width || frame.height != height || frame.bit_depth != png::BitDepth::Eight {
+        return Err("unsupported PNG frame or bit depth".into());
+    }
+    let channels = match frame.color_type {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => return Err("could not expand indexed PNG".into()),
+    };
+    let pixel_count = width as usize * height as usize;
+    if frame.buffer_size() != pixel_count * channels { return Err("invalid PNG pixel buffer".into()); }
+    let pixels = raw[..frame.buffer_size()].chunks_exact(channels).map(|p| match channels {
+        1 => [p[0], p[0], p[0], 255],
+        2 => [p[0], p[0], p[0], p[1]],
+        3 => [p[0], p[1], p[2], 255],
+        4 => [p[0], p[1], p[2], p[3]],
+        _ => unreachable!(),
+    }).collect();
+    reader.finish().map_err(|e| format!("finish PNG: {e}"))?;
+    if reader.info().animation_control.is_some() { return Err("animated PNG is not supported".into()); }
+    Ok(DecodedPng { width, height, pixels })
+}
+
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| format!("create temporary output: {e}"))?;
+    staged.write_all(bytes).map_err(|e| format!("write temporary output: {e}"))?;
+    staged.as_file_mut().sync_all().map_err(|e| format!("sync temporary output: {e}"))?;
+    // Never replace an existing file. The tempfile is created in the target's
+    // directory so the library can use a same-filesystem no-clobber installation.
+    // Filesystem/platform guarantees vary; directory fsync is not performed.
+    staged.persist_noclobber(path).map_err(|e| format!("create output: {}", e.error))?;
     Ok(())
 }
 
@@ -262,6 +492,104 @@ mod tests {
         assert_eq!(p, old);
         assert!(p.draw_line(0, [0, 0], [5, 0], red).is_err());
         assert_eq!(p, old);
+    }
+    #[test]
+    fn layer_edits_and_rectangles_validate_before_mutating() {
+        let mut p = Project::new(4, 3).unwrap();
+        p.add_layer().unwrap();
+        p.rename_layer(1, "Foreground").unwrap();
+        p.rectangle(1, 1, 1, 2, 2, [10, 20, 30, 255]).unwrap();
+        assert_eq!(p.layers[1].pixels[5], [10, 20, 30, 255]);
+        assert_eq!(p.layers[1].pixels[10], [10, 20, 30, 255]);
+        assert_eq!(p.layers[1].pixels[3], [0; 4]);
+        let old = p.clone();
+        assert!(p.rectangle(1, u32::MAX, 0, 2, 1, [1; 4]).is_err());
+        assert!(p.rectangle(1, 3, 2, 2, 1, [1; 4]).is_err());
+        assert!(p.rename_layer(0, "  ").is_err());
+        assert_eq!(p, old);
+        p.move_layer(1, 0).unwrap();
+        assert_eq!(p.layers[0].name, "Foreground");
+        p.remove_layer(1).unwrap();
+        assert!(p.remove_layer(0).is_err());
+        assert_eq!(p.layers.len(), 1);
+    }
+    #[test]
+    fn unknown_project_data_is_rejected_instead_of_silently_discarded() {
+        let p = Project::new(1, 1).unwrap();
+        let mut value = serde_json::to_value(p).unwrap();
+        value["future_capability"] = serde_json::json!({"important": true});
+        assert!(serde_json::from_value::<Project>(value).is_err());
+    }
+    #[test]
+    fn invalid_layer_operations_roll_back_the_entire_batch() {
+        let mut p = Project::new(2, 2).unwrap();
+        let original = p.clone();
+        let operations = [Operation::AddLayer, Operation::RenameLayer { layer: 1, name: "".into() }];
+        assert!(p.apply_operations(&operations).is_err());
+        assert_eq!(p, original);
+    }
+    #[test]
+    fn history_undo_redo_and_branching_are_consistent() {
+        let mut project = Project::new(1, 1).unwrap();
+        let mut history = History::default();
+        assert!(!history.can_undo());
+        history.checkpoint(&project);
+        project.set_pixel(0, 0, 0, [1, 2, 3, 255]).unwrap();
+        assert!(history.undo(&mut project));
+        assert_eq!(project.layers[0].pixels[0], [0; 4]);
+        assert!(history.can_redo());
+        assert!(history.redo(&mut project));
+        assert_eq!(project.layers[0].pixels[0], [1, 2, 3, 255]);
+        assert!(history.undo(&mut project));
+        history.checkpoint(&project);
+        project.set_pixel(0, 0, 0, [9, 8, 7, 255]).unwrap();
+        assert!(!history.can_redo());
+        history.clear();
+        assert!(!history.can_undo());
+    }
+    #[test]
+    fn history_transaction_preserves_redo_on_failure_or_noop() {
+        let mut p = Project::new(1, 1).unwrap();
+        let mut history = History::default();
+        history.checkpoint(&p);
+        p.set_pixel(0, 0, 0, [1, 2, 3, 255]).unwrap();
+        assert!(history.undo(&mut p));
+        assert!(history.can_redo());
+        assert!(!history.apply(&mut p, |candidate| candidate.set_pixel(0, 0, 0, [0; 4])).unwrap());
+        assert!(history.can_redo());
+        assert!(history.apply(&mut p, |candidate| candidate.set_pixel(99, 0, 0, [3; 4])).is_err());
+        assert!(history.can_redo());
+        assert!(history.apply(&mut p, |candidate| candidate.set_pixel(0, 0, 0, [9; 4])).unwrap());
+        assert!(!history.can_redo());
+    }
+    #[test]
+    fn undo_redo_restore_selected_layer_after_reorder() {
+        let mut p = Project::new(1, 1).unwrap();
+        p.add_layer().unwrap();
+        p.rename_layer(1, "Selected").unwrap();
+        let mut selection = 1;
+        let mut history = History::default();
+        history.apply_with_selection(&mut p, selection, |project| project.move_layer(1, 0)).unwrap();
+        selection = 0;
+        assert!(history.undo_with_selection(&mut p, &mut selection));
+        assert_eq!(selection, 1);
+        assert_eq!(p.layers[selection].name, "Selected");
+        assert!(history.redo_with_selection(&mut p, &mut selection));
+        assert_eq!(selection, 0);
+        assert_eq!(p.layers[selection].name, "Selected");
+    }
+    #[test]
+    fn history_limits_snapshot_count() {
+        let mut project = Project::new(1, 1).unwrap();
+        let mut history = History::default();
+        for i in 0..30 {
+            history.checkpoint(&project);
+            project.set_pixel(0, 0, 0, [i, 0, 0, 255]).unwrap();
+        }
+        let mut count = 0;
+        while history.undo(&mut project) { count += 1; }
+        assert_eq!(count, 20);
+        assert!(history.can_redo());
     }
     #[test]
     fn project_round_trip_and_png_are_valid() {
