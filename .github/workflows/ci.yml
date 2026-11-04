@@ -121,7 +121,13 @@ jobs:
             exit 1
           fi
       - name: Test environment probe
-        run: python3 -m unittest discover -s tests -v
+        run: |
+          if ! python3 -m unittest discover -s tests -v > /tmp/perveance-python-tests.log 2>&1; then
+            cat /tmp/perveance-python-tests.log
+            exit 1
+          fi
+          cat /tmp/perveance-python-tests.log
+          python3 -c 'from pathlib import Path; lines=Path("/tmp/perveance-python-tests.log").read_text().splitlines(); line=next(x for x in lines if x.startswith("test_network_namespace_does_not_isolate_exposed_host_unix_socket ")); result=line.rsplit(" ... ",1)[-1]; assert result == "ok" or result.startswith("skipped"); print("::notice::Fixed unshare Unix-socket control: "+result+"; if run, success demonstrates the host socket is reachable, not secure isolation")'
       - name: Run fixed isolation feasibility checks
         run: |
           if python3 tools/isolation_probe.py > /tmp/perveance-isolation.json; then
