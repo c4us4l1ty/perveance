@@ -109,6 +109,7 @@ jobs:
             wait "$pid"
           ' >/tmp/perveance-smoke.log 2>&1; then
             cat /tmp/perveance-smoke.log /tmp/perveance-gui.log 2>/dev/null || true
+            /usr/bin/python3 tools/diagnose_gui_smoke.py || true
             for file in /tmp/perveance-smoke.log /tmp/perveance-gui.log; do
               if [ -f "$file" ]; then
                 tail -n 12 "$file" | while IFS= read -r line; do
