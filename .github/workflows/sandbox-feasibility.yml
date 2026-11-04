@@ -1,10 +1,8 @@
 name: Fixed sandbox feasibility matrix
 on:
   push:
-    branches: ["arena/**"]
-    paths: ["tools/isolation_probe.py", "tests/test_isolation_probe.py", ".github/workflows/sandbox-feasibility.yml"]
+    branches: ["main", "arena/**"]
   pull_request:
-    paths: ["tools/isolation_probe.py", "tests/test_isolation_probe.py", ".github/workflows/sandbox-feasibility.yml"]
   workflow_dispatch:
 permissions:
   contents: read
