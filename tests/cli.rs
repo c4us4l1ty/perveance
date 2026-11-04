@@ -304,3 +304,66 @@ fn fingerprint_is_based_on_project_content_not_json_formatting() {
     let b: serde_json::Value = serde_json::from_slice(&cli(&["inspect", pretty.to_str().unwrap()]).stdout).unwrap();
     assert_eq!(a["revision"], b["revision"]);
 }
+
+#[test]
+fn read_region_exposes_revision_bound_rows_and_validates_bounds() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("base.json");
+    let edited = dir.0.join("edited.json");
+    let operations = dir.0.join("ops.json");
+    assert!(cli(&["new", "65", "64", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"pixel","layer":0,"x":2,"y":1,"color":[20,40,60,200]},
+        {"op":"pixel","layer":0,"x":3,"y":1,"color":[9,8,7,0]},
+        {"op":"add_layer"},
+        {"op":"pixel","layer":1,"x":2,"y":1,"color":[200,120,50,100]},
+        {"op":"set_visibility","layer":1,"visible":false}
+    ]"#).unwrap();
+    let edit = cli(&["apply", initial.to_str().unwrap(), edited.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(edit.status.success(), "{}", String::from_utf8_lossy(&edit.stderr));
+    let path = edited.to_str().unwrap();
+    let before = fs::read(&edited).unwrap();
+    let raw = cli(&["read-region", path, "2", "1", "2", "2", "layer", "1"]);
+    assert!(raw.status.success(), "{}", String::from_utf8_lossy(&raw.stderr));
+    let raw: serde_json::Value = serde_json::from_slice(&raw.stdout).unwrap();
+    assert_eq!(raw["pixels"], serde_json::json!([[[200,120,50,100],[0,0,0,0]],[[0,0,0,0],[0,0,0,0]]]));
+    assert_eq!(raw["layer"], 1);
+    let transparent = cli(&["read-region", path, "3", "1", "1", "1", "layer", "0"]);
+    assert!(transparent.status.success());
+    let transparent: serde_json::Value = serde_json::from_slice(&transparent.stdout).unwrap();
+    assert_eq!(transparent["pixels"][0][0], serde_json::json!([9,8,7,0]));
+    let composite = cli(&["read-region", path, "2", "1", "2", "2", "composite"]);
+    assert!(composite.status.success());
+    let composite: serde_json::Value = serde_json::from_slice(&composite.stdout).unwrap();
+    assert_eq!(composite["pixels"][0][0], serde_json::json!([20,40,60,200]));
+    assert_eq!(composite["layer"], serde_json::Value::Null);
+    let inspect: serde_json::Value = serde_json::from_slice(&cli(&["inspect", path]).stdout).unwrap();
+    assert_eq!(raw["revision"], inspect["revision"]);
+    assert_eq!(composite["revision"], inspect["revision"]);
+    for (y, row) in composite["pixels"].as_array().unwrap().iter().enumerate() {
+        for (x, color) in row.as_array().unwrap().iter().enumerate() {
+            let sample = cli(&["sample", path, &(x + 2).to_string(), &(y + 1).to_string(), "composite"]);
+            let sample: serde_json::Value = serde_json::from_slice(&sample.stdout).unwrap();
+            assert_eq!(*color, sample["color"]);
+        }
+    }
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["limits"]["region_pixels"], 4096);
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "read-region"));
+    assert!(cli(&["read-region", path, "0", "0", "64", "64", "composite"]).status.success());
+    for args in [
+        vec!["read-region", path, "0", "0", "65", "64", "composite"],
+        vec!["read-region", path, "0", "0", "0", "1", "composite"],
+        vec!["read-region", path, "64", "0", "2", "1", "composite"],
+        vec!["read-region", path, "4294967295", "0", "1", "1", "composite"],
+        vec!["read-region", path, "0", "0", "4294967295", "2", "composite"],
+        vec!["read-region", path, "0", "0", "1", "1", "layer", "2"],
+    ] {
+        let result = cli(&args);
+        assert!(!result.status.success(), "unexpected success: {:?}", args);
+        assert!(result.stdout.is_empty());
+        let err: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+        assert_eq!(err["ok"], false);
+    }
+    assert_eq!(fs::read(edited).unwrap(), before);
+}
