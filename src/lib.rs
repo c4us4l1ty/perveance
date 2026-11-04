@@ -97,6 +97,7 @@ impl Project {
     pub fn save_new(&self, path: &Path) -> Result<(), String> {
         self.validate()?;
         let bytes = serde_json::to_vec(self).map_err(|e| format!("serialize project: {e}"))?;
+        if bytes.len() as u64 > MAX_PROJECT_BYTES { return Err("project exceeds size limit".into()); }
         write_new(path, &bytes)
     }
 
@@ -119,9 +120,9 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let file = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| format!("create output: {e}"))?;
     let result = (|| { let mut output = BufWriter::new(file); output.write_all(bytes)?; output.flush() })();
     if let Err(error) = result {
-        // Remove our incomplete new file, not a pre-existing file.
-        let _ = fs::remove_file(path);
-        return Err(format!("write output: {error}"));
+        // Leave an incomplete file for the user to inspect or remove. Removing by path
+        // here could delete a different file if another process replaced the entry.
+        return Err(format!("write output: {error}; incomplete output may remain"));
     }
     Ok(())
 }

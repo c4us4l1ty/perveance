@@ -1,0 +1,21 @@
+name: Graphite feasibility spike
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-graphene-cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the reviewed upstream revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: GraphiteEditor/Graphite
+          ref: 708cca339de55b6bbb3f6257769c45dffa492c3e
+          persist-credentials: false
+      - name: Check the upstream headless CLI
+        run: |
+          rustup default stable
+          rustc --version
+          cargo check --locked -p graphene-cli --no-default-features
