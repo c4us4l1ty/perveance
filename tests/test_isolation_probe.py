@@ -51,14 +51,33 @@ class IsolationProbeTests(unittest.TestCase):
             self.assertEqual(command[command.index("--bind") + 2], "/work")
             self.assertEqual(kwargs["env"]["PERVEANCE_PROBE_SECRET"], "probe-only-environment-sentinel")
             self.assertNotIn("HOME", kwargs["env"])
-            kwargs["stdout"].write(json.dumps({name: True for name in probe.CHECKS}).encode())
+            checks = {name: True for name in probe.CHECKS}
+            workspace = Path(command[command.index("--bind") + 1])
+            if workspace.name == "unsafe-workspace":
+                checks["workspace_host_socket_unreachable"] = False
+            kwargs["stdout"].write(json.dumps(checks).encode())
             process = Mock()
             process.wait.return_value = 0
             return process
         with patch.object(probe.subprocess, "Popen", side_effect=fake_popen):
             result = probe.run_fixed_probe("/test/bwrap")
         self.assertEqual(result["status"], "passed")
+        self.assertFalse(result["unsafe_workspace_control"]["workspace_host_socket_unreachable"])
         self.assertEqual(result["autonomous_execution"], "disabled")
+
+    def test_unsafe_control_is_required_and_strict(self):
+        def fake_popen(command, **kwargs):
+            # A missing or falsely safe control must never become a pass.
+            checks = {name: True for name in probe.CHECKS}
+            kwargs["stdout"].write(json.dumps(checks).encode())
+            process = Mock()
+            process.wait.return_value = 0
+            return process
+        with patch.object(probe.subprocess, "Popen", side_effect=fake_popen):
+            result = probe.run_fixed_probe("/test/bwrap")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["autonomous_execution"], "disabled")
+        self.assertTrue(result["unsafe_workspace_control"]["workspace_host_socket_unreachable"])
 
     def test_fixed_worker_detects_unisolated_access(self):
         # This deliberately runs only the fixed probe code without bubblewrap, against
@@ -115,7 +134,7 @@ class IsolationProbeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
             checks = json.loads(result.stdout)
             self.assertTrue(checks["host_loopback_blocked"])
-            self.assertFalse(checks["workspace_host_socket_blocked"])
+            self.assertFalse(checks["workspace_host_socket_unreachable"])
             self.assertEqual(probe.classify(checks), "failed")
             self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
 

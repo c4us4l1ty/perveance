@@ -19,14 +19,15 @@ from typing import Any
 
 CHECKS = (
     "workspace_read_write", "host_secret_hidden", "host_write_blocked",
-    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "workspace_host_socket_blocked", "environment_cleared",
+    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "workspace_host_socket_unreachable", "environment_cleared",
 )
 LIMITATIONS = [
     "Fixed test code only; a pass is not a sandbox certification or an execution authorization.",
     "No kernel escape, syscall, GPU, cgroup/quota, network egress, dependency, credential-broker, or persistence audit.",
     "The diagnostic binds host /usr, /bin and libraries read-only; it is not a production worker profile.",
     "Only host IPv4 loopback and a planted workspace Unix socket are tested, not all network protocols or destinations.",
-    "A host Unix socket exposed through a bind-mounted workspace may remain reachable across network namespaces.",
+    "The positive fixture contains no host socket; this checks fixture staging, not an OS socket filter.",
+    "The negative control deliberately exposes a host Unix socket, which may remain reachable across network namespaces.",
     "Probe output and tool availability are not trusted authorization for autonomous execution.",
 ]
 
@@ -81,9 +82,9 @@ try:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(1)
         client.connect(str(work / 'host.sock'))
-        checks['workspace_host_socket_blocked'] = False
+        checks['workspace_host_socket_unreachable'] = False
 except OSError:
-    checks['workspace_host_socket_blocked'] = True
+    checks['workspace_host_socket_unreachable'] = True
 checks['environment_cleared'] = 'PERVEANCE_PROBE_SECRET' not in os.environ
 print(json.dumps(checks, sort_keys=True))
 '''
@@ -96,12 +97,13 @@ def classify(checks: Any) -> str:
     return "passed" if all(checks[name] is True for name in CHECKS) else "failed"
 
 
-def report(status: str, reason: str, checks: dict[str, Any] | None = None) -> dict[str, Any]:
+def report(status: str, reason: str, checks: dict[str, Any] | None = None, unsafe_control: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "probe": "bubblewrap-fixed-checks-v2",
+        "probe": "bubblewrap-fixed-checks-v3",
         "status": status,
         "reason": reason,
         "checks": checks or {},
+        "unsafe_workspace_control": unsafe_control or {},
         "autonomous_execution": "disabled",
         "limitations": LIMITATIONS,
     }
@@ -112,15 +114,18 @@ def run_fixed_probe(bwrap: str) -> dict[str, Any]:
         root = Path(tmp)
         secret = root / "host-sentinel"
         secret.write_bytes(b"probe-only-secret")
-        workspace = root / "workspace"
-        workspace.mkdir()
-        (workspace / "outside-link").symlink_to(secret)
+        clean = root / "clean-workspace"
+        unsafe = root / "unsafe-workspace"
+        clean.mkdir()
+        unsafe.mkdir()
+        # Both workspaces include a hostile symlink; only the unsafe control
+        # deliberately mounts a live host socket. No input directory is copied.
+        for workspace in (clean, unsafe):
+            (workspace / "outside-link").symlink_to(secret)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_listener:
-            # A deliberately unsafe input fixture: a live host socket in the
-            # bound workspace. Network namespaces alone do not necessarily deny it.
-            socket_path = workspace / "host.sock"
+            socket_path = unsafe / "host.sock"
             unix_listener.bind(str(socket_path))
-            unix_listener.listen(2)
+            unix_listener.listen(4)
             unix_listener.settimeout(2)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
                 control.settimeout(2)
@@ -128,57 +133,74 @@ def run_fixed_probe(bwrap: str) -> dict[str, Any]:
                 accepted, _ = unix_listener.accept()
                 accepted.close()
             listener.bind(("127.0.0.1", 0))
-            listener.listen(2)
+            listener.listen(4)
             listener.settimeout(2)
             port = listener.getsockname()[1]
-            # Establish that the listener is reachable from the host before the test.
             with socket.create_connection(("127.0.0.1", port), timeout=2):
                 accepted, _ = listener.accept()
                 accepted.close()
-            command = [bwrap, "--unshare-user", "--unshare-pid", "--unshare-net",
-                       "--unshare-ipc", "--unshare-uts", "--new-session", "--die-with-parent",
-                       "--clearenv", "--setenv", "PATH", "/usr/bin:/bin"]
-            for path in ("/usr", "/bin", "/lib", "/lib64"):
-                if Path(path).exists():
-                    command.extend(["--ro-bind", path, path])
-            command.extend(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-                            "--bind", str(workspace), "/work", "--chdir", "/work",
-                            "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port), "/work"])
-            # Files avoid unbounded in-memory output; a Linux file-size rlimit bounds each.
-            # This helper is single-threaded and only invokes a fixed diagnostic command.
-            import resource
-            def limit_output() -> None:
-                resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
-            with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-                try:
-                    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                                               env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"}, start_new_session=True,
-                                               preexec_fn=limit_output)
+
+            def run_worker(workspace: Path) -> tuple[dict[str, Any] | None, str | None]:
+                command = [bwrap, "--unshare-user", "--unshare-pid", "--unshare-net",
+                           "--unshare-ipc", "--unshare-uts", "--new-session", "--die-with-parent",
+                           "--clearenv", "--setenv", "PATH", "/usr/bin:/bin"]
+                for path in ("/usr", "/bin", "/lib", "/lib64"):
+                    if Path(path).exists():
+                        command.extend(["--ro-bind", path, path])
+                command.extend(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+                                "--bind", str(workspace), "/work", "--chdir", "/work",
+                                "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port), "/work"])
+                # Fixed code only; keep output bounded even on failures.
+                import resource
+                def limit_output() -> None:
+                    resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
+                with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
                     try:
-                        exit_code = process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
-                        return report("failed", "probe timed out; no execution permission granted")
-                except OSError as exc:
-                    return report("failed", f"could not start probe: {type(exc).__name__}")
-                stdout.seek(0)
-                stderr.seek(0)
-                output = stdout.read(65537)
-                error = stderr.read(2048).decode("utf-8", errors="replace").strip()
-            if exit_code != 0:
-                return report("failed", "bubblewrap or fixed test failed: " + (error[:500] or f"exit {exit_code}"))
-            if len(output) > 65536:
-                return report("failed", "probe output exceeded limit")
-            try:
-                checks = json.loads(output)
-            except (ValueError, UnicodeError):
-                return report("failed", "unexpected probe output")
-            # Independently confirm that the host sentinel was not modified.
+                        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+                                                   env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"}, start_new_session=True,
+                                                   preexec_fn=limit_output)
+                        try:
+                            exit_code = process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.wait()
+                            return None, "probe timed out; no execution permission granted"
+                    except OSError as exc:
+                        return None, f"could not start probe: {type(exc).__name__}"
+                    stdout.seek(0)
+                    stderr.seek(0)
+                    output = stdout.read(65537)
+                    error = stderr.read(2048).decode("utf-8", errors="replace").strip()
+                if exit_code != 0:
+                    return None, "bubblewrap or fixed test failed: " + (error[:500] or f"exit {exit_code}")
+                if len(output) > 65536:
+                    return None, "probe output exceeded limit"
+                try:
+                    result = json.loads(output)
+                except (ValueError, UnicodeError):
+                    return None, "unexpected probe output"
+                if not isinstance(result, dict):
+                    return None, "unexpected probe output"
+                return result, None
+
+            checks, error = run_worker(clean)
+            if error:
+                return report("failed", "clean workspace: " + error)
             if secret.read_bytes() != b"probe-only-secret":
-                return report("failed", "host sentinel was unexpectedly modified", checks if isinstance(checks, dict) else None)
-            status = classify(checks)
-            return report(status, "fixed checks passed" if status == "passed" else "one or more fixed checks failed", checks if isinstance(checks, dict) else None)
+                return report("failed", "host sentinel was unexpectedly modified", checks)
+            if classify(checks) != "passed":
+                return report("failed", "one or more clean-workspace checks failed", checks)
+            control, error = run_worker(unsafe)
+            if error:
+                return report("failed", "unsafe workspace control: " + error, checks)
+            if secret.read_bytes() != b"probe-only-secret":
+                return report("failed", "host sentinel was unexpectedly modified", checks, control)
+            # Validate the entire fixed response: only the planted socket check
+            # should differ. The control proves the test detects this exposure.
+            expected_control = {name: name != "workspace_host_socket_unreachable" for name in CHECKS}
+            if set(control) != set(CHECKS) or any(control[name] is not expected for name, expected in expected_control.items()):
+                return report("failed", "unsafe workspace control did not demonstrate host socket reachability", checks, control)
+            return report("passed", "fixed clean-workspace checks passed; unsafe socket exposure detected", checks, control)
 
 
 def build_report() -> dict[str, Any]:
