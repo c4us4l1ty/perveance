@@ -59,3 +59,12 @@
 - PR #4 merged the revision-bound handoff, experimental OpenRouter adapter and fixed isolation diagnostics. [CI run 41816532726](https://github.com/c4us4l1ty/perveance/actions/runs/41816532726) passed, but its bubblewrap diagnostic failed during network namespace setup; it did not certify isolation. Autonomous execution remains disabled.
 
 - Added a 16-slot editable session palette to the GUI; [CI run 41819935147](https://github.com/c4us4l1ty/perveance/actions/runs/41819935147) passed the Rust tests and existing X11 checks. Palette interaction was simulated in egui tests; it was not separately exercised in native X11. The bubblewrap diagnostic still failed on network namespace setup, so autonomy remains disabled. A follow-up adds explicit separate palette-file save/load and headless inspection. [CI run 41820353435](https://github.com/c4us4l1ty/perveance/actions/runs/41820353435) passed Rust tests, simulated palette-file controls and existing X11 checks; the bubblewrap diagnostic again failed network namespace setup.
+
+- Added undoable one-pixel layer nudges in the GUI and signed `translate_layer` operations for batches and revision-bound proposals. Moves fail without explicit clipping if any nonzero RGBA bytes would leave the canvas, including RGB on transparent pixels; opt-in clipping can discard artwork. [CI run 41821351223](https://github.com/c4us4l1ty/perveance/actions/runs/41821351223) passed Rust tests, simulated nudge controls and existing X11 checks. The new nudge controls have not been independently exercised in native X11; the OpenRouter adapter rejects translation. The bubblewrap probe again failed during network namespace setup and does not certify isolation.
+
+## Major work still open
+
+- Phase 0: select and verify a sandbox, controlled dependency flow and broker-compatible real coding harness; investigate Graphite rendering and integration and make a foundation decision.
+- Phase 1: improve GUI workflow, accessible input, safe project updates and conflict handling; palette and nudge controls need native interaction coverage and broader usability testing.
+- Phase 2–3: implement and adversarially test the supervisor, broker, quotas, persistent capability lifecycle and a real self-extension/reuse experiment. Autonomous code execution remains disabled until security gates pass.
+- Phase 4: expand creative formats and non-destructive workflows, platform support and release readiness; live OpenRouter compatibility remains unverified.
