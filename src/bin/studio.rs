@@ -165,6 +165,26 @@ impl Studio {
             Err(error) => self.status = error,
         }
     }
+    fn agent_handoff_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        ui.heading("Agent handoff");
+        ui.small("Data-only proposals must match the current project revision.");
+        if ui.button("Copy current revision").clicked() {
+            match self.project.revision() {
+                Ok(revision) => { ui.ctx().copy_text(revision); self.status = "Revision sent to clipboard.".into(); }
+                Err(error) => self.status = error,
+            }
+        }
+        ui.label("Proposal JSON path");
+        ui.text_edit_singleline(&mut self.proposal_path);
+        let apply = ui.button("Apply proposal");
+        if apply.clicked() {
+            match EditProposal::load(Path::new(&self.proposal_path)) {
+                Ok(proposal) => self.apply_proposal(&proposal),
+                Err(error) => self.status = error,
+            }
+        }
+        apply
+    }
     fn pick_color(&mut self, point: [u32; 2]) {
         match self.project.sample_composite(point[0], point[1]) {
             Ok(color) => { self.color = color; self.status = format!("Sampled composite RGBA {color:?}."); }
@@ -325,22 +345,7 @@ impl eframe::App for Studio {
             }
             ui.small("PNG import uses 8-bit pixels; color profiles are not retained.");
             ui.separator();
-            ui.heading("Agent handoff");
-            ui.small("Data-only proposals must match the current project revision.");
-            if ui.button("Copy current revision").clicked() {
-                match self.project.revision() {
-                    Ok(revision) => { ctx.copy_text(revision); self.status = "Revision sent to clipboard.".into(); }
-                    Err(error) => self.status = error,
-                }
-            }
-            ui.label("Proposal JSON path");
-            ui.text_edit_singleline(&mut self.proposal_path);
-            if ui.button("Apply proposal").clicked() {
-                match EditProposal::load(Path::new(&self.proposal_path)) {
-                    Ok(proposal) => self.apply_proposal(&proposal),
-                    Err(error) => self.status = error,
-                }
-            }
+            self.agent_handoff_ui(ui);
 
             ui.separator();
             ui.small("AI and autonomous feature building are not implemented.");
@@ -655,6 +660,40 @@ mod tests {
         assert!(studio.history.can_redo());
         studio.redo_edit();
         assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn proposal_button_loads_file_and_rejects_replay() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Rect {
+            let mut rect = Rect::NOTHING;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { rect = studio.agent_handoff_ui(ui).rect; });
+            });
+            rect
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proposal.json");
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
+            Operation::Pixel { layer: 0, x: 1, y: 1, color: [7, 8, 9, 255] },
+        ] };
+        std::fs::write(&path, serde_json::to_vec(&proposal).unwrap()).unwrap();
+        studio.proposal_path = path.to_str().unwrap().to_owned();
+        let ctx = egui::Context::default();
+        let apply = frame(&ctx, &mut studio, vec![]).center();
+        click(&ctx, &mut studio, apply);
+        assert_eq!(studio.project.layers[0].pixels[33], [7, 8, 9, 255]);
+        assert!(studio.history.can_undo());
+        click(&ctx, &mut studio, apply);
+        assert!(studio.status.contains("stale"));
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[0].pixels[33], [0; 4]);
     }
 
     #[test]
