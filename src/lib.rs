@@ -798,6 +798,24 @@ mod tests {
     }
 
     #[test]
+    fn layer_flips_are_involutions_for_odd_even_and_single_pixel_sizes() {
+        for width in 1..=7 {
+            for height in 1..=7 {
+                let mut p = Project::new(width, height).unwrap();
+                for (i, pixel) in p.layers[0].pixels.iter_mut().enumerate() {
+                    *pixel = [i as u8, 255 - i as u8, 42, if i % 2 == 0 { 0 } else { 255 }];
+                }
+                let before = p.clone();
+                for axis in [FlipAxis::Horizontal, FlipAxis::Vertical] {
+                    p.flip_layer(0, axis).unwrap();
+                    p.flip_layer(0, axis).unwrap();
+                    assert_eq!(p, before, "{width}x{height} {axis:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn layer_transforms_are_atomic_in_batches_and_noops_preserve_redo() {
         let mut p = Project::new(2, 2).unwrap();
         let mut history = History::default();

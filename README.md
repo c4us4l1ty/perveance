@@ -57,7 +57,7 @@ cargo run --locked --bin perveance-cli -- import-png project.json another-image.
 
 PNG input is limited to 8 MiB and dimensions of 1–256 pixels on each side. Static RGB, RGBA, grayscale, grayscale-alpha and indexed images are decoded to editable 8-bit RGBA; 16-bit samples are reduced to 8 bits. Animated PNGs are rejected. Metadata, ICC profiles and color management are not preserved or applied, so colors may differ from color-managed applications. Importing does not make a generated image's original objects or layers editable: the PNG is one raster layer. There is no resizing or alignment on layer import.
 
-The line, rectangle and ellipse tools write raster pixels to the selected layer; they are not editable vector objects. Drag in either direction and choose filled or outlined. Ellipse edges use a deterministic pixel-center rasterization, and outline pixels are the four-connected edge.
+The line, rectangle and ellipse tools write raster pixels to the selected layer; they are not editable vector objects. Drag in either direction; rectangles and ellipses can be filled or outlined. Ellipse edges use a deterministic pixel-center rasterization, and outline pixels are the four-connected edge.
 
 ### Sampling colors
 

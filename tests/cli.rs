@@ -219,6 +219,13 @@ fn batch_layer_transforms_reopen_and_fail_atomically() {
     assert_eq!(project.layers[1].name, "Layer 1 copy");
     assert_eq!(project.layers[0].pixels[0], [0; 4]);
     assert_eq!(project.layers[1].pixels[11], [5, 6, 7, 255]);
+    let png = dir.0.join("transformed.png");
+    assert!(cli(&["export-png", output.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut pixels).unwrap();
+    assert_eq!(&pixels[44..48], &[5, 6, 7, 255]);
+    assert_eq!(&pixels[0..4], &[0; 4]);
     fs::write(&operations, r#"[{"op":"duplicate_layer","layer":0},{"op":"clear_layer","layer":9}]"#).unwrap();
     let result = cli(&["apply", initial.to_str().unwrap(), rejected.to_str().unwrap(), operations.to_str().unwrap()]);
     assert!(!result.status.success());
