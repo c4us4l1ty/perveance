@@ -85,3 +85,41 @@ fn batch_can_create_layers_and_failing_batch_leaves_no_output() {
     assert!(!rejected.exists());
     assert_eq!(perveance::Project::load(&initial).unwrap().layers.len(), 1);
 }
+
+#[test]
+fn batch_layer_controls_and_rectangle_export() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("out.json");
+    let png = dir.0.join("out.png");
+    let operations = dir.0.join("operations.json");
+    assert!(cli(&["new", "4", "3", initial.to_str().unwrap()]).status.success());
+    fs::write(&operations, r#"[
+        {"op":"add_layer"},
+        {"op":"rename_layer","layer":1,"name":"Ink"},
+        {"op":"rectangle","layer":1,"x":1,"y":1,"width":2,"height":2,"color":[200,100,50,255]},
+        {"op":"move_layer","from":1,"to":0},
+        {"op":"remove_layer","layer":1}
+    ]"#).unwrap();
+    let result = cli(&["apply", initial.to_str().unwrap(), output.to_str().unwrap(), operations.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let project = perveance::Project::load(&output).unwrap();
+    assert_eq!(project.layers.len(), 1);
+    assert_eq!(project.layers[0].name, "Ink");
+    assert_eq!(project.layers[0].pixels[5], [200, 100, 50, 255]);
+    assert!(cli(&["export-png", output.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut pixels).unwrap();
+    assert_eq!(&pixels[20..24], &[200, 100, 50, 255]);
+}
+
+#[test]
+fn discovery_reports_batch_support_and_version() {
+    let output = cli(&["capabilities"]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["api_version"], 1);
+    assert_eq!(value["autonomous_execution"], false);
+    assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "rectangle"));
+}

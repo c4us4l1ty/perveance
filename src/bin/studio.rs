@@ -15,13 +15,20 @@ struct Studio {
     status: String,
     undo: Vec<Project>,
     confirm_open: bool,
+    new_width: u32,
+    new_height: u32,
+    zoom: f32,
+    show_grid: bool,
+    rename_buffer: String,
+    canvas_texture: Option<egui::TextureHandle>,
 }
 
 impl Default for Studio {
     fn default() -> Self {
         Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
             color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, path: "art.perveance.json".into(),
-            status: "Prototype: save and export create new files only.".into(), undo: Vec::new(), confirm_open: false }
+            status: "Prototype: save and export create new files only.".into(), undo: Vec::new(), confirm_open: false,
+            new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
 }
 
@@ -42,10 +49,13 @@ impl eframe::App for Studio {
                 ui.heading("perveance");
                 ui.label(egui::RichText::new("STUDIO / EARLY PROTOTYPE").small().color(Color32::from_rgb(166, 215, 74)));
                 if ui.button("Undo").clicked() {
-                    if let Some(previous) = self.undo.pop() { self.project = previous; self.layer = self.layer.min(self.project.layers.len() - 1); }
+                    if let Some(previous) = self.undo.pop() { self.project = previous; self.layer = self.layer.min(self.project.layers.len() - 1); self.rename_buffer = self.project.layers[self.layer].name.clone(); }
                 }
                 ui.separator();
                 ui.label(format!("{} × {}", self.project.width, self.project.height));
+                ui.separator();
+                ui.add(egui::Slider::new(&mut self.zoom, 1.0..=32.0).text("Zoom").step_by(1.0));
+                ui.checkbox(&mut self.show_grid, "Grid");
             });
         });
         egui::SidePanel::left("tools").default_width(190.0).show(ctx, |ui| {
@@ -59,6 +69,18 @@ impl eframe::App for Studio {
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
             ui.add_space(16.0);
             ui.heading("Project");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut self.new_width).range(1..=256).prefix("W "));
+                ui.add(egui::DragValue::new(&mut self.new_height).range(1..=256).prefix("H "));
+            });
+            ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
+            if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
+                match Project::new(self.new_width, self.new_height) {
+                    Ok(project) => { self.project = project; self.layer = 0; self.undo.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
+                    Err(error) => self.status = error,
+                }
+            }
+            ui.separator();
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
             if ui.button("Save as new file").clicked() {
@@ -70,10 +92,9 @@ impl eframe::App for Studio {
                 let result = self.project.export_png_new(Path::new(&output));
                 self.set_status(result, &format!("Exported {output}"));
             }
-            ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.project = project; self.layer = 0; self.undo.clear(); self.status = "Project opened.".into(); self.confirm_open = false; }
+                    Ok(project) => { self.project = project; self.layer = 0; self.undo.clear(); self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
                     Err(error) => self.status = error,
                 }
             }
@@ -85,7 +106,7 @@ impl eframe::App for Studio {
             ui.add_space(8.0);
             if ui.button("+ Add layer").clicked() {
                 self.checkpoint();
-                match self.project.add_layer() { Ok(()) => self.layer = self.project.layers.len() - 1, Err(e) => self.status = e }
+                match self.project.add_layer() { Ok(()) => { self.layer = self.project.layers.len() - 1; self.rename_buffer = self.project.layers[self.layer].name.clone(); }, Err(e) => self.status = e }
             }
             for index in (0..self.project.layers.len()).rev() {
                 ui.horizontal(|ui| {
@@ -94,31 +115,73 @@ impl eframe::App for Studio {
                         self.checkpoint();
                         self.project.layers[index].visible = visible;
                     }
-                    if ui.selectable_label(self.layer == index, &self.project.layers[index].name).clicked() { self.layer = index; }
+                    if ui.selectable_label(self.layer == index, &self.project.layers[index].name).clicked() { self.layer = index; self.rename_buffer = self.project.layers[index].name.clone(); }
                 });
             }
+            ui.separator();
+            ui.label("Selected layer name");
+            ui.text_edit_singleline(&mut self.rename_buffer);
+            if ui.button("Rename").clicked() {
+                let mut updated = self.project.clone();
+                match updated.rename_layer(self.layer, &self.rename_buffer) {
+                    Ok(()) => { self.checkpoint(); self.project = updated; }
+                    Err(error) => self.status = error,
+                }
+            }
+            ui.horizontal(|ui| {
+                if ui.add_enabled(self.layer + 1 < self.project.layers.len(), egui::Button::new("↑")).on_hover_text("Move layer up").clicked() {
+                    self.checkpoint();
+                    if self.project.move_layer(self.layer, self.layer + 1).is_ok() { self.layer += 1; }
+                }
+                if ui.add_enabled(self.layer > 0, egui::Button::new("↓")).on_hover_text("Move layer down").clicked() {
+                    self.checkpoint();
+                    if self.project.move_layer(self.layer, self.layer - 1).is_ok() { self.layer -= 1; }
+                }
+                if ui.add_enabled(self.project.layers.len() > 1, egui::Button::new("Remove")).on_hover_text("Remove selected layer (undoable)").clicked() {
+                    self.checkpoint();
+                    if self.project.remove_layer(self.layer).is_ok() {
+                        self.layer = self.layer.min(self.project.layers.len() - 1);
+                        self.rename_buffer = self.project.layers[self.layer].name.clone();
+                    }
+                }
+            });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
+            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                 ui.add_space(12.0);
                 ui.label("CANVAS");
                 ui.add_space(8.0);
-                let available = ui.available_size();
-                let scale = (available.x / self.project.width as f32).min(available.y / self.project.height as f32).min(18.0).max(1.0);
+                let scale = self.zoom;
                 let size = Vec2::new(self.project.width as f32 * scale, self.project.height as f32 * scale);
                 let sense = if self.tool == Tool::Fill { Sense::click() } else { Sense::click_and_drag() };
                 let (rect, response) = ui.allocate_exact_size(size, sense);
-                let painter = ui.painter();
-                if let Ok(rgba) = self.project.rgba() {
+                if let Ok(mut rgba) = self.project.rgba() {
+                    // Composite a checkerboard only for the preview; exported PNG keeps alpha.
                     for y in 0..self.project.height {
                         for x in 0..self.project.width {
-                            let min = Pos2::new(rect.min.x + x as f32 * scale, rect.min.y + y as f32 * scale);
-                            let cell = Rect::from_min_size(min, Vec2::splat(scale));
-                            let checker = if (x / 4 + y / 4) % 2 == 0 { 58 } else { 75 };
-                            painter.rect_filled(cell, 0.0, Color32::from_gray(checker));
                             let i = ((y * self.project.width + x) * 4) as usize;
-                            painter.rect_filled(cell, 0.0, Color32::from_rgba_unmultiplied(rgba[i], rgba[i+1], rgba[i+2], rgba[i+3]));
+                            let checker: u32 = if (x / 4 + y / 4) % 2 == 0 { 58 } else { 75 };
+                            let alpha = rgba[i + 3] as u32;
+                            for channel in 0..3 {
+                                rgba[i + channel] = ((rgba[i + channel] as u32 * alpha + checker * (255 - alpha) + 127) / 255) as u8;
+                            }
+                            rgba[i + 3] = 255;
+                        }
+                    }
+                    let image = egui::ColorImage::from_rgba_unmultiplied([self.project.width as usize, self.project.height as usize], &rgba);
+                    let texture = self.canvas_texture.get_or_insert_with(|| ctx.load_texture("canvas", image.clone(), egui::TextureOptions::NEAREST));
+                    texture.set(image, egui::TextureOptions::NEAREST);
+                    ui.painter().image(texture.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                    if self.show_grid && scale >= 5.0 {
+                        let stroke = egui::Stroke::new(0.5, Color32::from_black_alpha(70));
+                        for x in 0..=self.project.width {
+                            let px = rect.min.x + x as f32 * scale;
+                            ui.painter().line_segment([Pos2::new(px, rect.min.y), Pos2::new(px, rect.max.y)], stroke);
+                        }
+                        for y in 0..=self.project.height {
+                            let py = rect.min.y + y as f32 * scale;
+                            ui.painter().line_segment([Pos2::new(rect.min.x, py), Pos2::new(rect.max.x, py)], stroke);
                         }
                     }
                 }

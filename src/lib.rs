@@ -11,6 +11,7 @@ pub const MAX_DIMENSION: u32 = 256;
 const MAX_PROJECT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Layer {
     pub name: String,
     pub visible: bool,
@@ -19,6 +20,7 @@ pub struct Layer {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Project {
     pub version: u32,
     pub width: u32,
@@ -28,13 +30,17 @@ pub struct Project {
 }
 
 /// A bounded, typed operation accepted by the headless interface.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     AddLayer,
     SetVisibility { layer: usize, visible: bool },
+    RenameLayer { layer: usize, name: String },
+    MoveLayer { from: usize, to: usize },
+    RemoveLayer { layer: usize },
     Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
     Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
+    Rectangle { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
 }
 
@@ -73,6 +79,49 @@ impl Project {
             name: format!("Layer {}", self.layers.len() + 1), visible: true,
             pixels: vec![[0; 4]; (self.width * self.height) as usize],
         });
+        Ok(())
+    }
+
+    pub fn rename_layer(&mut self, layer: usize, name: &str) -> Result<(), String> {
+        self.validate()?;
+        if name.trim().is_empty() || name.len() > 256 { return Err("layer name must be 1 to 256 bytes and not blank".into()); }
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        target.name = name.to_owned();
+        Ok(())
+    }
+
+    /// Move a layer to an index in the resulting bottom-to-top ordering.
+    pub fn move_layer(&mut self, from: usize, to: usize) -> Result<(), String> {
+        self.validate()?;
+        if from >= self.layers.len() || to >= self.layers.len() { return Err("layer does not exist".into()); }
+        if from != to {
+            let layer = self.layers.remove(from);
+            self.layers.insert(to, layer);
+        }
+        Ok(())
+    }
+
+    pub fn remove_layer(&mut self, layer: usize) -> Result<(), String> {
+        self.validate()?;
+        if layer >= self.layers.len() { return Err("layer does not exist".into()); }
+        if self.layers.len() == 1 { return Err("cannot remove the last layer".into()); }
+        self.layers.remove(layer);
+        Ok(())
+    }
+
+    /// Fill a rectangle, entirely inside the canvas, with exclusive right/bottom edges.
+    pub fn rectangle(&mut self, layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4]) -> Result<(), String> {
+        self.validate()?;
+        let right = x.checked_add(width).ok_or("rectangle out of bounds")?;
+        let bottom = y.checked_add(height).ok_or("rectangle out of bounds")?;
+        if layer >= self.layers.len() || width == 0 || height == 0 || right > self.width || bottom > self.height {
+            return Err("rectangle or layer is outside the project".into());
+        }
+        for row in y..bottom {
+            let start = (row * self.width + x) as usize;
+            let end = start + width as usize;
+            self.layers[layer].pixels[start..end].fill(color);
+        }
         Ok(())
     }
 
@@ -142,15 +191,19 @@ impl Project {
         if operations.len() > MAX_OPERATIONS { return Err("too many operations".into()); }
         let mut candidate = self.clone();
         for (index, operation) in operations.iter().enumerate() {
-            let result = match *operation {
+            let result = match operation {
                 Operation::AddLayer => candidate.add_layer(),
-                Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(layer) {
-                    Some(item) => { item.visible = visible; Ok(()) },
+                Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
+                    Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),
                 },
-                Operation::Pixel { layer, x, y, color } => candidate.set_pixel(layer, x, y, color),
-                Operation::Line { layer, from, to, color } => candidate.draw_line(layer, from, to, color),
-                Operation::Fill { layer, x, y, color } => candidate.fill(layer, x, y, color),
+                Operation::RenameLayer { layer, name } => candidate.rename_layer(*layer, name),
+                Operation::MoveLayer { from, to } => candidate.move_layer(*from, *to),
+                Operation::RemoveLayer { layer } => candidate.remove_layer(*layer),
+                Operation::Pixel { layer, x, y, color } => candidate.set_pixel(*layer, *x, *y, *color),
+                Operation::Line { layer, from, to, color } => candidate.draw_line(*layer, *from, *to, *color),
+                Operation::Rectangle { layer, x, y, width, height, color } => candidate.rectangle(*layer, *x, *y, *width, *height, *color),
+                Operation::Fill { layer, x, y, color } => candidate.fill(*layer, *x, *y, *color),
             };
             result.map_err(|error| format!("operation {index}: {error}"))?;
         }
@@ -262,6 +315,41 @@ mod tests {
         assert_eq!(p, old);
         assert!(p.draw_line(0, [0, 0], [5, 0], red).is_err());
         assert_eq!(p, old);
+    }
+    #[test]
+    fn layer_edits_and_rectangles_validate_before_mutating() {
+        let mut p = Project::new(4, 3).unwrap();
+        p.add_layer().unwrap();
+        p.rename_layer(1, "Foreground").unwrap();
+        p.rectangle(1, 1, 1, 2, 2, [10, 20, 30, 255]).unwrap();
+        assert_eq!(p.layers[1].pixels[5], [10, 20, 30, 255]);
+        assert_eq!(p.layers[1].pixels[10], [10, 20, 30, 255]);
+        assert_eq!(p.layers[1].pixels[3], [0; 4]);
+        let old = p.clone();
+        assert!(p.rectangle(1, u32::MAX, 0, 2, 1, [1; 4]).is_err());
+        assert!(p.rectangle(1, 3, 2, 2, 1, [1; 4]).is_err());
+        assert!(p.rename_layer(0, "  ").is_err());
+        assert_eq!(p, old);
+        p.move_layer(1, 0).unwrap();
+        assert_eq!(p.layers[0].name, "Foreground");
+        p.remove_layer(1).unwrap();
+        assert!(p.remove_layer(0).is_err());
+        assert_eq!(p.layers.len(), 1);
+    }
+    #[test]
+    fn unknown_project_data_is_rejected_instead_of_silently_discarded() {
+        let p = Project::new(1, 1).unwrap();
+        let mut value = serde_json::to_value(p).unwrap();
+        value["future_capability"] = serde_json::json!({"important": true});
+        assert!(serde_json::from_value::<Project>(value).is_err());
+    }
+    #[test]
+    fn invalid_layer_operations_roll_back_the_entire_batch() {
+        let mut p = Project::new(2, 2).unwrap();
+        let original = p.clone();
+        let operations = [Operation::AddLayer, Operation::RenameLayer { layer: 1, name: "".into() }];
+        assert!(p.apply_operations(&operations).is_err());
+        assert_eq!(p, original);
     }
     #[test]
     fn project_round_trip_and_png_are_valid() {

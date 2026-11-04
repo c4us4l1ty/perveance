@@ -8,7 +8,10 @@ fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
-            "operations": ["new", "inspect", "paint", "apply", "export-png"], "limitations": ["create-new outputs only", "no vector support", "no AI"]})),
+            "operations": ["new", "inspect", "paint", "apply", "export-png"],
+            "batch_operations": ["add_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "fill"],
+            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144},
+            "limitations": ["create-new outputs only", "no vector support", "no AI"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;
             project.save_new(Path::new(output))?;
