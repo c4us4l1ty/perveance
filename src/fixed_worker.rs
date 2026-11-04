@@ -82,9 +82,16 @@ else:
             .env_clear().env("PATH", "/usr/bin:/bin")
             .stdin(Stdio::null()).stdout(Stdio::from(stdout.try_clone().map_err(|_| "cannot duplicate diagnostic output")?))
             .stderr(Stdio::from(stderr.try_clone().map_err(|_| "cannot duplicate diagnostic output")?));
-        // Only an async-signal-safe syscall is performed after fork. This cap
-        // bounds each child's regular-file output, not CPU, memory or total disk.
+        // Only async-signal-safe syscalls are performed after fork. Mark all
+        // non-stdio FDs close-on-exec before starting bwrap; never rely on the
+        // helper closing them. CLOEXEC preserves Rust's exec-error pipe until
+        // exec. A missing/blocked close_range fails closed. The file limit is
+        // per regular file, not a CPU, memory or total-disk quota.
         unsafe { command.pre_exec(|| {
+            const CLOSE_RANGE_CLOEXEC: libc::c_uint = 1 << 2;
+            if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, CLOSE_RANGE_CLOEXEC) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
             let limit = libc::rlimit { rlim_cur: FILE_LIMIT, rlim_max: FILE_LIMIT };
             if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 { return Err(std::io::Error::last_os_error()); }
             Ok(())
