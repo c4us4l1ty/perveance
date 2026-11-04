@@ -70,6 +70,13 @@ fn swatch_preview(color: [u8; 4]) -> Color32 {
     Color32::from_rgb(channel(color[0]), channel(color[1]), channel(color[2]))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CanvasReplacement {
+    New { width: u32, height: u32 },
+    Project(String),
+    Png(String),
+}
+
 struct Studio {
     project: Project,
     // A snapshot of the last successfully saved/opened project (or initial blank canvas).
@@ -100,7 +107,7 @@ struct Studio {
     ai_pending: Option<std::sync::mpsc::Receiver<Result<EditProposal, String>>>,
     status: String,
     history: History,
-    confirm_open: bool,
+    pending_replacement: Option<CanvasReplacement>,
     new_width: u32,
     new_height: u32,
     resize_width: u32,
@@ -117,7 +124,7 @@ impl Default for Studio {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
             color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
-            status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
+            status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
 }
@@ -125,6 +132,60 @@ impl Default for Studio {
 impl Studio {
     fn has_unsaved_changes(&self) -> bool {
         self.saved_project.as_ref().map_or(true, |saved| *saved != self.project)
+    }
+    // Capture the requested path/dimensions at click time; never keep a blanket
+    // "allow replacement" setting that can outlive the user's confirmation.
+    fn request_replacement(&mut self, replacement: CanvasReplacement) {
+        if self.confirm_close || self.pending_replacement.is_some() { return; }
+        if self.has_unsaved_changes() || self.shape_start.is_some() || self.stroke_last.is_some() {
+            self.pending_replacement = Some(replacement);
+        } else {
+            self.replace_canvas(replacement);
+        }
+    }
+    fn replace_canvas(&mut self, replacement: CanvasReplacement) {
+        let (result, is_saved, message) = match replacement {
+            CanvasReplacement::New { width, height } => (Project::new(width, height), false, "New canvas created."),
+            CanvasReplacement::Project(path) => (Project::load(Path::new(&path)), true, "Project opened."),
+            CanvasReplacement::Png(path) => (Project::from_png(Path::new(&path)), false, "PNG opened as a new canvas."),
+        };
+        match result {
+            Ok(project) => {
+                self.saved_project = if is_saved { Some(project.clone()) } else { None };
+                self.project = project;
+                self.layer = 0;
+                self.history.clear();
+                self.shape_start = None;
+                self.shape_current = None;
+                self.stroke_last = None;
+                self.stroke_recorded = false;
+                self.rename_buffer = self.project.layers[0].name.clone();
+                self.sync_resize_dimensions();
+                self.allow_resize_clip = false;
+                self.allow_translation_clip = false;
+                self.status = message.into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn resolve_replacement(&mut self, discard: bool) {
+        if let Some(replacement) = self.pending_replacement.take() {
+            if discard { self.replace_canvas(replacement); }
+        }
+    }
+    fn replacement_dialog_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.heading("Unsaved project");
+        ui.label("Your current artwork has unsaved changes.");
+        ui.label("Cancel to save as a new project file, or discard and replace it. Replacement cannot be undone.");
+        let mut buttons = (Rect::NOTHING, Rect::NOTHING);
+        ui.horizontal(|ui| {
+            let cancel = ui.button("Cancel");
+            let discard = ui.button("Discard and replace");
+            buttons = (cancel.rect, discard.rect);
+            if cancel.clicked() { self.resolve_replacement(false); }
+            if discard.clicked() { self.resolve_replacement(true); }
+        });
+        buttons
     }
     fn save_project(&mut self) -> Result<(), String> {
         self.project.save_new(Path::new(&self.path))?;
@@ -291,7 +352,7 @@ impl Studio {
     fn poll_ai(&mut self, ctx: &egui::Context) {
         if self.ai_pending.is_none() { return; }
         // Do not inject a discrete edit into an active brush/shape gesture or dialog.
-        if self.confirm_close || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
+        if self.confirm_close || self.pending_replacement.is_some() || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
             return;
         }
@@ -453,11 +514,12 @@ impl eframe::App for Studio {
             if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.confirm_close = true;
+                self.pending_replacement = None;
             }
         }
         self.poll_ai(ctx);
         // Do not intercept shortcuts while a dialog, text field, or brush gesture is active.
-        if !self.confirm_close && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
+        if !self.confirm_close && self.pending_replacement.is_none() && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
             let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
             let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
             let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -504,12 +566,8 @@ impl eframe::App for Studio {
                 ui.add(egui::DragValue::new(&mut self.new_width).range(1..=256).prefix("W "));
                 ui.add(egui::DragValue::new(&mut self.new_height).range(1..=256).prefix("H "));
             });
-            ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
-            if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
-                match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.saved_project = None; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.sync_resize_dimensions(); self.allow_resize_clip = false; self.confirm_open = false; self.status = "New canvas created.".into(); }
-                    Err(error) => self.status = error,
-                }
+            if ui.button("New canvas").clicked() {
+                self.request_replacement(CanvasReplacement::New { width: self.new_width, height: self.new_height });
             }
             egui::CollapsingHeader::new("Resize existing canvas").show(ui, |ui| { self.resize_ui(ui); });
             ui.separator();
@@ -520,11 +578,8 @@ impl eframe::App for Studio {
                 self.set_status(result, "Project saved.");
             }
             self.export_png_ui(ui);
-            if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
-                match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.sync_resize_dimensions(); self.allow_resize_clip = false; self.status = "Project opened.".into(); self.confirm_open = false; }
-                    Err(error) => self.status = error,
-                }
+            if ui.button("Open project").clicked() {
+                self.request_replacement(CanvasReplacement::Project(self.path.clone()));
             }
             ui.separator();
             ui.label("PNG path");
@@ -542,23 +597,8 @@ impl eframe::App for Studio {
                     Err(error) => self.status = error,
                 }
             }
-            if ui.add_enabled(self.confirm_open, egui::Button::new("Open PNG as canvas")).clicked() {
-                match Project::from_png(Path::new(&self.png_path)) {
-                    Ok(project) => {
-                        self.project = project;
-                        self.saved_project = None;
-                        self.layer = 0;
-                        self.history.clear();
-                        self.shape_start = None;
-                        self.shape_current = None;
-                        self.rename_buffer = self.project.layers[0].name.clone();
-                        self.sync_resize_dimensions();
-                        self.allow_resize_clip = false;
-                        self.confirm_open = false;
-                        self.status = "PNG opened as a new canvas.".into();
-                    }
-                    Err(error) => self.status = error,
-                }
+            if ui.button("Open PNG as canvas").clicked() {
+                self.request_replacement(CanvasReplacement::Png(self.png_path.clone()));
             }
             ui.small("PNG import uses 8-bit pixels; color profiles are not retained.");
             ui.separator();
@@ -776,6 +816,10 @@ impl eframe::App for Studio {
               });
             });
         });
+        if self.pending_replacement.is_some() && !self.confirm_close {
+            egui::Modal::new(egui::Id::new("unsaved_replace")).show(ctx, |ui| { self.replacement_dialog_ui(ui); });
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { self.resolve_replacement(false); }
+        }
         if self.confirm_close {
             let mut keep_editing = false;
             let mut discard = false;
@@ -859,6 +903,112 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn replacement_confirmation_preserves_work_on_cancel_and_open_failure() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.replacement_dialog_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0,0], [0,0]);
+        let original = studio.project.clone();
+        let ctx = egui::Context::default();
+        studio.request_replacement(CanvasReplacement::New { width: 7, height: 8 });
+        assert!(studio.pending_replacement.is_some());
+        assert_eq!(studio.project, original);
+        let (cancel, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, cancel.center());
+        assert!(studio.pending_replacement.is_none());
+        assert_eq!(studio.project, original);
+        assert!(studio.history.can_undo());
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.json");
+        studio.request_replacement(CanvasReplacement::Project(missing.to_str().unwrap().into()));
+        let (_, discard) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, discard.center());
+        assert!(studio.pending_replacement.is_none());
+        assert_eq!(studio.project, original);
+        assert!(studio.history.can_undo());
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.status.contains("open project"));
+        studio.request_replacement(CanvasReplacement::New { width: 7, height: 8 });
+        let (_, discard) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, discard.center());
+        assert_eq!((studio.project.width, studio.project.height), (7,8));
+        assert!(!studio.history.can_undo());
+        assert!(studio.has_unsaved_changes());
+        assert_eq!((studio.resize_width, studio.resize_height), (7,8));
+    }
+
+    #[test]
+    fn replacement_uses_captured_request_and_correct_saved_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("other.json");
+        let png = dir.path().join("image.png");
+        let other = Project::new(3, 4).unwrap();
+        other.save_new(&path).unwrap();
+        other.export_png_new(&png).unwrap();
+        let mut studio = Studio::default();
+        // An unchanged document can be replaced without a warning.
+        studio.request_replacement(CanvasReplacement::Project(path.to_str().unwrap().into()));
+        assert!(studio.pending_replacement.is_none());
+        assert_eq!(studio.project, other);
+        assert!(!studio.has_unsaved_changes());
+        studio.tool = Tool::Line;
+        studio.commit_shape([0,0], [0,0]);
+        studio.path = path.to_str().unwrap().into();
+        studio.allow_resize_clip = true;
+        studio.allow_translation_clip = true;
+        studio.request_replacement(CanvasReplacement::Png(png.to_str().unwrap().into()));
+        studio.png_path = "changed-after-request.png".into();
+        assert!(studio.pending_replacement.is_some());
+        studio.resolve_replacement(true);
+        assert_eq!((studio.project.width, studio.project.height), (3,4));
+        assert_eq!(studio.project.layers[0].name, "Imported PNG");
+        assert!(studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+        assert!(!studio.allow_resize_clip);
+        assert!(!studio.allow_translation_clip);
+        studio.request_replacement(CanvasReplacement::Project(path.to_str().unwrap().into()));
+        assert!(studio.pending_replacement.is_some()); // An imported canvas remains unsaved.
+        studio.resolve_replacement(true);
+        assert_eq!(studio.project, other);
+        assert!(!studio.has_unsaved_changes());
+        studio.shape_start = Some([0,0]);
+        studio.request_replacement(CanvasReplacement::New { width: 8, height: 8 });
+        assert!(studio.pending_replacement.is_some()); // Do not silently drop an active gesture.
+    }
+
+    #[test]
+    fn provider_result_waits_for_replacement_confirmation() {
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0,0], [0,0]);
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![Operation::AddLayer] };
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Ok(proposal)).unwrap();
+        studio.ai_pending = Some(receive);
+        studio.request_replacement(CanvasReplacement::New { width: 8, height: 8 });
+        let ctx = egui::Context::default();
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_some());
+        assert_eq!(studio.project.layers.len(), 1);
+        studio.resolve_replacement(false);
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_none());
+        assert_eq!(studio.project.layers.len(), 2);
     }
 
     #[test]

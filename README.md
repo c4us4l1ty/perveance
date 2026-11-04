@@ -43,7 +43,7 @@ Offsets range from -256 to 256 per axis. `clip` is required: `false` rejects dat
 
 All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves and PNG exports stage and sync a temporary file before a no-clobber installation. Guarantees depend on the filesystem and platform; directory durability across power loss is not guaranteed, and a crash can leave a temporary file.
 
-The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder, duplicate, flip, clear or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. The editor warns before a normal window close if the project differs from the last successful project save or open. PNG exports do not mark a project saved. This is not crash recovery and cannot prevent data loss from force-quitting, system failure or external file changes. Unsupported project fields are rejected rather than silently discarded.
+The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder, duplicate, flip, clear or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas prompts immediately before replacing unsaved artwork; cancel to keep editing or discard and replace. Replacement clears undo history and cannot itself be undone. The editor also warns before a normal window close if the project differs from the last successful project save or open. PNG exports do not mark a project saved. This is not crash recovery and cannot prevent data loss from force-quitting, system failure or external file changes. Unsupported project fields are rejected rather than silently discarded.
 
 ### Resizing a canvas
 
@@ -85,7 +85,7 @@ These commands require paths that do not already exist. Open `potion.json` in th
 
 ### Importing PNG artwork
 
-The studio can open a static PNG as a new canvas, or import one as an editable top layer when its dimensions match the current canvas. Enter the PNG path in the left panel; replacing the canvas requires the existing confirmation checkbox. Layer import can be undone.
+The studio can open a static PNG as a new canvas, or import one as an editable top layer when its dimensions match the current canvas. Enter the PNG path in the left panel; replacing unsaved artwork requires a discard confirmation. Layer import can be undone.
 
 The headless equivalents also produce new files without overwriting:
 
