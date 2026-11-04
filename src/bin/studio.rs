@@ -217,7 +217,7 @@ impl Studio {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
-    fn ai_ui(&mut self, ui: &mut egui::Ui) {
+    fn ai_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.heading("Prompt to pixels (experimental)");
         ui.small("Sends your prompt, canvas size and layer count to OpenRouter and your chosen model. Fees may apply; no spend cap. Pixels and layer names are not sent.");
         ui.label("Model ID");
@@ -226,10 +226,10 @@ impl Studio {
         ui.add(egui::TextEdit::singleline(&mut self.ai_key).password(true));
         ui.label("Art prompt");
         ui.add(egui::TextEdit::multiline(&mut self.ai_prompt).desired_rows(3));
-        if ui.add_enabled(self.ai_pending.is_none(), egui::Button::new("Send to OpenRouter")).clicked() {
-            self.start_ai(ui.ctx());
-        }
+        let send = ui.add_enabled(self.ai_pending.is_none(), egui::Button::new("Send to OpenRouter"));
+        if send.clicked() { self.start_ai(ui.ctx()); }
         ui.small("Adds and paints new layers only. Request may be charged even if rejected or the app closes. Live provider compatibility is unverified.");
+        send
     }
     fn agent_handoff_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.heading("Agent handoff");
@@ -762,6 +762,48 @@ mod tests {
         assert!(studio.status.contains("stale"));
         studio.undo_edit();
         assert_eq!(studio.project.layers[0].pixels[33], [0; 4]);
+    }
+
+    #[test]
+    fn ai_send_control_validates_without_leaking_credentials() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Rect {
+            let mut rect = Rect::NOTHING;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { rect = studio.ai_ui(ui).rect; });
+            });
+            rect
+        }
+        let mut studio = Studio::default();
+        studio.ai_key = "fake-secret".into();
+        studio.ai_prompt = "draw a flower".into();
+        // Empty model ID fails before any network request starts.
+        let ctx = egui::Context::default();
+        let pos = frame(&ctx, &mut studio, vec![]).center();
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        frame(&ctx, &mut studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+        frame(&ctx, &mut studio, vec![button(false)]);
+        assert_eq!(studio.status, "invalid model ID");
+        assert!(!studio.status.contains("fake-secret"));
+        assert!(studio.ai_pending.is_none());
+    }
+
+    #[test]
+    fn provider_result_waits_for_active_shape_gesture() {
+        let mut studio = Studio::default();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![Operation::AddLayer] };
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Ok(proposal)).unwrap();
+        studio.ai_pending = Some(receive);
+        studio.shape_start = Some([0, 0]);
+        let ctx = egui::Context::default();
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_some());
+        assert_eq!(studio.project.layers.len(), 1);
+        studio.shape_start = None;
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_none());
+        assert_eq!(studio.project.layers.len(), 2);
     }
 
     #[test]

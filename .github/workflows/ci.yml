@@ -18,10 +18,6 @@ jobs:
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth scrot python3-pil
-      - name: Temporary lockfile transport
-        run: |
-          cargo metadata --format-version 1 > /tmp/perveance-metadata.json
-          python3 -c 'import base64,hashlib,zlib; from pathlib import Path; b=Path("Cargo.lock").read_bytes(); s=base64.b64encode(zlib.compress(b,9)).decode(); print("::notice::LOCK_SHA="+hashlib.sha256(b).hexdigest()); print("::notice::LOCK_COUNT="+str((len(s)+3999)//4000)); [print("::notice::LOCK_%02d="%(i//4000)+s[i:i+4000]) for i in range(0,len(s),4000)]'
       - name: Build and test Rust
         run: |
           if cargo test --locked --all-targets > /tmp/perveance-rust-test.log 2>&1; then
