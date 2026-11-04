@@ -17,7 +17,7 @@ jobs:
       - name: Select Rust
         run: rustup default stable
       - name: Install Linux GUI build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth scrot python3-pil
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth scrot python3-pil bubblewrap
       - name: Build and test Rust
         run: |
           if cargo test --locked --all-targets > /tmp/perveance-rust-test.log 2>&1; then
@@ -122,6 +122,15 @@ jobs:
           fi
       - name: Test environment probe
         run: python3 -m unittest discover -s tests -v
+      - name: Run fixed isolation feasibility checks
+        run: |
+          if python3 tools/isolation_probe.py > /tmp/perveance-isolation.json; then
+            probe_exit=0
+          else
+            probe_exit=$?
+          fi
+          cat /tmp/perveance-isolation.json
+          python3 -c 'import json,sys; r=json.load(open("/tmp/perveance-isolation.json")); status=r["status"]; assert status in ("passed","failed","unavailable"); assert r["autonomous_execution"] == "disabled"; assert (int(sys.argv[1]) == 0) == (status == "passed"); print("::notice::Bubblewrap fixed probe: "+status+"; "+r["reason"]+"; autonomous execution remains disabled")' "$probe_exit"
       - name: Exercise CLI round trip
         run: |
           cargo run --locked --quiet --bin perveance-cli -- capabilities

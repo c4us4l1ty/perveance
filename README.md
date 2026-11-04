@@ -13,7 +13,7 @@ This is **not** the finished product: autonomous development, sandbox enforcemen
 
 ## Development and verification
 
-Use a current stable Rust toolchain and the Linux X11 development dependencies, including the `libxkbcommon-x11` runtime library. `cargo test --locked --all-targets` runs the Rust tests. GitHub Actions compiles and runs these tests and a CLI round trip. The Python diagnostic `python3 tools/phase0_probe.py` reports a few local development prerequisites; it is **not** a sandbox certification. Run its tests with `python3 -m unittest discover -s tests -v`.
+Use a current stable Rust toolchain and the Linux X11 development dependencies, including the `libxkbcommon-x11` runtime library. `cargo test --locked --all-targets` runs the Rust tests. GitHub Actions compiles and runs these tests and a CLI round trip. The Python diagnostic `python3 tools/phase0_probe.py` reports a few local development prerequisites; it is **not** a sandbox certification. Run its tests with `python3 -m unittest discover -s tests -v`. A separate fixed-test diagnostic, `python3 tools/isolation_probe.py`, checks a few bubblewrap behaviors on Linux and exits nonzero if unavailable or failed. It never runs model code or enables autonomy, and passing is **not** sandbox certification.
 
 ### Headless batch editing
 
@@ -99,3 +99,9 @@ This sends your prompt, canvas dimensions, layer count, and selected model ID to
 The model is asked for JSON containing existing typed raster operations. The app only permits it to add and paint new layers, validates the complete batch, and applies it as one undoable edit if the project revision has not changed while the request was in flight. Invalid, stale, oversized, truncated, or disallowed results are rejected. A new top layer can still obscure existing artwork. This does **not** run generated code, build features, call an agent harness, or provide a sandbox. An adversarial provider/model remains untrusted.
 
 Only local mock HTTP tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
+
+### Isolation feasibility diagnostic
+
+The optional bubblewrap diagnostic creates its own temporary sentinel and workspace and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink), host IPv4 loopback access, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled.
+
+These are narrow observations, not a safety guarantee. In particular, the test binds host system directories read-only and does not test kernel escapes, all network paths, resource quotas, credential brokering or malicious build scripts. Do not use the diagnostic command as a sandbox for untrusted code. The tested build-and-activation supervisor still needs to be designed and independently validated.

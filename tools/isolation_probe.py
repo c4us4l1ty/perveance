@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Run a fixed, non-destructive bubblewrap feasibility probe. Not a sandbox certification.
+
+This program never accepts or runs user/model code. A pass does not enable Perveance
+agent execution; it observes only the small set of behaviors named in the report.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+from typing import Any
+
+CHECKS = (
+    "workspace_read_write", "host_secret_hidden", "host_write_blocked",
+    "symlink_escape_blocked", "host_loopback_blocked", "environment_cleared",
+)
+LIMITATIONS = [
+    "Fixed test code only; a pass is not a sandbox certification or an execution authorization.",
+    "No kernel escape, syscall, GPU, cgroup/quota, network egress, dependency, credential-broker, or persistence audit.",
+    "The diagnostic binds host /usr, /bin and libraries read-only; it is not a production worker profile.",
+    "Only host IPv4 loopback is tested, not all network protocols or destinations.",
+    "Probe output and tool availability are not trusted authorization for autonomous execution.",
+]
+
+# This fixed program inspects only a probe-created sentinel and local listener.
+# Its arguments, paths and listener are created by this diagnostic itself.
+WORKER = r'''
+import json, os, pathlib, socket, sys
+secret = pathlib.Path(sys.argv[1])
+port = int(sys.argv[2])
+work = pathlib.Path('/work')
+checks = {}
+p = work / 'scratch.txt'
+try:
+    p.write_text('probe-workspace', encoding='utf-8')
+    checks['workspace_read_write'] = p.read_text(encoding='utf-8') == 'probe-workspace'
+except OSError:
+    checks['workspace_read_write'] = False
+try:
+    secret.read_bytes()
+    checks['host_secret_hidden'] = False
+except OSError:
+    checks['host_secret_hidden'] = True
+try:
+    secret.write_bytes(b'changed-by-probe')
+    checks['host_write_blocked'] = False
+except OSError:
+    checks['host_write_blocked'] = True
+try:
+    (work / 'outside-link').read_bytes()
+    checks['symlink_escape_blocked'] = False
+except OSError:
+    checks['symlink_escape_blocked'] = True
+try:
+    with socket.create_connection(('127.0.0.1', port), timeout=1):
+        checks['host_loopback_blocked'] = False
+except OSError:
+    checks['host_loopback_blocked'] = True
+checks['environment_cleared'] = 'PERVEANCE_PROBE_SECRET' not in os.environ
+print(json.dumps(checks, sort_keys=True))
+'''
+
+
+def classify(checks: Any) -> str:
+    """Only the complete, correctly typed expected response can pass."""
+    if not isinstance(checks, dict) or set(checks) != set(CHECKS):
+        return "failed"
+    return "passed" if all(checks[name] is True for name in CHECKS) else "failed"
+
+
+def report(status: str, reason: str, checks: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "probe": "bubblewrap-fixed-checks-v1",
+        "status": status,
+        "reason": reason,
+        "checks": checks or {},
+        "autonomous_execution": "disabled",
+        "limitations": LIMITATIONS,
+    }
+
+
+def run_fixed_probe(bwrap: str) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="perveance-isolation-probe-") as tmp:
+        root = Path(tmp)
+        secret = root / "host-sentinel"
+        secret.write_bytes(b"probe-only-secret")
+        workspace = root / "workspace"
+        workspace.mkdir()
+        (workspace / "outside-link").symlink_to(secret)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(2)
+            listener.settimeout(2)
+            port = listener.getsockname()[1]
+            # Establish that the listener is reachable from the host before the test.
+            with socket.create_connection(("127.0.0.1", port), timeout=2):
+                accepted, _ = listener.accept()
+                accepted.close()
+            command = [bwrap, "--unshare-user", "--unshare-pid", "--unshare-net",
+                       "--unshare-ipc", "--unshare-uts", "--new-session", "--die-with-parent",
+                       "--clearenv", "--setenv", "PATH", "/usr/bin:/bin"]
+            for path in ("/usr", "/bin", "/lib", "/lib64"):
+                if Path(path).exists():
+                    command.extend(["--ro-bind", path, path])
+            command.extend(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+                            "--bind", str(workspace), "/work", "--chdir", "/work",
+                            "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port)])
+            # Files avoid unbounded in-memory output; a Linux file-size rlimit bounds each.
+            # This helper is single-threaded and only invokes a fixed diagnostic command.
+            import resource
+            def limit_output() -> None:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
+            with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+                try:
+                    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+                                               env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"}, start_new_session=True,
+                                               preexec_fn=limit_output)
+                    try:
+                        exit_code = process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                        return report("failed", "probe timed out; no execution permission granted")
+                except OSError as exc:
+                    return report("failed", f"could not start probe: {type(exc).__name__}")
+                stdout.seek(0)
+                stderr.seek(0)
+                output = stdout.read(65537)
+                error = stderr.read(2048).decode("utf-8", errors="replace").strip()
+            if exit_code != 0:
+                return report("failed", "bubblewrap or fixed test failed: " + (error[:500] or f"exit {exit_code}"))
+            if len(output) > 65536:
+                return report("failed", "probe output exceeded limit")
+            try:
+                checks = json.loads(output)
+            except (ValueError, UnicodeError):
+                return report("failed", "unexpected probe output")
+            # Independently confirm that the host sentinel was not modified.
+            if secret.read_bytes() != b"probe-only-secret":
+                return report("failed", "host sentinel was unexpectedly modified", checks if isinstance(checks, dict) else None)
+            status = classify(checks)
+            return report(status, "fixed checks passed" if status == "passed" else "one or more fixed checks failed", checks if isinstance(checks, dict) else None)
+
+
+def build_report() -> dict[str, Any]:
+    if sys.platform != "linux":
+        return report("unavailable", "Linux is required")
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        return report("unavailable", "bubblewrap was not found")
+    if not Path("/usr/bin/python3").is_file():
+        return report("unavailable", "/usr/bin/python3 is unavailable")
+    try:
+        return run_fixed_probe(bwrap)
+    except (OSError, ValueError) as exc:
+        return report("failed", f"probe setup failed: {type(exc).__name__}")
+
+
+def main() -> int:
+    result = build_report()
+    print(json.dumps(result, indent=2, sort_keys=True))
+    # A pass means the fixed diagnostic ran as expected; it never authorizes execution.
+    return 0 if result["status"] == "passed" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
