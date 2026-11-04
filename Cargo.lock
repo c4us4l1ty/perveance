@@ -1800,6 +1800,7 @@ name = "perveance"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "libc",
  "png 0.17.16",
  "serde",
  "serde_json",
