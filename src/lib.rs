@@ -1,6 +1,8 @@
 //! Small, deliberately limited pixel-art prototype shared by the GUI and CLI.
 //! It does not execute AI-generated code or implement a sandbox.
 
+pub mod provider;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::File;
