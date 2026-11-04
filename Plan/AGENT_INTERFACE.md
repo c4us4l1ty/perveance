@@ -1,0 +1,29 @@
+# Agent and headless interface
+
+## Goal
+
+External agents, including one working in an Arena sandbox, can use Perveance to create and inspect art without controlling the GUI. Both GUI and headless interface share the same operations and project persistence. A direct Arena connector/API is not assumed to exist; MCP or another protocol may be explored later, but must not be advertised as supported until implemented and the host's support is verified.
+
+## Proposed CLI contract (interface design, not implemented commands)
+
+- Discover: machine-readable product/API version, installed capabilities with version, signatures/operations, required permissions and current support status.
+- Projects: create/open, inspect canvas/layers/objects/revision, save/checkpoint, validate and close. Explicit workspace root and input/output paths, never implicit unrestricted home-directory access.
+- Edit: submit versioned, typed operations in an atomic transaction, including raster writes, layer editing and capability-defined payload operations. Return stable IDs, revision and undo/checkpoint reference. Preconditions reject stale revision; do not overwrite an active GUI session's edits.
+- Preview and export: render a bounded preview and PNG at explicit size/color/alpha; later support additional formats only when actually installed. Return file paths relative to the authorized workspace, dimensions and hashes.
+- Tasks: start/cancel/query creative tasks, monitor capability-build progress, inspect cost/permission scope, logs and final status. Headless creative tasks need explicitly configured supported provider and sandbox; basic manual operations need neither.
+- Capability lifecycle: discover/read status and logs, list installed/staged versions, request rollback via the supervisor under policy. No direct registry writes from an untrusted process.
+
+Use a stable documented JSON schema or equivalent machine-readable protocol, predictable exit codes, structured errors, explicit API compatibility and bounded output/log sizes. Long-running tasks expose job IDs and durable events; a synchronous convenience mode may wait. Document schema evolution and error taxonomy. Do not claim a protocol is available before it is implemented.
+
+## Arena workflow
+
+1. The Arena session must have a usable Perveance build (or supported installation), allowed execution environment and access to the artwork/project. Dependency installation, connectivity, GPU and sandbox availability vary by session.
+2. Ask the agent in Arena to make an asset. It queries supported operations and works in the workspace; it inspects generated previews with whatever image-viewing tools that session supplies, then saves/exports the deliverables.
+3. The agent can present generated files from that workspace. An editable project can later be opened in the GUI when transferred to a compatible Perveance installation.
+4. Missing capabilities may be built only if the Perveance supervisor's verified isolation and resource policy can operate in that environment. If nested sandboxing or provider access is unavailable, fail closed or do the feature-development work through the normal supervised repository workflow; do not silently execute unrestricted model code.
+
+This does not confer access to the user's local desktop, installed software, keys or network. Arena cannot be assumed callable from Perveance. A future local service/API bridge would need explicit discovery, authentication, consent and verified Arena support.
+
+## Concurrent editing and file safety
+
+Use project revisions and explicit transaction preconditions for headless access; detect conflicts with a GUI or other agents, reject stale writes and offer reload/rebase where safe. No blanket destructive command. Outputs use explicit paths and safe atomic replacement. A sandboxed external agent may only access the files it is given; Perveance must not escalate that access.
