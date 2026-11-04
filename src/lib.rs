@@ -2,13 +2,15 @@
 //! It does not execute AI-generated code or implement a sandbox.
 
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Cursor, Read, Write};
+use std::fs::File;
+use std::io::{BufReader, Cursor, Read, Write};
 use std::path::Path;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DIMENSION: u32 = 256;
-const MAX_PROJECT_BYTES: u64 = 16 * 1024 * 1024;
+// Must accommodate the worst valid 256×256×32 RGBA project as JSON, including
+// escaped layer names, not merely its much smaller in-memory pixel payload.
+const MAX_PROJECT_BYTES: u64 = 40 * 1024 * 1024;
 pub const MAX_PNG_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,8 +36,13 @@ pub struct Project {
 /// estimated pixel/name payload, not a precise process-memory ceiling.
 #[derive(Default)]
 pub struct History {
-    undo: Vec<Project>,
-    redo: Vec<Project>,
+    undo: Vec<HistorySnapshot>,
+    redo: Vec<HistorySnapshot>,
+}
+
+struct HistorySnapshot {
+    project: Project,
+    selected_layer: Option<usize>,
 }
 
 const HISTORY_MAX_SNAPSHOTS: usize = 20;
@@ -46,27 +53,65 @@ impl History {
     pub fn can_redo(&self) -> bool { !self.redo.is_empty() }
 
     /// Call immediately before a successful edit. New edits discard the redo branch.
-    pub fn checkpoint(&mut self, project: &Project) {
+    pub fn checkpoint(&mut self, project: &Project) { self.checkpoint_inner(project, None); }
+
+    /// Also retain the editor's selected layer so layer reorder undo restores selection.
+    pub fn checkpoint_with_selection(&mut self, project: &Project, selected_layer: usize) {
+        self.checkpoint_inner(project, Some(selected_layer));
+    }
+
+    fn checkpoint_inner(&mut self, project: &Project, selected_layer: Option<usize>) {
         self.redo.clear();
-        Self::push_bounded(&mut self.undo, project.clone());
+        Self::push_bounded(&mut self.undo, HistorySnapshot { project: project.clone(), selected_layer });
+    }
+
+    /// Apply a discrete edit transactionally. No-ops and errors do not discard redo.
+    pub fn apply<F>(&mut self, project: &mut Project, edit: F) -> Result<bool, String>
+    where F: FnOnce(&mut Project) -> Result<(), String> {
+        self.apply_inner(project, None, edit)
+    }
+
+    pub fn apply_with_selection<F>(&mut self, project: &mut Project, selected_layer: usize, edit: F) -> Result<bool, String>
+    where F: FnOnce(&mut Project) -> Result<(), String> {
+        self.apply_inner(project, Some(selected_layer), edit)
+    }
+
+    fn apply_inner<F>(&mut self, project: &mut Project, selected_layer: Option<usize>, edit: F) -> Result<bool, String>
+    where F: FnOnce(&mut Project) -> Result<(), String> {
+        let mut candidate = project.clone();
+        edit(&mut candidate)?;
+        candidate.validate()?;
+        if candidate == *project { return Ok(false); }
+        self.checkpoint_inner(project, selected_layer);
+        *project = candidate;
+        Ok(true)
     }
 
     pub fn undo(&mut self, project: &mut Project) -> bool {
-        match self.undo.pop() {
-            Some(previous) => {
-                let current = std::mem::replace(project, previous);
-                Self::push_bounded(&mut self.redo, current);
-                true
-            }
-            None => false,
-        }
+        Self::restore(&mut self.undo, &mut self.redo, project, None)
     }
 
     pub fn redo(&mut self, project: &mut Project) -> bool {
-        match self.redo.pop() {
-            Some(next) => {
-                let current = std::mem::replace(project, next);
-                Self::push_bounded(&mut self.undo, current);
+        Self::restore(&mut self.redo, &mut self.undo, project, None)
+    }
+
+    pub fn undo_with_selection(&mut self, project: &mut Project, selected_layer: &mut usize) -> bool {
+        Self::restore(&mut self.undo, &mut self.redo, project, Some(selected_layer))
+    }
+
+    pub fn redo_with_selection(&mut self, project: &mut Project, selected_layer: &mut usize) -> bool {
+        Self::restore(&mut self.redo, &mut self.undo, project, Some(selected_layer))
+    }
+
+    fn restore(source: &mut Vec<HistorySnapshot>, destination: &mut Vec<HistorySnapshot>, project: &mut Project, selected_layer: Option<&mut usize>) -> bool {
+        match source.pop() {
+            Some(snapshot) => {
+                let current_selection = selected_layer.as_deref().copied();
+                let current_project = std::mem::replace(project, snapshot.project);
+                Self::push_bounded(destination, HistorySnapshot { project: current_project, selected_layer: current_selection });
+                if let (Some(selection), Some(previous)) = (selected_layer, snapshot.selected_layer) {
+                    *selection = previous.min(project.layers.len().saturating_sub(1));
+                }
                 true
             }
             None => false,
@@ -75,9 +120,9 @@ impl History {
 
     pub fn clear(&mut self) { self.undo.clear(); self.redo.clear(); }
 
-    fn push_bounded(stack: &mut Vec<Project>, project: Project) {
-        stack.push(project);
-        while stack.len() > 1 && (stack.len() > HISTORY_MAX_SNAPSHOTS || stack.iter().map(Self::estimated_payload).sum::<usize>() > HISTORY_MAX_PAYLOAD_BYTES) {
+    fn push_bounded(stack: &mut Vec<HistorySnapshot>, snapshot: HistorySnapshot) {
+        stack.push(snapshot);
+        while stack.len() > 1 && (stack.len() > HISTORY_MAX_SNAPSHOTS || stack.iter().map(|entry| Self::estimated_payload(&entry.project)).sum::<usize>() > HISTORY_MAX_PAYLOAD_BYTES) {
             stack.remove(0);
         }
     }
@@ -387,13 +432,14 @@ fn decode_png(path: &Path) -> Result<DecodedPng, String> {
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let file = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| format!("create output: {e}"))?;
-    let result = (|| { let mut output = BufWriter::new(file); output.write_all(bytes)?; output.flush() })();
-    if let Err(error) = result {
-        // Leave an incomplete file for the user to inspect or remove. Removing by path
-        // here could delete a different file if another process replaced the entry.
-        return Err(format!("write output: {error}; incomplete output may remain"));
-    }
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| format!("create temporary output: {e}"))?;
+    staged.write_all(bytes).map_err(|e| format!("write temporary output: {e}"))?;
+    staged.as_file_mut().sync_all().map_err(|e| format!("sync temporary output: {e}"))?;
+    // Never replace an existing file. The tempfile is created in the target's
+    // directory so the library can use a same-filesystem no-clobber installation.
+    // Filesystem/platform guarantees vary; directory fsync is not performed.
+    staged.persist_noclobber(path).map_err(|e| format!("create output: {}", e.error))?;
     Ok(())
 }
 
@@ -500,6 +546,37 @@ mod tests {
         assert!(!history.can_redo());
         history.clear();
         assert!(!history.can_undo());
+    }
+    #[test]
+    fn history_transaction_preserves_redo_on_failure_or_noop() {
+        let mut p = Project::new(1, 1).unwrap();
+        let mut history = History::default();
+        history.checkpoint(&p);
+        p.set_pixel(0, 0, 0, [1, 2, 3, 255]).unwrap();
+        assert!(history.undo(&mut p));
+        assert!(history.can_redo());
+        assert!(!history.apply(&mut p, |candidate| candidate.set_pixel(0, 0, 0, [0; 4])).unwrap());
+        assert!(history.can_redo());
+        assert!(history.apply(&mut p, |candidate| candidate.set_pixel(99, 0, 0, [3; 4])).is_err());
+        assert!(history.can_redo());
+        assert!(history.apply(&mut p, |candidate| candidate.set_pixel(0, 0, 0, [9; 4])).unwrap());
+        assert!(!history.can_redo());
+    }
+    #[test]
+    fn undo_redo_restore_selected_layer_after_reorder() {
+        let mut p = Project::new(1, 1).unwrap();
+        p.add_layer().unwrap();
+        p.rename_layer(1, "Selected").unwrap();
+        let mut selection = 1;
+        let mut history = History::default();
+        history.apply_with_selection(&mut p, selection, |project| project.move_layer(1, 0)).unwrap();
+        selection = 0;
+        assert!(history.undo_with_selection(&mut p, &mut selection));
+        assert_eq!(selection, 1);
+        assert_eq!(p.layers[selection].name, "Selected");
+        assert!(history.redo_with_selection(&mut p, &mut selection));
+        assert_eq!(selection, 0);
+        assert_eq!(p.layers[selection].name, "Selected");
     }
     #[test]
     fn history_limits_snapshot_count() {

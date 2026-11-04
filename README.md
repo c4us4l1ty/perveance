@@ -6,7 +6,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
-- A new-file-only save/export policy: outputs cannot overwrite an existing file. The simple JSON format is experimental and not yet a stable interchange format.
+- A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
 This is **not** the finished product: AI providers, autonomous development, sandbox enforcement, vector artwork, a full editor, atomic/revision-aware project updates, and broad OS support are not implemented. Do not rely on this prototype for important artwork. It does not execute generated code.
 
@@ -26,9 +26,9 @@ The prototype CLI can apply a JSON array of up to 1,024 typed operations in one 
 ]
 ```
 
-All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves use exclusive creation but are not yet crash-atomic; an incomplete output may remain after an I/O failure.
+All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves and PNG exports stage and sync a temporary file before a no-clobber installation. Guarantees depend on the filesystem and platform; directory durability across power loss is not guaranteed, and a crash can leave a temporary file.
 
-The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder or remove layers. Layer edits are undoable and redoable within a bounded local history. Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. Unsupported project fields are rejected rather than silently discarded.
+The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. Unsupported project fields are rejected rather than silently discarded.
 
 ### Example layered asset
 

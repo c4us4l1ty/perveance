@@ -42,6 +42,7 @@ struct Studio {
     color: [u8; 4],
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
+    stroke_recorded: bool,
     path: String,
     png_path: String,
     status: String,
@@ -58,7 +59,7 @@ struct Studio {
 impl Default for Studio {
     fn default() -> Self {
         Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, path: "art.perveance.json".into(), png_path: "image.png".into(),
+            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -66,7 +67,19 @@ impl Default for Studio {
 
 impl Studio {
     fn checkpoint(&mut self) {
-        self.history.checkpoint(&self.project);
+        self.history.checkpoint_with_selection(&self.project, self.layer);
+    }
+    fn undo_edit(&mut self) {
+        if self.history.undo_with_selection(&mut self.project, &mut self.layer) {
+            self.layer = self.layer.min(self.project.layers.len() - 1);
+            self.rename_buffer = self.project.layers[self.layer].name.clone();
+        }
+    }
+    fn redo_edit(&mut self) {
+        if self.history.redo_with_selection(&mut self.project, &mut self.layer) {
+            self.layer = self.layer.min(self.project.layers.len() - 1);
+            self.rename_buffer = self.project.layers[self.layer].name.clone();
+        }
     }
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
@@ -75,18 +88,23 @@ impl Studio {
 
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Do not intercept shortcuts while a text field is editing or a brush gesture is active.
+        if !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
+            let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
+            let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
+            let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+            if ctx.input_mut(|input| input.consume_shortcut(&redo) || input.consume_shortcut(&redo_alternate)) {
+                self.redo_edit();
+            } else if ctx.input_mut(|input| input.consume_shortcut(&undo)) {
+                self.undo_edit();
+            }
+        }
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("perveance");
                 ui.label(egui::RichText::new("STUDIO / EARLY PROTOTYPE").small().color(Color32::from_rgb(166, 215, 74)));
-                if ui.add_enabled(self.history.can_undo(), egui::Button::new("Undo")).clicked() && self.history.undo(&mut self.project) {
-                    self.layer = self.layer.min(self.project.layers.len() - 1);
-                    self.rename_buffer = self.project.layers[self.layer].name.clone();
-                }
-                if ui.add_enabled(self.history.can_redo(), egui::Button::new("Redo")).clicked() && self.history.redo(&mut self.project) {
-                    self.layer = self.layer.min(self.project.layers.len() - 1);
-                    self.rename_buffer = self.project.layers[self.layer].name.clone();
-                }
+                if ui.add_enabled(self.history.can_undo(), egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.undo_edit(); }
+                if ui.add_enabled(self.history.can_redo(), egui::Button::new("Redo")).on_hover_text("Ctrl+Shift+Z or Ctrl+Y").clicked() { self.redo_edit(); }
                 ui.separator();
                 ui.label(format!("{} × {}", self.project.width, self.project.height));
                 ui.separator();
@@ -170,18 +188,24 @@ impl eframe::App for Studio {
           });
         });
         egui::SidePanel::right("layers").default_width(190.0).show(ctx, |ui| {
+          egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.heading("Layers");
             ui.add_space(8.0);
             if ui.button("+ Add layer").clicked() {
-                self.checkpoint();
-                match self.project.add_layer() { Ok(()) => { self.layer = self.project.layers.len() - 1; self.rename_buffer = self.project.layers[self.layer].name.clone(); }, Err(e) => self.status = e }
+                match self.history.apply_with_selection(&mut self.project, self.layer, |project| project.add_layer()) {
+                    Ok(true) => { self.layer = self.project.layers.len() - 1; self.rename_buffer = self.project.layers[self.layer].name.clone(); }
+                    Ok(false) => {}
+                    Err(error) => self.status = error,
+                }
             }
             for index in (0..self.project.layers.len()).rev() {
                 ui.horizontal(|ui| {
                     let mut visible = self.project.layers[index].visible;
                     if ui.checkbox(&mut visible, "").changed() {
-                        self.checkpoint();
-                        self.project.layers[index].visible = visible;
+                        if let Err(error) = self.history.apply_with_selection(&mut self.project, self.layer, |project| {
+                            project.layers[index].visible = visible;
+                            Ok(())
+                        }) { self.status = error; }
                     }
                     if ui.selectable_label(self.layer == index, &self.project.layers[index].name).clicked() { self.layer = index; self.rename_buffer = self.project.layers[index].name.clone(); }
                 });
@@ -190,29 +214,42 @@ impl eframe::App for Studio {
             ui.label("Selected layer name");
             ui.text_edit_singleline(&mut self.rename_buffer);
             if ui.button("Rename").clicked() {
-                let mut updated = self.project.clone();
-                match updated.rename_layer(self.layer, &self.rename_buffer) {
-                    Ok(()) => { self.checkpoint(); self.project = updated; }
-                    Err(error) => self.status = error,
+                let layer = self.layer;
+                let name = self.rename_buffer.clone();
+                if let Err(error) = self.history.apply_with_selection(&mut self.project, self.layer, |project| project.rename_layer(layer, &name)) {
+                    self.status = error;
                 }
             }
             ui.horizontal(|ui| {
                 if ui.add_enabled(self.layer + 1 < self.project.layers.len(), egui::Button::new("Up")).on_hover_text("Move layer up").clicked() {
-                    self.checkpoint();
-                    if self.project.move_layer(self.layer, self.layer + 1).is_ok() { self.layer += 1; }
+                    let layer = self.layer;
+                    match self.history.apply_with_selection(&mut self.project, self.layer, |project| project.move_layer(layer, layer + 1)) {
+                        Ok(true) => self.layer += 1,
+                        Ok(false) => {}
+                        Err(error) => self.status = error,
+                    }
                 }
                 if ui.add_enabled(self.layer > 0, egui::Button::new("Down")).on_hover_text("Move layer down").clicked() {
-                    self.checkpoint();
-                    if self.project.move_layer(self.layer, self.layer - 1).is_ok() { self.layer -= 1; }
+                    let layer = self.layer;
+                    match self.history.apply_with_selection(&mut self.project, self.layer, |project| project.move_layer(layer, layer - 1)) {
+                        Ok(true) => self.layer -= 1,
+                        Ok(false) => {}
+                        Err(error) => self.status = error,
+                    }
                 }
                 if ui.add_enabled(self.project.layers.len() > 1, egui::Button::new("Remove")).on_hover_text("Remove selected layer (undoable)").clicked() {
-                    self.checkpoint();
-                    if self.project.remove_layer(self.layer).is_ok() {
-                        self.layer = self.layer.min(self.project.layers.len() - 1);
-                        self.rename_buffer = self.project.layers[self.layer].name.clone();
+                    let layer = self.layer;
+                    match self.history.apply_with_selection(&mut self.project, self.layer, |project| project.remove_layer(layer)) {
+                        Ok(true) => {
+                            self.layer = self.layer.min(self.project.layers.len() - 1);
+                            self.rename_buffer = self.project.layers[self.layer].name.clone();
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.status = error,
                     }
                 }
             });
+          });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -262,26 +299,42 @@ impl eframe::App for Studio {
                     if x < width && y < height { Some([x, y]) } else { None }
                 };
                 if response.clicked() || response.drag_started() {
-                    self.checkpoint();
+                    self.stroke_recorded = false;
                     self.stroke_last = if response.drag_started() {
                         ctx.input(|input| input.pointer.press_origin()).and_then(to_pixel)
                     } else { None };
                 }
                 if response.clicked() || response.dragged() || response.drag_started() {
                     if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) {
+                        // Delay the checkpoint until the first actual change in this gesture.
+                        // No-op strokes and failed edits must not discard the redo branch.
+                        let before = if self.stroke_recorded { None } else { Some(self.project.clone()) };
                         let result = if self.tool == Tool::Fill {
                             self.project.fill(self.layer, point[0], point[1], self.color)
                         } else {
                             let color = if self.tool == Tool::Eraser { [0; 4] } else { self.color };
                             self.project.draw_line(self.layer, self.stroke_last.unwrap_or(point), point, color)
                         };
-                        if let Err(error) = result { self.status = error; }
+                        match result {
+                            Ok(()) => {
+                                if let Some(before) = before {
+                                    if before != self.project {
+                                        self.history.checkpoint_with_selection(&before, self.layer);
+                                        self.stroke_recorded = true;
+                                    }
+                                }
+                            }
+                            Err(error) => self.status = error,
+                        }
                         self.stroke_last = Some(point);
                     } else {
                         self.stroke_last = None;
                     }
                 }
-                if response.drag_stopped() || response.clicked() { self.stroke_last = None; }
+                if response.drag_stopped() || response.clicked() {
+                    self.stroke_last = None;
+                    self.stroke_recorded = false;
+                }
               });
             });
         });
