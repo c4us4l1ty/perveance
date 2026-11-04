@@ -40,7 +40,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
             "operations": ["new", "new-from-png", "inspect", "inspect-palette", "sample", "read-region", "paint", "apply", "apply-proposal", "import-png", "export-png"],
-            "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "translate_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
+            "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
                 "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
@@ -52,6 +52,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "clear_layer": {"op": "clear_layer", "layer": 0},
                 "flip_layer": {"op": "flip_layer", "layer": 0, "axis": "horizontal"},
                 "translate_layer": {"op": "translate_layer", "layer": 0, "dx": 1, "dy": 0, "clip": false},
+                "resize_canvas": {"op": "resize_canvas", "width": 32, "height": 32, "clip": false},
                 "pixel": {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]},
                 "line": {"op": "line", "layer": 0, "from": [0, 0], "to": [1, 1], "color": [255, 0, 0, 255]},
                 "rectangle": {"op": "rectangle", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "color": [255, 0, 0, 255]},
@@ -63,7 +64,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             "proposal_version": perveance::PROPOSAL_VERSION,
             "proposal_example": {"version": 1, "base_revision": "<revision from inspect>", "operations": [{"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}]},
             "proposal_semantics": "Data-only typed edits bound to a project snapshot fingerprint; input is loaded once and output is create-new. This does not lock files or detect unsaved edits in another process.",
-            "batch_semantics": "Layer indices are bottom-to-top; duplicates are inserted immediately above their source. Flips reflect the full layer across canvas bounds. Translations shift raw pixels and require explicit clip=true to discard nonzero RGBA outside the canvas. RGBA channels are straight-alpha bytes. Shape dimensions are positive and must fit the canvas; ellipse outlines use four-connected edges. Operations apply in order to a clone; on failure no output is created.",
+            "batch_semantics": "Layer indices are bottom-to-top; duplicates are inserted immediately above their source. Flips reflect the full layer across canvas bounds. Translations shift raw pixels; canvas resize is top-left anchored without resampling. Both require explicit clip=true to discard nonzero RGBA outside the canvas. RGBA channels are straight-alpha bytes. Shape dimensions are positive and must fit the canvas; ellipse outlines use four-connected edges. Operations apply in order to a clone; on failure no output is created.",
             "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "no AI in CLI"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;

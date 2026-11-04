@@ -17,7 +17,7 @@ Use a current stable Rust toolchain and the Linux X11 development dependencies, 
 
 ### Headless batch editing
 
-The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `flip_layer`, `translate_layer`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
+The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
 
 ```json
 [
@@ -44,6 +44,12 @@ Offsets range from -256 to 256 per axis. `clip` is required: `false` rejects dat
 All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves and PNG exports stage and sync a temporary file before a no-clobber installation. Guarantees depend on the filesystem and platform; directory durability across power loss is not guaranteed, and a crash can leave a temporary file.
 
 The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder, duplicate, flip, clear or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. The editor warns before a normal window close if the project differs from the last successful project save or open. PNG exports do not mark a project saved. This is not crash recovery and cannot prevent data loss from force-quitting, system failure or external file changes. Unsupported project fields are rejected rather than silently discarded.
+
+### Resizing a canvas
+
+In the GUI, expand **Resize existing canvas** in the Project section and enter the new width and height (1–256). Resize is undoable and affects every raster layer, including hidden layers. It is anchored at the top-left and does not scale or resample; added pixels are transparent black. Shrinking is rejected if it would discard nonzero RGBA data, including hidden RGB in fully transparent pixels, unless **Allow clipping** is explicitly enabled. Clipping can permanently discard artwork; undo history is bounded, so keep backups. After a successful resize the clipping option resets.
+
+Agents can use `{"op":"resize_canvas","width":64,"height":64,"clip":false}` in a batch or revision-bound proposal. The `clip` field is required and `true` permits destructive cropping. Changes are transactional; the experimental OpenRouter adapter cannot resize the canvas. This is a raster canvas resize, not image scaling or a non-destructive transform.
 
 ### Palette
 

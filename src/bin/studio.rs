@@ -101,6 +101,9 @@ struct Studio {
     confirm_open: bool,
     new_width: u32,
     new_height: u32,
+    resize_width: u32,
+    resize_height: u32,
+    allow_resize_clip: bool,
     zoom: f32,
     show_grid: bool,
     rename_buffer: String,
@@ -113,7 +116,7 @@ impl Default for Studio {
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
             color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
-            new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
+            new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
 }
 
@@ -129,14 +132,22 @@ impl Studio {
     fn checkpoint(&mut self) {
         self.history.checkpoint_with_selection(&self.project, self.layer);
     }
+    fn sync_resize_dimensions(&mut self) {
+        self.resize_width = self.project.width;
+        self.resize_height = self.project.height;
+    }
     fn undo_edit(&mut self) {
+        let dimensions = (self.project.width, self.project.height);
         if self.history.undo_with_selection(&mut self.project, &mut self.layer) {
+            if dimensions != (self.project.width, self.project.height) { self.sync_resize_dimensions(); }
             self.layer = self.layer.min(self.project.layers.len() - 1);
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
     }
     fn redo_edit(&mut self) {
+        let dimensions = (self.project.width, self.project.height);
         if self.history.redo_with_selection(&mut self.project, &mut self.layer) {
+            if dimensions != (self.project.width, self.project.height) { self.sync_resize_dimensions(); }
             self.layer = self.layer.min(self.project.layers.len() - 1);
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
@@ -170,6 +181,28 @@ impl Studio {
             self.status = error;
         }
     }
+    fn resize_canvas(&mut self) {
+        let (width, height, clip) = (self.resize_width, self.resize_height, self.allow_resize_clip);
+        match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.resize_canvas(width, height, clip)) {
+            Ok(changed) => {
+                self.sync_resize_dimensions();
+                self.allow_resize_clip = false;
+                self.status = if changed { "Canvas resized (undoable)." } else { "Canvas size unchanged." }.into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn resize_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.small("Top-left anchored; no scaling. Shrinking can permanently discard pixel data (including hidden layers). Undo is bounded.");
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut self.resize_width).range(1..=256).prefix("W "));
+            ui.add(egui::DragValue::new(&mut self.resize_height).range(1..=256).prefix("H "));
+        });
+        let clip = ui.checkbox(&mut self.allow_resize_clip, "Allow clipping");
+        let apply = ui.button("Resize canvas");
+        if apply.clicked() { self.resize_canvas(); }
+        (clip.rect, apply.rect)
+    }
     fn nudge_selected(&mut self, dx: i32, dy: i32) {
         let layer = self.layer;
         let clip = self.allow_translation_clip;
@@ -201,9 +234,11 @@ impl Studio {
     }
     fn apply_proposal(&mut self, proposal: &EditProposal) {
         let original_count = self.project.layers.len();
+        let dimensions = (self.project.width, self.project.height);
         match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.apply_proposal(proposal)) {
             Ok(changed) => {
                 if changed { self.layer = selection_after_operations(self.layer, original_count, &proposal.operations); }
+                if dimensions != (self.project.width, self.project.height) { self.sync_resize_dimensions(); }
                 self.layer = self.layer.min(self.project.layers.len() - 1);
                 self.rename_buffer = self.project.layers[self.layer].name.clone();
                 self.status = if changed { "Proposal applied (undoable)." } else { "Proposal made no changes." }.into();
@@ -455,10 +490,11 @@ impl eframe::App for Studio {
             ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
             if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
                 match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.saved_project = None; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
+                    Ok(project) => { self.project = project; self.saved_project = None; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.sync_resize_dimensions(); self.allow_resize_clip = false; self.confirm_open = false; self.status = "New canvas created.".into(); }
                     Err(error) => self.status = error,
                 }
             }
+            egui::CollapsingHeader::new("Resize existing canvas").show(ui, |ui| { self.resize_ui(ui); });
             ui.separator();
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
@@ -473,7 +509,7 @@ impl eframe::App for Studio {
             }
             if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
                 match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
+                    Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.sync_resize_dimensions(); self.allow_resize_clip = false; self.status = "Project opened.".into(); self.confirm_open = false; }
                     Err(error) => self.status = error,
                 }
             }
@@ -503,6 +539,8 @@ impl eframe::App for Studio {
                         self.shape_start = None;
                         self.shape_current = None;
                         self.rename_buffer = self.project.layers[0].name.clone();
+                        self.sync_resize_dimensions();
+                        self.allow_resize_clip = false;
                         self.confirm_open = false;
                         self.status = "PNG opened as a new canvas.".into();
                     }
@@ -976,6 +1014,67 @@ mod tests {
         assert_eq!(studio.project.sample_layer(0, 0, 0).unwrap(), [0; 4]);
         studio.undo_edit();
         assert_eq!(studio.project, original);
+    }
+
+    #[test]
+    fn resize_controls_require_opt_in_and_restore_dimensions_on_undo() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.resize_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.add_layer().unwrap();
+        studio.project.layers[1].visible = false;
+        studio.project.set_pixel(1, 31, 31, [8, 9, 10, 0]).unwrap();
+        studio.layer = 1;
+        let original = studio.project.clone();
+        studio.resize_width = 16;
+        studio.resize_height = 16;
+        let ctx = egui::Context::default();
+        let (checkbox, button) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, button.center());
+        assert_eq!(studio.project, original);
+        assert!(studio.status.contains("clip"));
+        assert!(!studio.history.can_undo());
+        click(&ctx, &mut studio, checkbox.center());
+        assert!(studio.allow_resize_clip);
+        click(&ctx, &mut studio, button.center());
+        assert_eq!((studio.project.width, studio.project.height), (16,16));
+        assert!(!studio.allow_resize_clip);
+        assert_eq!(studio.layer, 1);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        assert_eq!((studio.resize_width, studio.resize_height), (32,32));
+        assert_eq!(studio.layer, 1);
+        studio.redo_edit();
+        assert_eq!((studio.project.width, studio.project.height), (16,16));
+        assert_eq!((studio.resize_width, studio.resize_height), (16,16));
+        assert_eq!(studio.layer, 1);
+    }
+
+    #[test]
+    fn proposal_resize_refreshes_gui_dimensions_and_can_be_undone() {
+        let mut studio = Studio::default();
+        let revision = studio.project.revision().unwrap();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision,
+            operations: vec![Operation::ResizeCanvas { width: 40, height: 25, clip: false }] };
+        studio.apply_proposal(&proposal);
+        assert_eq!((studio.project.width, studio.project.height), (40,25));
+        assert_eq!((studio.resize_width, studio.resize_height), (40,25));
+        studio.apply_proposal(&proposal);
+        assert!(studio.status.contains("stale"));
+        studio.undo_edit();
+        assert_eq!((studio.project.width, studio.project.height), (32,32));
+        assert_eq!((studio.resize_width, studio.resize_height), (32,32));
     }
 
     #[test]

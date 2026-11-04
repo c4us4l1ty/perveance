@@ -180,6 +180,12 @@ mod tests {
     }
 
     #[test]
+    fn provider_cannot_resize_canvas() {
+        assert!(validate_generated(&[Operation::ResizeCanvas { width: 1, height: 1, clip: true }], 1).is_err());
+        assert!(validate_generated(&[Operation::AddLayer, Operation::ResizeCanvas { width: 3, height: 3, clip: false }], 1).is_err());
+    }
+
+    #[test]
     fn provider_cannot_translate_existing_or_new_layers() {
         assert!(validate_generated(&[Operation::TranslateLayer { layer: 0, dx: 1, dy: 0, clip: true }], 1).is_err());
         assert!(validate_generated(&[Operation::AddLayer, Operation::TranslateLayer { layer: 1, dx: 1, dy: 0, clip: false }], 1).is_err());

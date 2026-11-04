@@ -190,6 +190,7 @@ pub enum Operation {
     ClearLayer { layer: usize },
     FlipLayer { layer: usize, axis: FlipAxis },
     TranslateLayer { layer: usize, dx: i32, dy: i32, clip: bool },
+    ResizeCanvas { width: u32, height: u32, clip: bool },
     SetVisibility { layer: usize, visible: bool },
     RenameLayer { layer: usize, name: String },
     MoveLayer { from: usize, to: usize },
@@ -269,6 +270,45 @@ impl Project {
         if self.layers.iter().any(|layer| layer.pixels.len() != len || layer.name.len() > 256) {
             return Err("invalid layer data".into());
         }
+        Ok(())
+    }
+
+    /// Resize every raster layer, anchored at the top left with no resampling.
+    /// Reject loss of any nonzero RGBA bytes, including hidden/transparent data,
+    /// unless clipping is explicitly enabled. Failure leaves all layers unchanged.
+    pub fn resize_canvas(&mut self, width: u32, height: u32, clip: bool) -> Result<(), String> {
+        self.validate()?;
+        if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+            return Err(format!("dimensions must be between 1 and {MAX_DIMENSION}"));
+        }
+        if (width, height) == (self.width, self.height) { return Ok(()); }
+        let old_width = self.width as usize;
+        let old_height = self.height as usize;
+        let new_width = width as usize;
+        let new_height = height as usize;
+        if !clip {
+            for layer in &self.layers {
+                for y in 0..old_height {
+                    for x in 0..old_width {
+                        if (x >= new_width || y >= new_height) && layer.pixels[y * old_width + x] != [0; 4] {
+                            return Err("resize would clip nonzero pixel data; enable clipping to proceed".into());
+                        }
+                    }
+                }
+            }
+        }
+        for layer in &mut self.layers {
+            let mut pixels = vec![[0; 4]; new_width * new_height];
+            let copy_width = old_width.min(new_width);
+            for y in 0..old_height.min(new_height) {
+                let from = y * old_width;
+                let to = y * new_width;
+                pixels[to..to + copy_width].copy_from_slice(&layer.pixels[from..from + copy_width]);
+            }
+            layer.pixels = pixels;
+        }
+        self.width = width;
+        self.height = height;
         Ok(())
     }
 
@@ -518,6 +558,7 @@ impl Project {
                 Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
                 Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
                 Operation::TranslateLayer { layer, dx, dy, clip } => candidate.translate_layer(*layer, *dx, *dy, *clip),
+                Operation::ResizeCanvas { width, height, clip } => candidate.resize_canvas(*width, *height, *clip),
                 Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
                     Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),

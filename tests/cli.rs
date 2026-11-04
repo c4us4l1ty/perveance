@@ -425,3 +425,46 @@ fn translation_is_discoverable_and_proposals_require_explicit_clipping() {
     }
     assert_eq!(perveance::Project::load(moved.as_path()).unwrap(), result);
 }
+
+#[test]
+fn resize_proposal_and_export_preserve_layers_and_refuse_unapproved_crop() {
+    let dir = TempDir::new();
+    let input = dir.0.join("input.json");
+    let resized = dir.0.join("resized.json");
+    let invalid = dir.0.join("invalid.json");
+    let proposal = dir.0.join("proposal.json");
+    let png = dir.0.join("resized.png");
+    let mut project = perveance::Project::new(2, 2).unwrap();
+    project.set_pixel(0, 1, 1, [33, 44, 55, 255]).unwrap();
+    project.add_layer().unwrap();
+    project.layers[1].visible = false;
+    project.set_pixel(1, 0, 1, [7, 8, 9, 0]).unwrap();
+    project.save_new(&input).unwrap();
+    let revision = project.revision().unwrap();
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "resize_canvas"));
+    for op in [serde_json::json!({"op":"resize_canvas","width":1,"height":1,"clip":false}),
+        serde_json::json!({"op":"resize_canvas","width":3,"height":3}),
+        serde_json::json!({"op":"resize_canvas","width":3,"height":3,"clip":true,"extra":0})] {
+        fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[op]})).unwrap()).unwrap();
+        let result = cli(&["apply-proposal", input.to_str().unwrap(), invalid.to_str().unwrap(), proposal.to_str().unwrap()]);
+        assert!(!result.status.success());
+        assert!(!invalid.exists());
+    }
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[
+        {"op":"resize_canvas","width":3,"height":3,"clip":false},
+        {"op":"pixel","layer":0,"x":2,"y":2,"color":[99,88,77,255]}]})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", input.to_str().unwrap(), resized.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let output = perveance::Project::load(&resized).unwrap();
+    assert_eq!((output.width, output.height), (3,3));
+    assert_eq!(output.sample_layer(1, 0, 1).unwrap(), [7,8,9,0]);
+    assert!(!output.layers[1].visible);
+    assert_eq!(perveance::Project::load(&input).unwrap(), project);
+    assert!(cli(&["export-png", resized.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut pixels).unwrap();
+    assert_eq!((info.width, info.height), (3, 3));
+    assert_eq!(&pixels[(2 * 3 + 2) * 4..(2 * 3 + 3) * 4], &[99,88,77,255]);
+}
