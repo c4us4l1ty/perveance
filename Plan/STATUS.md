@@ -47,4 +47,4 @@
 
 - Added CLI operation examples and a tested layered potion asset. Inspected a CI-generated X11 screenshot of the default window and refined centering, spacing and original tool icons. This is only a single startup screenshot, not a complete visual, input, accessibility or platform test.
 - Added bounded static-PNG import into a new canvas or matching-size raster layer in the GUI and CLI. The initial [PNG import CI run](https://github.com/c4us4l1ty/perveance/actions/runs/41804157603) passed tests covering RGBA, RGB, grayscale, indexed and 16-bit conversion, invalid/truncated data, APNG rejection, size limits and no-overwrite behavior. PNG metadata and color management are not preserved.
-- Added bounded undo/redo history for the GUI; subsequent changes still require the current branch's final CI result. Autonomous execution and AI providers remain unimplemented.
+- Added bounded undo/redo history for the GUI; its [initial CI run](https://github.com/c4us4l1ty/perveance/actions/runs/41804474941) passed. Subsequent changes still require the current branch's final CI result. Autonomous execution and AI providers remain unimplemented.

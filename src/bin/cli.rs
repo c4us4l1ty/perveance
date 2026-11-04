@@ -23,7 +23,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
             "batch_semantics": "Layer indices are bottom-to-top. RGBA channels are straight-alpha bytes. Rectangle dimensions are positive and must fit the canvas. Operations apply in order to a clone; on failure no output is created.",
-            "limitations": ["create-new outputs only", "no vector support", "no AI"]})),
+            "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "no AI"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;
             project.save_new(Path::new(output))?;

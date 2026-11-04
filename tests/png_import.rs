@@ -64,6 +64,13 @@ fn rejects_invalid_dimensions_animation_corruption_and_oversized_input() {
     assert!(Project::from_png(&path).is_err());
     png_file(&path, 1, 1, ColorType::Rgba, BitDepth::Eight, &[1, 2, 3, 255], false, false);
     let mut data = fs::read(&path).unwrap();
+    let idat = data.windows(4).position(|window| window == b"IDAT").unwrap();
+    let len = u32::from_be_bytes(data[idat - 4..idat].try_into().unwrap()) as usize;
+    data[idat + 4 + len] ^= 0x80;
+    fs::write(&path, data).unwrap();
+    assert!(Project::from_png(&path).is_err(), "bad IDAT checksum must be rejected");
+    png_file(&path, 1, 1, ColorType::Rgba, BitDepth::Eight, &[1, 2, 3, 255], false, false);
+    let mut data = fs::read(&path).unwrap();
     data.truncate(data.len() / 2);
     fs::write(&path, data).unwrap();
     assert!(Project::from_png(&path).is_err());
@@ -99,6 +106,13 @@ fn cli_import_creates_editable_projects_and_rejects_bad_inputs() {
     let layered = dir.0.join("layered.json");
     let bad_output = dir.0.join("bad.json");
     png_file(&png, 2, 1, ColorType::Rgba, BitDepth::Eight, &[11, 22, 33, 255, 44, 55, 66, 128], false, false);
+    let imported = Project::from_png(&png).unwrap();
+    let exported = dir.0.join("roundtrip.png");
+    imported.export_png_new(&exported).unwrap();
+    let mut decoder = png::Decoder::new(fs::File::open(&exported).unwrap()).read_info().unwrap();
+    let mut buffer = vec![0; decoder.output_buffer_size()];
+    let frame = decoder.next_frame(&mut buffer).unwrap();
+    assert_eq!(&buffer[..frame.buffer_size()], &[11, 22, 33, 255, 44, 55, 66, 128]);
     let result = cli(&["new-from-png", png.to_str().unwrap(), new_project.to_str().unwrap()]);
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     let result = cli(&["import-png", new_project.to_str().unwrap(), png.to_str().unwrap(), layered.to_str().unwrap()]);
