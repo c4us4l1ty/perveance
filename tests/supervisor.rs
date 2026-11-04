@@ -121,3 +121,33 @@ fn json_files_are_bounded_strict_and_errors_do_not_echo_input() {
     fs::write(&policy, vec![b' '; supervisor::MAX_POLICY_BYTES as usize + 1]).unwrap();
     assert!(IntakePolicy::load(&policy).is_err());
 }
+
+#[test]
+fn model_budget_reservations_are_conservative_and_transactional() {
+    use perveance::supervisor::ModelCallBudget;
+    let mut budgets = IntakePolicy::default().maximum;
+    budgets.model_calls = 2;
+    budgets.model_cost_microusd = 100;
+    let mut ledger = ModelCallBudget::new(&budgets);
+    assert!(ledger.reserve(0).is_err());
+    assert_eq!((ledger.reserved_calls(), ledger.reserved_cost_microusd()), (0, 0));
+    assert!(ledger.reserve(60).is_ok());
+    // Exceeding either limit or overflowing leaves both counters unchanged.
+    assert!(ledger.reserve(41).is_err());
+    assert!(ledger.reserve(u64::MAX).is_err());
+    assert_eq!((ledger.reserved_calls(), ledger.reserved_cost_microusd()), (1, 60));
+    assert!(ledger.reserve(40).is_ok());
+    assert!(ledger.reserve(1).is_err());
+    assert_eq!((ledger.reserved_calls(), ledger.reserved_cost_microusd()), (2, 100));
+
+    budgets.model_calls = 0;
+    let mut no_calls = ModelCallBudget::new(&budgets);
+    assert!(no_calls.reserve(1).is_err());
+    assert_eq!((no_calls.reserved_calls(), no_calls.reserved_cost_microusd()), (0, 0));
+    budgets.model_calls = u64::MAX;
+    budgets.model_cost_microusd = u64::MAX;
+    let mut overflow = ModelCallBudget::new(&budgets);
+    assert!(overflow.reserve(u64::MAX).is_ok());
+    assert!(overflow.reserve(1).is_err());
+    assert_eq!((overflow.reserved_calls(), overflow.reserved_cost_microusd()), (1, u64::MAX));
+}

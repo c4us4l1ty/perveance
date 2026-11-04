@@ -112,3 +112,41 @@ pub fn inspect_request(project: &Project, request: &TaskRequest, policy: &Intake
         autonomous_execution: false, budgets_enforced: false, persistent_task_created: false,
     })
 }
+
+/// In-memory accounting for a single task, owned and synchronized by trusted
+/// code. Reservations are deliberately not refunded, including on failures:
+/// actual provider billing can arrive late or remain unknown. This is not a
+/// broker, a durable ledger, or a guarantee that a provider will charge no
+/// more than the caller's declared bound. No network call uses it yet.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ModelCallBudget {
+    max_calls: u64,
+    max_cost_microusd: u64,
+    reserved_calls: u64,
+    reserved_cost_microusd: u64,
+}
+
+impl ModelCallBudget {
+    pub fn new(budgets: &Budgets) -> Self {
+        Self { max_calls: budgets.model_calls, max_cost_microusd: budgets.model_cost_microusd,
+            reserved_calls: 0, reserved_cost_microusd: 0 }
+    }
+
+    /// Atomically reserve one call and its conservative *known* cost bound.
+    /// Zero or unknown bounds must not be used as a way to authorize a call.
+    /// This function does not make or authorize calls and its caller must
+    /// independently establish a bound and enforce all other security gates.
+    pub fn reserve(&mut self, upper_cost_microusd: u64) -> Result<(), &'static str> {
+        if upper_cost_microusd == 0 { return Err("model cost bound must be positive and known"); }
+        let calls = self.reserved_calls.checked_add(1).ok_or("model call count overflow")?;
+        let cost = self.reserved_cost_microusd.checked_add(upper_cost_microusd).ok_or("model cost overflow")?;
+        if calls > self.max_calls { return Err("model call budget exhausted"); }
+        if cost > self.max_cost_microusd { return Err("model cost budget exhausted"); }
+        self.reserved_calls = calls;
+        self.reserved_cost_microusd = cost;
+        Ok(())
+    }
+
+    pub fn reserved_calls(&self) -> u64 { self.reserved_calls }
+    pub fn reserved_cost_microusd(&self) -> u64 { self.reserved_cost_microusd }
+}

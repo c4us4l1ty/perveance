@@ -41,3 +41,5 @@ An explicit `--include-composite` option supplies at most 1,024 visible composit
 ## Experimental fail-closed intake inspection
 
 `inspect-autonomy-request` validates a strict bounded task request with prompt, budget declarations, and project revision against trusted caller-provided or default intake ceilings. A valid response is always `blocked`; `ok: true` means only that validation succeeded. There is no job ID, execution permit, persistence, cancellation, measured resource usage, or enforcement. The prompt is omitted from the report; request files and paths remain the caller's responsibility. This inspection does not control the separate experimental `prompt-openrouter` command. See README for schema, limits and path/revision caveats.
+
+The supervisor module also contains an isolated in-memory model-call reservation counter for future trusted broker work. Nothing currently uses it to make provider calls, it is not persistent, and it cannot guarantee billing; it does not change either the blocked autonomy result or the standalone provider's behavior.
