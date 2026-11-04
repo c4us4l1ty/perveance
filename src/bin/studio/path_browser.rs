@@ -99,11 +99,13 @@ impl PathBrowser {
             }
         });
         if let Some(path) = navigate { self.go_to(path); }
+        let mut filename_has_focus = false;
         if !self.target.directory_only() {
             ui.horizontal(|ui| {
                 ui.label("File name");
                 let response = ui.text_edit_singleline(&mut self.filename);
                 if self.focus_filename { response.request_focus(); self.focus_filename = false; }
+                filename_has_focus = response.has_focus() || (response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)));
                 if response.changed() { self.selection_error = None; }
             });
         }
@@ -122,11 +124,12 @@ impl PathBrowser {
                 }
             }
         });
-        // Enter in the directory field navigates; elsewhere it confirms the
-        // selection. A focused Cancel button still takes precedence.
+        // Enter navigates in the directory field or confirms in the filename
+        // field. Buttons and entries handle their own activation; pressing
+        // Enter on Up, Refresh or a directory must not also open a file.
         if ui.input(|input| input.key_pressed(egui::Key::Enter)) && matches!(action, BrowserAction::None) {
             if directory_has_focus { self.refresh(); }
-            else {
+            else if filename_has_focus {
                 match self.selection() {
                     Ok(path) => action = BrowserAction::Use(path),
                     Err(error) => self.selection_error = Some(error),
@@ -182,6 +185,25 @@ mod tests {
         let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| { action = browser.ui(ui).0; }); });
         assert!(matches!(action, BrowserAction::None));
         assert_eq!(browser.selection().unwrap(), child.join("art.json"));
+    }
+
+    #[test]
+    fn enter_without_filename_or_directory_focus_does_not_confirm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("existing.json");
+        std::fs::write(&path, b"untouched").unwrap();
+        let mut browser = PathBrowser::new(BrowserTarget::OpenProject, path.to_str().unwrap());
+        browser.focus_filename = false;
+        let ctx = egui::Context::default();
+        let mut action = BrowserAction::None;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))),
+            events: vec![Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }],
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| { action = browser.ui(ui).0; }); });
+        assert!(matches!(action, BrowserAction::None));
+        assert_eq!(std::fs::read(path).unwrap(), b"untouched");
     }
 
     #[test]
