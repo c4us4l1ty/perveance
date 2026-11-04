@@ -19,7 +19,14 @@ jobs:
       - name: Install Linux GUI build prerequisites
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-shape0-dev libxcb-xfixes0-dev xvfb xdotool libgl1-mesa-dri xauth
       - name: Build and test Rust
-        run: cargo test --locked --all-targets
+        run: |
+          if cargo test --locked --all-targets > /tmp/perveance-rust-test.log 2>&1; then
+            tail -n 25 /tmp/perveance-rust-test.log
+          else
+            cat /tmp/perveance-rust-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-rust-test.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
       - name: Verify desktop window starts under X11
         run: |
           cargo build --locked --bin perveance

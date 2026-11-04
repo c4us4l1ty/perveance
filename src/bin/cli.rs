@@ -8,9 +8,9 @@ fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
-            "operations": ["new", "inspect", "paint", "apply", "export-png"],
+            "operations": ["new", "new-from-png", "inspect", "paint", "apply", "import-png", "export-png"],
             "batch_operations": ["add_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "fill"],
-            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144},
+            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
                 "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
                 "move_layer": {"op": "move_layer", "from": 0, "to": 1},
@@ -28,6 +28,17 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             let project = Project::new(number(width)?, number(height)?)?;
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output}))
+        }
+        [command, png_path, output] if command == "new-from-png" => {
+            let project = Project::from_png(Path::new(png_path))?;
+            project.save_new(Path::new(output))?;
+            Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height, "layer": 0}))
+        }
+        [command, input, png_path, output] if command == "import-png" => {
+            let mut project = Project::load(Path::new(input))?;
+            project.import_png_layer(Path::new(png_path))?;
+            project.save_new(Path::new(output))?;
+            Ok(json!({"ok": true, "output": output, "layer": project.layers.len() - 1}))
         }
         [command, input] if command == "inspect" => {
             let project = Project::load(Path::new(input))?;
@@ -58,7 +69,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | inspect INPUT | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
     }
 }
 

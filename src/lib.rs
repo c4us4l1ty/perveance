@@ -3,12 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::path::Path;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DIMENSION: u32 = 256;
 const MAX_PROJECT_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_PNG_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +58,27 @@ impl Project {
             height,
             layers: vec![Layer { name: "Layer 1".into(), visible: true, pixels: vec![[0; 4]; (width * height) as usize] }],
         })
+    }
+
+    /// Open a static PNG as a new project. Pixel metadata and color profiles are not retained.
+    pub fn from_png(path: &Path) -> Result<Self, String> {
+        let image = decode_png(path)?;
+        let mut project = Self::new(image.width, image.height)?;
+        project.layers[0].name = "Imported PNG".into();
+        project.layers[0].pixels = image.pixels;
+        Ok(project)
+    }
+
+    /// Import a same-sized static PNG as a new topmost layer. Failure leaves the project unchanged.
+    pub fn import_png_layer(&mut self, path: &Path) -> Result<(), String> {
+        self.validate()?;
+        if self.layers.len() >= 32 { return Err("layer limit reached".into()); }
+        let image = decode_png(path)?;
+        if image.width != self.width || image.height != self.height {
+            return Err(format!("PNG is {}×{} but the canvas is {}×{}", image.width, image.height, self.width, self.height));
+        }
+        self.layers.push(Layer { name: "Imported PNG".into(), visible: true, pixels: image.pixels });
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -253,6 +275,58 @@ impl Project {
         }
         write_new(path, &bytes)
     }
+}
+
+struct DecodedPng {
+    width: u32,
+    height: u32,
+    pixels: Vec<[u8; 4]>,
+}
+
+/// Decode only a bounded single-frame PNG to straight-alpha RGBA8.
+fn decode_png(path: &Path) -> Result<DecodedPng, String> {
+    let file = File::open(path).map_err(|e| format!("open PNG: {e}"))?;
+    let mut bytes = Vec::new();
+    BufReader::new(file).take(MAX_PNG_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("read PNG: {e}"))?;
+    if bytes.len() as u64 > MAX_PNG_BYTES { return Err("PNG exceeds input size limit".into()); }
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_limits(png::Limits { bytes: 8 * 1024 * 1024 });
+    decoder.set_ignore_text_chunk(true);
+    decoder.set_ignore_iccp_chunk(true);
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().map_err(|e| format!("invalid PNG header: {e}"))?;
+    let info = reader.info();
+    let (width, height) = (info.width, info.height);
+    if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+        return Err(format!("PNG dimensions must be between 1 and {MAX_DIMENSION}"));
+    }
+    if info.animation_control.is_some() { return Err("animated PNG is not supported".into()); }
+    let max_output = (width as usize) * (height as usize) * 4;
+    if reader.output_buffer_size() > max_output { return Err("PNG decoded output is too large".into()); }
+    let mut raw = vec![0; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut raw).map_err(|e| format!("decode PNG: {e}"))?;
+    if frame.width != width || frame.height != height || frame.bit_depth != png::BitDepth::Eight {
+        return Err("unsupported PNG frame or bit depth".into());
+    }
+    let channels = match frame.color_type {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => return Err("could not expand indexed PNG".into()),
+    };
+    let pixel_count = width as usize * height as usize;
+    if frame.buffer_size() != pixel_count * channels { return Err("invalid PNG pixel buffer".into()); }
+    let pixels = raw[..frame.buffer_size()].chunks_exact(channels).map(|p| match channels {
+        1 => [p[0], p[0], p[0], 255],
+        2 => [p[0], p[0], p[0], p[1]],
+        3 => [p[0], p[1], p[2], 255],
+        4 => [p[0], p[1], p[2], p[3]],
+        _ => unreachable!(),
+    }).collect();
+    reader.finish().map_err(|e| format!("finish PNG: {e}"))?;
+    if reader.info().animation_control.is_some() { return Err("animated PNG is not supported".into()); }
+    Ok(DecodedPng { width, height, pixels })
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {

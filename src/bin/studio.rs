@@ -43,6 +43,7 @@ struct Studio {
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
     path: String,
+    png_path: String,
     status: String,
     undo: Vec<Project>,
     confirm_open: bool,
@@ -57,7 +58,7 @@ struct Studio {
 impl Default for Studio {
     fn default() -> Self {
         Self { project: Project::new(32, 32).expect("valid initial canvas"), layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, path: "art.perveance.json".into(),
+            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, path: "art.perveance.json".into(), png_path: "image.png".into(),
             status: "Prototype: save and export create new files only.".into(), undo: Vec::new(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -90,6 +91,7 @@ impl eframe::App for Studio {
             });
         });
         egui::SidePanel::left("tools").default_width(190.0).show(ctx, |ui| {
+          egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.heading("Tools");
             ui.add_space(8.0);
             tool_button(ui, &mut self.tool, Tool::Pencil, "Pencil");
@@ -130,7 +132,38 @@ impl eframe::App for Studio {
                 }
             }
             ui.separator();
+            ui.label("PNG path");
+            ui.text_edit_singleline(&mut self.png_path);
+            if ui.button("Import PNG as layer").clicked() {
+                let mut updated = self.project.clone();
+                match updated.import_png_layer(Path::new(&self.png_path)) {
+                    Ok(()) => {
+                        self.checkpoint();
+                        self.project = updated;
+                        self.layer = self.project.layers.len() - 1;
+                        self.rename_buffer = self.project.layers[self.layer].name.clone();
+                        self.status = "PNG imported as a new layer.".into();
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            if ui.add_enabled(self.confirm_open, egui::Button::new("Open PNG as canvas")).clicked() {
+                match Project::from_png(Path::new(&self.png_path)) {
+                    Ok(project) => {
+                        self.project = project;
+                        self.layer = 0;
+                        self.undo.clear();
+                        self.rename_buffer = self.project.layers[0].name.clone();
+                        self.confirm_open = false;
+                        self.status = "PNG opened as a new canvas.".into();
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            ui.small("PNG import uses 8-bit pixels; color profiles are not retained.");
+            ui.separator();
             ui.small("AI and autonomous feature building are not implemented.");
+          });
         });
         egui::SidePanel::right("layers").default_width(190.0).show(ctx, |ui| {
             ui.heading("Layers");

@@ -41,3 +41,16 @@ cargo run --locked --bin perveance-cli -- export-png potion.json potion.png
 ```
 
 These commands require paths that do not already exist. Open `potion.json` in the GUI to edit its layers. `perveance-cli capabilities` reports example operation objects and their limits in JSON.
+
+### Importing PNG artwork
+
+The studio can open a static PNG as a new canvas, or import one as an editable top layer when its dimensions match the current canvas. Enter the PNG path in the left panel; replacing the canvas requires the existing confirmation checkbox. Layer import can be undone.
+
+The headless equivalents also produce new files without overwriting:
+
+```sh
+cargo run --locked --bin perveance-cli -- new-from-png image.png project.json
+cargo run --locked --bin perveance-cli -- import-png project.json another-image.png layered-project.json
+```
+
+PNG input is limited to 8 MiB and dimensions of 1–256 pixels on each side. Static RGB, RGBA, grayscale, grayscale-alpha and indexed images are decoded to editable 8-bit RGBA; 16-bit samples are reduced to 8 bits. Animated PNGs are rejected. Metadata, ICC profiles and color management are not preserved or applied, so colors may differ from color-managed applications. Importing does not make a generated image's original objects or layers editable: the PNG is one raster layer. There is no resizing or alignment on layer import.
