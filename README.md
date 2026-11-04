@@ -4,7 +4,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 
 ## Current prototype
 
-- A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse and composite-eyedropper tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
+- A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse, composite-eyedropper and rectangular region-editing tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
@@ -51,13 +51,13 @@ python3 tools/arena_art.py apply potion.perveance.json edited.perveance.json mor
 python3 tools/arena_art.py apply-proposal potion.perveance.json edited.perveance.json proposal.json
 ```
 
-The operations file is a JSON array in the Rust CLI's format. The bridge supports the current typed raster batch operations: `add_layer`, `duplicate_layer`, `clear_layer`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `rename_layer`, `move_layer`, `remove_layer`, `set_visibility`, `pixel`, `line`, `brush_line`, `rectangle`, `rectangle_outline`, `ellipse`, and `fill`. Its project and file limits remain stricter than Rust's; CLI commands and PNG import are not fully supported. Use `sample ... layer LAYER` or `read-region ... layer LAYER` for raw layer pixels (including hidden pixels). Region results are row-major, retain raw RGB under zero alpha, and report the snapshot revision. A brush is a clipped 1–16 pixel square, and even sizes are biased toward the top left; ellipses follow the Rust pixel-center rasterization. Straight-alpha RGBA compositing follows the Rust model; CI compares batch results, representative translucent composites, and bridge PNGs against the Rust implementation. A native X11 test exercises a file handoff from the bridge to a GUI edit and back to a revision-bound bridge edit; it is not a live connector or real-desktop validation. This is a separately implemented, limited compatibility bridge—not the Rust app running inside Arena, an Arena connector, or full CLI parity. Projects can be opened in Perveance when transferred to an available build, but the project format is experimental.
+The operations file is a JSON array in the Rust CLI's format. The bridge supports the current typed raster batch operations: `add_layer`, `duplicate_layer`, `clear_layer`, `clear_region`, `copy_region`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `rename_layer`, `move_layer`, `remove_layer`, `set_visibility`, `pixel`, `line`, `brush_line`, `rectangle`, `rectangle_outline`, `ellipse`, and `fill`. Its project and file limits remain stricter than Rust's; CLI commands and PNG import are not fully supported. Use `sample ... layer LAYER` or `read-region ... layer LAYER` for raw layer pixels (including hidden pixels). Region results are row-major, retain raw RGB under zero alpha, and report the snapshot revision. A brush is a clipped 1–16 pixel square, and even sizes are biased toward the top left; ellipses follow the Rust pixel-center rasterization. Straight-alpha RGBA compositing follows the Rust model; CI compares batch results, representative translucent composites, and bridge PNGs against the Rust implementation. A native X11 test exercises a file handoff from the bridge to a GUI edit and back to a revision-bound bridge edit; it is not a live connector or real-desktop validation. This is a separately implemented, limited compatibility bridge—not the Rust app running inside Arena, an Arena connector, or full CLI parity. Projects can be opened in Perveance when transferred to an available build, but the project format is experimental.
 
 Bridge limits are 128×128, 16 layers, 1,024 operations, 256 KiB batch input and 8 MiB project input/output; scaled PNGs may be up to 1024×1024. The Rust app has different limits, and scaled PNGs larger than 256×256 cannot be reimported into it. Inputs are loaded snapshots. `inspect`, `sample` and `read-region` report the Rust-compatible content revision, and `apply-proposal` rejects a mismatched v1 base revision; plain `apply` does not check one. Revision checks are not locks or atomic compare-and-swap and cannot see unsaved GUI changes or later disk edits. Output files are create-new and installed through a same-directory temporary file and hard link; existing paths are not overwritten. Directories and inputs must be trusted; symlinks are followed on input, hard-link support is required, and a crash or cleanup error may leave temporary or completed files. There is no precise CPU/memory quota. The bridge runs no generated code and supplies no sandbox, supervisor, model, or automatic self-extension; an Arena agent must itself choose the operations and have access to the checkout and output directory. Do not put secrets in artwork or paths.
 
 ### Headless batch editing
 
-The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
+The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `clear_region`, `copy_region`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
 
 ```json
 [
@@ -71,7 +71,28 @@ Layer duplicates are inserted immediately above their source and retain its visi
 
 ### Tool shortcuts
 
-When the canvas or editor has focus, use **B** for Pencil, **E** Eraser, **G** Fill, **R** Rectangle, **O** Ellipse, **L** Line, and **I** Eyedropper. The Tools panel has a collapsible shortcut reference and each tool's tooltip shows its key. These unmodified-key shortcuts do not change artwork by themselves, and are ignored while typing, a dialog is open, or a drawing gesture is active. **Ctrl+O** still opens a project; **Ctrl+S** saves; **Ctrl+Z** undoes; **Ctrl+Shift+Z** or **Ctrl+Y** redoes.
+When the canvas or editor has focus, use **B** for Pencil, **E** Eraser, **G** Fill, **R** Rectangle, **O** Ellipse, **L** Line, **I** Eyedropper, and **M** Select region. The Tools panel has a collapsible shortcut reference and each tool's tooltip shows its key. These unmodified-key shortcuts do not change artwork by themselves, and are ignored while typing, a dialog is open, or a drawing gesture is active. **Ctrl+O** still opens a project; **Ctrl+S** saves; **Ctrl+Z** undoes; **Ctrl+Shift+Z** or **Ctrl+Y** redoes.
+
+### Rectangular region editing
+
+Choose **Select region** (**M**) and drag in either direction; endpoints are inclusive. A click selects one pixel. In this tool, use the buttons or unmodified **C** to copy, **X** to cut, **V** to paste, **Delete** to clear, **Escape** to deselect, and **Ctrl+A** to select the whole canvas. These actions are ignored while typing, in dialogs, or during a drawing gesture. C/X/V deliberately do not use Ctrl: this is an **internal session buffer**, not the operating system clipboard. No image or text is read from or sent to the OS clipboard.
+
+Copy/cut reads the **selected raw layer**, even if hidden, preserving straight-alpha RGBA bytes including RGB under zero alpha. Copy and selection do not modify artwork or undo history. Cut, clear and paste are each one undoable edit; failed or no-op edits preserve redo. Undo history is bounded, so save important work first. Clear and cut write transparent black; they do not affect other layers.
+
+To paste elsewhere, click or drag a new destination, optionally choose another layer, then press V. Only the destination's top-left is used; the copied rectangle keeps its size. Without a selection, paste uses the original copied coordinates. The entire rectangle must fit; an out-of-bounds paste fails without clipping or changing artwork. **Paste replaces raw pixels, including transparent ones; it does not alpha-blend.** A paste may erase existing destination artwork.
+
+The buffer survives layer changes, new/open canvases and undo during the session, but is not saved to disk and is lost on exit. Selection bounds are session-only, separate from undo, and cleared when switching to another tool, replacing the canvas or using Resize. This is a region-editing aid, **not a painting mask**, floating selection, resizable transform or vector object.
+
+Headless batches and revision-bound proposals support the equivalent data-only operations:
+
+```json
+[
+  {"op":"copy_region","layer":0,"x":1,"y":2,"width":3,"height":2,"to_layer":1,"to_x":5,"to_y":6},
+  {"op":"clear_region","layer":0,"x":1,"y":2,"width":3,"height":2}
+]
+```
+
+Both layers must already exist and both rectangles must fit. `copy_region` snapshots the source before writing, so overlapping same-layer copies do not smear. It does not clear the source. Operations run in order: a later `clear_region` can erase an overlapping destination, so it is not a general overlapping move command. Both operations are also supported by the limited Python bridge, under its stricter bounds; the experimental OpenRouter adapter rejects them. Edits can cover the entire bounded canvas (256×256 in Rust, 128×128 in the bridge); the separate `read-region` JSON inspection remains limited to 4,096 pixels.
 
 ### Pencil and eraser brush size
 

@@ -1,6 +1,6 @@
 # Status and decision log
 
-**Date:** 2026-11-04  
+**Date:** 2026-11-05
 **State:** Owner said START. Phase 0 investigation and an initial experimental Rust GUI/headless prototype have begun. See PHASE0_FINDINGS.md for open gates and current limitations.
 
 ## Confirmed owner direction
@@ -120,3 +120,5 @@
 - Added discoverable unmodified-key tool shortcuts in the desktop editor. They are guarded during typing, dialogs and drawing gestures and do not edit the artwork themselves. Added state tests and a native X11 line/pencil, undo/redo and dialog-isolation smoke test; verify the associated CI run for results. This is not an accessibility or real-desktop audit.
 
 - Added an opt-in manual recovery checkpoint action and F9 shortcut. It shares the existing no-clobber session cap and deduplication, can snapshot clean projects, and never marks the project saved. The native test is configured to create a checkpoint immediately and reopen it after forced termination; verify the relevant CI run. Recovery remains best-effort, uses trusted directories, does not check if old snapshots still exist, and is not a durability or backup guarantee.
+
+- Continued the dependable pixel-art milestone with rectangular raw-layer region selection and internal-buffer copy/cut/paste/clear. Added bounded `copy_region` / `clear_region` operations for Rust batches/proposals and the limited Python bridge, overlap snapshots, no-clipping replacement semantics, model/CLI/GUI and cross-implementation tests, and a native X11 save/undo/redo/dialog-isolation test. Local Python tests pass; Rust and native GUI validation require the associated GitHub CI run. The buffer is session-only, never uses the OS clipboard and does not change the v1 project format; this is not a painting mask or floating transform. OpenRouter permissions and disabled arbitrary-code autonomy are unchanged.

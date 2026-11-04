@@ -62,3 +62,14 @@ summary alongside the evaluation artifact. It is not an exact linked-binary
 inventory, license-text collection, compliance decision or redistribution
 review. System libraries, non-Cargo assets and the project's own licensing
 decisions remain open. Check the associated CI run for actual results.
+
+## Rectangular region editing increment
+
+The GUI adds an internal-buffer Select region workflow for raw-layer copy, cut,
+paste and clear, with one-step undo and no-clipping bounds checks. Typed
+`copy_region` / `clear_region` batches and revision-bound proposals are shared
+by the Rust CLI and limited Python bridge. No project-format change, OS
+clipboard integration, painting mask, floating transform or new provider
+permission is introduced. A native X11 test covers saved raw-byte results,
+reverse-drag bounds, undo/redo, rejected paste and dialog isolation; check the
+associated CI run for actual results. This is not real-desktop validation.

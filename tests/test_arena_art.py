@@ -18,6 +18,55 @@ spec.loader.exec_module(art)
 
 
 class ArenaArtTests(unittest.TestCase):
+    def test_region_copy_snapshots_overlaps_and_preserves_raw_hidden_pixels(self):
+        p = art.create_project(5, 4, [{"op": "add_layer"}])
+        p["layers"][0]["visible"] = False
+        for y in range(4):
+            for x in range(5):
+                p["layers"][0]["pixels"][y * 5 + x] = [x + 1, y + 1, 33, 0 if x % 2 == 0 else 128]
+        original = json.loads(json.dumps(p))
+        for source, target in [((0, 0, 4, 3), (1, 1)), ((1, 1, 4, 3), (0, 0)),
+                               ((0, 0, 4, 4), (1, 0)), ((1, 0, 4, 4), (0, 0)),
+                               ((0, 0, 5, 3), (0, 1)), ((0, 1, 5, 3), (0, 0))]:
+            x, y, width, height = source
+            tx, ty = target
+            for target_layer in (0, 1):
+                op = {"op": "copy_region", "layer": 0, "x": x, "y": y, "width": width, "height": height,
+                      "to_layer": target_layer, "to_x": tx, "to_y": ty}
+                edited = art.apply_operations(p, [op])
+                expected = json.loads(json.dumps(p))
+                for row in range(height):
+                    for column in range(width):
+                        expected["layers"][target_layer]["pixels"][(ty + row) * 5 + tx + column] = p["layers"][0]["pixels"][(y + row) * 5 + x + column]
+                self.assertEqual(edited, expected)
+                self.assertEqual(p, original)
+        # Copied bytes must not alias either the source or another destination.
+        edited = art.apply_operations(p, [{"op": "copy_region", "layer": 0, "x": 1, "y": 1,
+            "width": 2, "height": 2, "to_layer": 1, "to_x": 0, "to_y": 0}])
+        edited["layers"][1]["pixels"][0][0] = 255
+        self.assertEqual(edited["layers"][0]["pixels"][6], [2, 2, 33, 128])
+        self.assertEqual(p, original)
+
+    def test_region_clear_and_copy_validation_are_atomic(self):
+        p = art.create_project(3, 2, [{"op": "rectangle", "layer": 0, "x": 0, "y": 0,
+                                     "width": 3, "height": 2, "color": [7, 8, 9, 0]}])
+        original = json.loads(json.dumps(p))
+        copy_op = {"op": "copy_region", "layer": 0, "x": 0, "y": 0, "width": 2, "height": 1,
+                   "to_layer": 0, "to_x": 1, "to_y": 1}
+        clear = {"op": "clear_region", "layer": 0, "x": 0, "y": 0, "width": 2, "height": 1}
+        edited = art.apply_operations(p, [copy_op, clear])
+        self.assertEqual(edited["layers"][0]["pixels"], [[0, 0, 0, 0]] * 2 + [[7, 8, 9, 0]] * 4)
+        invalid = [{**copy_op, key: value} for key, value in [
+            ("layer", 1), ("to_layer", 1), ("x", -1), ("y", 2), ("width", 0), ("height", 0),
+            ("to_x", 2), ("to_y", 2), ("width", 2**32 - 1), ("to_x", True), ("to_layer", False), ("extra", 1)]]
+        invalid += [{**clear, "x": 3}, {**clear, "height": False}, {"op": "copy_region", "layer": 0}]
+        for op in invalid:
+            with self.subTest(op=op), self.assertRaises(ValueError):
+                art.apply_operations(p, [clear, op])
+            self.assertEqual(p, original)
+        self.assertIn("copy_region", art.main(["capabilities"])["operations"])
+        self.assertIn("clear_region", art.main(["capabilities"])["operations"])
+
     def test_composite_and_hidden_raw_pixels(self):
         p = art.create_project(1, 1, [
             {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]},
