@@ -530,3 +530,36 @@ fn cli_scaled_export_reports_dimensions_and_never_overwrites() {
     assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "export-png-scaled"));
     assert_eq!(perveance::Project::load(&project).unwrap(), p);
 }
+
+#[test]
+fn brush_operations_are_discoverable_transactional_and_exportable() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("output.json");
+    let bad = dir.0.join("bad.json");
+    let proposal = dir.0.join("proposal.json");
+    let png = dir.0.join("brush.png");
+    let p = perveance::Project::new(5, 5).unwrap();
+    p.save_new(&initial).unwrap();
+    let revision = p.revision().unwrap();
+    let ops = serde_json::json!([{"op":"brush_line", "layer":0, "from":[0,2], "to":[4,2], "size":3, "color":[10,20,30,255]}]);
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":ops})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", initial.to_str().unwrap(), output.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let edited = perveance::Project::load(&output).unwrap();
+    assert_eq!(edited.sample_layer(0, 4, 1).unwrap(), [10,20,30,255]);
+    assert_eq!(edited.sample_layer(0, 4, 4).unwrap(), [0;4]);
+    assert!(cli(&["export-png", output.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut pixels).unwrap();
+    assert_eq!(&pixels[(5 + 4) * 4..(5 + 5) * 4], &[10,20,30,255]);
+    let bad_op = serde_json::json!({"op":"brush_line", "layer":0, "from":[0,0], "to":[1,1], "size":17, "color":[1,2,3,4]});
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[bad_op]})).unwrap()).unwrap();
+    assert!(!cli(&["apply-proposal", initial.to_str().unwrap(), bad.to_str().unwrap(), proposal.to_str().unwrap()]).status.success());
+    assert!(!bad.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap(), p);
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["limits"]["brush_size"], 16);
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "brush_line"));
+}

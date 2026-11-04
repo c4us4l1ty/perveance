@@ -11,6 +11,7 @@ use std::path::Path;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DIMENSION: u32 = 256;
+pub const MAX_BRUSH_SIZE: u32 = 16;
 pub const MAX_EXPORT_SCALE: u32 = 8;
 // Must accommodate the worst valid 256×256×32 RGBA project as JSON, including
 // escaped layer names, not merely its much smaller in-memory pixel payload.
@@ -198,6 +199,7 @@ pub enum Operation {
     RemoveLayer { layer: usize },
     Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
     Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
+    BrushLine { layer: usize, from: [u32; 2], to: [u32; 2], size: u32, color: [u8; 4] },
     Rectangle { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     RectangleOutline { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     Ellipse { layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4] },
@@ -498,10 +500,20 @@ impl Project {
 
     /// Draw an inclusive, one-pixel-wide Bresenham line on a single layer.
     pub fn draw_line(&mut self, layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4]) -> Result<(), String> {
+        self.brush_line(layer, from, to, 1, color)
+    }
+
+    /// Stamp a square brush at each inclusive Bresenham point. Even sizes are
+    /// biased toward the top left; stamps are clipped at the canvas boundary.
+    /// This replaces raw pixels, rather than blending the brush color.
+    pub fn brush_line(&mut self, layer: usize, from: [u32; 2], to: [u32; 2], size: u32, color: [u8; 4]) -> Result<(), String> {
         self.validate()?;
+        if size == 0 || size > MAX_BRUSH_SIZE { return Err(format!("brush size must be between 1 and {MAX_BRUSH_SIZE}")); }
         if layer >= self.layers.len() || from[0] >= self.width || from[1] >= self.height || to[0] >= self.width || to[1] >= self.height {
             return Err("line endpoint or layer is outside the project".into());
         }
+        let (width, height) = (self.width as i32, self.height as i32);
+        let pixels = &mut self.layers[layer].pixels;
         let (mut x, mut y) = (from[0] as i32, from[1] as i32);
         let (end_x, end_y) = (to[0] as i32, to[1] as i32);
         let dx = (end_x - x).abs();
@@ -510,7 +522,15 @@ impl Project {
         let sy = if y < end_y { 1 } else { -1 };
         let mut error = dx + dy;
         loop {
-            self.layers[layer].pixels[(y as u32 * self.width + x as u32) as usize] = color;
+            let left = x - (size as i32 / 2);
+            let top = y - (size as i32 / 2);
+            let right = (left + size as i32).min(width);
+            let bottom = (top + size as i32).min(height);
+            for row in top.max(0)..bottom {
+                let start = (row * width + left.max(0)) as usize;
+                let end = (row * width + right) as usize;
+                pixels[start..end].fill(color);
+            }
             if x == end_x && y == end_y { break; }
             let twice = 2 * error;
             if twice >= dy { error += dy; x += sx; }
@@ -569,6 +589,7 @@ impl Project {
                 Operation::RemoveLayer { layer } => candidate.remove_layer(*layer),
                 Operation::Pixel { layer, x, y, color } => candidate.set_pixel(*layer, *x, *y, *color),
                 Operation::Line { layer, from, to, color } => candidate.draw_line(*layer, *from, *to, *color),
+                Operation::BrushLine { layer, from, to, size, color } => candidate.brush_line(*layer, *from, *to, *size, *color),
                 Operation::Rectangle { layer, x, y, width, height, color } => candidate.rectangle(*layer, *x, *y, *width, *height, *color),
                 Operation::RectangleOutline { layer, x, y, width, height, color } => candidate.rectangle_outline(*layer, *x, *y, *width, *height, *color),
                 Operation::Ellipse { layer, x, y, width, height, filled, color } => candidate.ellipse(*layer, *x, *y, *width, *height, *filled, *color),

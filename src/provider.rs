@@ -189,6 +189,12 @@ mod tests {
     }
 
     #[test]
+    fn provider_cannot_use_unlisted_brush_operations() {
+        let brush = Operation::BrushLine { layer: 1, from: [0,0], to: [1,1], size: 3, color: [1;4] };
+        assert!(validate_generated(&[Operation::AddLayer, brush], 1).is_err());
+    }
+
+    #[test]
     fn provider_cannot_resize_canvas() {
         assert!(validate_generated(&[Operation::ResizeCanvas { width: 1, height: 1, clip: true }], 1).is_err());
         assert!(validate_generated(&[Operation::AddLayer, Operation::ResizeCanvas { width: 3, height: 3, clip: false }], 1).is_err());

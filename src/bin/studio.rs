@@ -91,6 +91,7 @@ struct Studio {
     palette_path: String,
     allow_translation_clip: bool,
     tool: Tool,
+    brush_size: u32,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
     shape_start: Option<[u32; 2]>,
@@ -123,7 +124,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
+            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -229,6 +230,28 @@ impl Studio {
             self.layer = self.layer.min(self.project.layers.len() - 1);
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
+    }
+    fn apply_stroke_point(&mut self, point: [u32; 2]) {
+        // One snapshot per gesture; failures and no-ops must not discard redo.
+        let before = if self.stroke_recorded { None } else { Some(self.project.clone()) };
+        let result = if self.tool == Tool::Fill {
+            self.project.fill(self.layer, point[0], point[1], self.color)
+        } else {
+            let color = if self.tool == Tool::Eraser { [0; 4] } else { self.color };
+            self.project.brush_line(self.layer, self.stroke_last.unwrap_or(point), point, self.brush_size, color)
+        };
+        match result {
+            Ok(()) => {
+                if let Some(before) = before {
+                    if before != self.project {
+                        self.history.checkpoint_with_selection(&before, self.layer);
+                        self.stroke_recorded = true;
+                    }
+                }
+            }
+            Err(error) => self.status = error,
+        }
+        self.stroke_last = Some(point);
     }
     fn commit_shape(&mut self, start: [u32; 2], end: [u32; 2]) {
         let (x, y, width, height) = shape_box(start, end);
@@ -556,6 +579,10 @@ impl eframe::App for Studio {
             if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
                 ui.checkbox(&mut self.shape_filled, "Filled shape");
             }
+            if matches!(self.tool, Tool::Pencil | Tool::Eraser) {
+                ui.add(egui::Slider::new(&mut self.brush_size, 1..=perveance::MAX_BRUSH_SIZE).text("Brush size"));
+                ui.small("Square brush; edge strokes are clipped.");
+            }
             ui.separator();
             ui.label("Color");
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
@@ -783,27 +810,7 @@ impl eframe::App for Studio {
                 }
                 if response.clicked() || response.dragged() || response.drag_started() {
                     if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) {
-                        // Delay the checkpoint until the first actual change in this gesture.
-                        // No-op strokes and failed edits must not discard the redo branch.
-                        let before = if self.stroke_recorded { None } else { Some(self.project.clone()) };
-                        let result = if self.tool == Tool::Fill {
-                            self.project.fill(self.layer, point[0], point[1], self.color)
-                        } else {
-                            let color = if self.tool == Tool::Eraser { [0; 4] } else { self.color };
-                            self.project.draw_line(self.layer, self.stroke_last.unwrap_or(point), point, color)
-                        };
-                        match result {
-                            Ok(()) => {
-                                if let Some(before) = before {
-                                    if before != self.project {
-                                        self.history.checkpoint_with_selection(&before, self.layer);
-                                        self.stroke_recorded = true;
-                                    }
-                                }
-                            }
-                            Err(error) => self.status = error,
-                        }
-                        self.stroke_last = Some(point);
+                        self.apply_stroke_point(point);
                     } else {
                         self.stroke_last = None;
                     }
@@ -868,6 +875,47 @@ fn main() -> eframe::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn adjustable_brush_gesture_is_one_undo_and_eraser_replaces_raw_pixels() {
+        let mut studio = Studio::default();
+        studio.brush_size = 3;
+        studio.tool = Tool::Pencil;
+        studio.apply_stroke_point([3,3]);
+        studio.apply_stroke_point([7,3]);
+        assert!(studio.stroke_recorded);
+        assert_eq!(studio.project.sample_layer(0, 2, 2).unwrap(), studio.color);
+        assert_eq!(studio.project.sample_layer(0, 8, 4).unwrap(), studio.color);
+        assert_eq!(studio.project.sample_layer(0, 9, 4).unwrap(), [0;4]);
+        let drawn = studio.project.clone();
+        studio.stroke_last = None;
+        studio.stroke_recorded = false;
+        studio.undo_edit();
+        assert!(studio.project.layers[0].pixels.iter().all(|pixel| *pixel == [0;4]));
+        assert!(studio.history.can_redo());
+        // A no-op and a rejected brush do not discard redo.
+        studio.color = [0;4];
+        studio.apply_stroke_point([3,3]);
+        assert!(!studio.stroke_recorded);
+        assert!(studio.history.can_redo());
+        studio.stroke_last = None;
+        studio.brush_size = 0;
+        studio.apply_stroke_point([3,3]);
+        assert!(studio.status.contains("brush size"));
+        assert!(studio.history.can_redo());
+        studio.stroke_last = None;
+        studio.brush_size = 3;
+        studio.redo_edit();
+        assert_eq!(studio.project, drawn);
+        studio.tool = Tool::Eraser;
+        studio.apply_stroke_point([3,3]);
+        assert_eq!(studio.project.sample_layer(0, 2, 2).unwrap(), [0;4]);
+        assert_eq!(studio.project.sample_layer(0, 8, 4).unwrap(), [166,215,74,255]);
+        studio.stroke_last = None;
+        studio.stroke_recorded = false;
+        studio.undo_edit();
+        assert_eq!(studio.project, drawn);
+    }
+
     #[test]
     fn shape_drag_is_reversible_and_uses_inclusive_bounds() {
         assert_eq!(shape_box([4, 5], [2, 3]), (2, 3, 3, 3));
