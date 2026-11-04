@@ -15,6 +15,24 @@ This is **not** the finished product: autonomous development, sandbox enforcemen
 
 Use a current stable Rust toolchain and the Linux X11 development dependencies, including the `libxkbcommon-x11` runtime library. `cargo test --locked --all-targets` runs the Rust tests. GitHub Actions compiles and runs these tests and a CLI round trip. The Python diagnostic `python3 tools/phase0_probe.py` reports a few local development prerequisites; it is **not** a sandbox certification. Run its tests with `python3 -m unittest discover -s tests -v`. A separate fixed-test diagnostic, `python3 tools/isolation_probe.py`, checks a few bubblewrap behaviors on Linux and exits nonzero if unavailable or failed. It never runs model code or enables autonomy, and passing is **not** sandbox certification.
 
+### Arena agent: offline data-only bridge
+
+An external agent with this checkout and Python 3 can create Perveance-compatible editable raster projects and PNGs without Rust, a provider key, bubblewrap, a display, or network access:
+
+```sh
+python3 tools/arena_art.py capabilities
+python3 tools/arena_art.py create 16 16 examples/potion-operations.json potion.perveance.json
+python3 tools/arena_art.py inspect potion.perveance.json
+python3 tools/arena_art.py sample potion.perveance.json 6 7 composite
+python3 tools/arena_art.py export-png potion.perveance.json potion.png
+# Further edits, written to a separate new project:
+python3 tools/arena_art.py apply potion.perveance.json edited.perveance.json more-operations.json
+```
+
+The operations file is a JSON array in the Rust CLI's format, but the bridge supports **only** `add_layer`, `rename_layer`, `set_visibility`, `pixel`, `line`, `rectangle`, and `fill`. Use `sample ... layer LAYER` for raw layer pixels (including hidden pixels). Straight-alpha RGBA compositing follows the Rust model; CI compares example batch results, representative translucent composites, and bridge PNGs against the Rust implementation. This is a separately implemented, limited compatibility bridge—not the Rust app running inside Arena, an Arena connector, or full CLI parity. Projects can be opened in Perveance when transferred to an available build, but the project format is experimental.
+
+Bridge limits are 128×128, 16 layers, 1,024 operations, 256 KiB batch input and 8 MiB project input/output; the Rust app has different limits. Inputs are loaded snapshots; there is no revision check, GUI synchronization or file lock. Output files are create-new and installed through a same-directory temporary file and hard link; existing paths are not overwritten. Directories and inputs must be trusted; symlinks are followed on input, hard-link support is required, and a crash or cleanup error may leave temporary or completed files. There is no precise CPU/memory quota. The bridge runs no generated code and supplies no sandbox, supervisor, model, or automatic self-extension; an Arena agent must itself choose the operations and have access to the checkout and output directory. Do not put secrets in artwork or paths.
+
 ### Headless batch editing
 
 The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
