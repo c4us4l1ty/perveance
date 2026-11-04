@@ -1,4 +1,4 @@
-use perveance::{Operation, Project};
+use perveance::{EditProposal, Operation, Project};
 use serde_json::json;
 use std::{env, fs::File, io::Read, path::Path, process};
 
@@ -8,9 +8,10 @@ fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid 
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
-            "operations": ["new", "new-from-png", "inspect", "sample", "paint", "apply", "import-png", "export-png"],
+            "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
+            "operations": ["new", "new-from-png", "inspect", "sample", "paint", "apply", "apply-proposal", "import-png", "export-png"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
-            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "png_bytes": perveance::MAX_PNG_BYTES},
+            "limits": {"canvas_dimension": 256, "layers": 32, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
                 "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
                 "move_layer": {"op": "move_layer", "from": 0, "to": 1},
@@ -27,8 +28,11 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "ellipse": {"op": "ellipse", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "filled": true, "color": [255, 0, 0, 255]},
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
+            "proposal_version": perveance::PROPOSAL_VERSION,
+            "proposal_example": {"version": 1, "base_revision": "<revision from inspect>", "operations": [{"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}]},
+            "proposal_semantics": "Data-only typed edits bound to a project snapshot fingerprint; input is loaded once and output is create-new. This does not lock files or detect unsaved edits in another process.",
             "batch_semantics": "Layer indices are bottom-to-top; duplicates are inserted immediately above their source. Flips reflect the full layer across canvas bounds. RGBA channels are straight-alpha bytes. Shape dimensions are positive and must fit the canvas; ellipse outlines use four-connected edges. Operations apply in order to a clone; on failure no output is created.",
-            "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "no AI"]})),
+            "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "no AI in CLI"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;
             project.save_new(Path::new(output))?;
@@ -47,7 +51,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
         }
         [command, input] if command == "inspect" => {
             let project = Project::load(Path::new(input))?;
-            Ok(json!({"ok": true, "version": project.version, "width": project.width, "height": project.height,
+            Ok(json!({"ok": true, "version": project.version, "revision": project.revision()?, "width": project.width, "height": project.height,
                 "layers": project.layers.iter().map(|layer| json!({"name": layer.name, "visible": layer.visible})).collect::<Vec<_>>() }))
         }
         [command, input, x, y, source] if command == "sample" && source == "composite" => {
@@ -82,12 +86,21 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "applied": ops.len()}))
         }
+        [command, input, output, proposal_path] if command == "apply-proposal" => {
+            let proposal = EditProposal::load(Path::new(proposal_path))?;
+            let mut project = Project::load(Path::new(input))?;
+            let base_revision = project.revision()?;
+            project.apply_proposal(&proposal)?;
+            let revision = project.revision()?;
+            project.save_new(Path::new(output))?;
+            Ok(json!({"ok": true, "output": output, "applied": proposal.operations.len(), "base_revision": base_revision, "revision": revision}))
+        }
         [command, input, output] if command == "export-png" => {
             let project = Project::load(Path::new(input))?;
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
     }
 }
 

@@ -121,6 +121,8 @@ fn discovery_reports_batch_support_and_version() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["api_version"], 1);
     assert_eq!(value["autonomous_execution"], false);
+    assert_eq!(value["autonomy_status"]["state"], "disabled");
+    assert_eq!(value["autonomy_status"]["diagnostic_can_enable_execution"], false);
     assert!(value["batch_operations"].as_array().unwrap().iter().any(|v| v == "rectangle"));
 }
 
@@ -236,4 +238,69 @@ fn batch_layer_transforms_reopen_and_fail_atomically() {
         assert!(capabilities["batch_operations"].as_array().unwrap().iter().any(|value| value == operation));
         assert_eq!(capabilities["batch_examples"][operation]["op"], operation);
     }
+}
+
+#[test]
+fn revision_checked_proposals_are_data_only_bounded_and_transactional() {
+    let dir = TempDir::new();
+    let input = dir.0.join("base.json");
+    let output = dir.0.join("edited.json");
+    let changed = dir.0.join("changed.json");
+    let rejected = dir.0.join("rejected.json");
+    let proposal = dir.0.join("proposal.json");
+    let input_path = input.to_str().unwrap();
+    let output_path = output.to_str().unwrap();
+    let changed_path = changed.to_str().unwrap();
+    let rejected_path = rejected.to_str().unwrap();
+    let proposal_path = proposal.to_str().unwrap();
+    assert!(cli(&["new", "3", "3", input_path]).status.success());
+    let inspected: serde_json::Value = serde_json::from_slice(&cli(&["inspect", input_path]).stdout).unwrap();
+    let revision = inspected["revision"].as_str().unwrap();
+    assert!(revision.starts_with("sha256-json-v1:"));
+    let proposal_json = serde_json::json!({"version":1,"base_revision":revision,"operations":[
+        {"op":"add_layer"},
+        {"op":"pixel","layer":1,"x":1,"y":1,"color":[3,4,5,255]}
+    ]});
+    fs::write(&proposal, serde_json::to_vec(&proposal_json).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", input_path, output_path, proposal_path]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(response["base_revision"], revision);
+    assert_ne!(response["revision"], revision);
+    assert_eq!(perveance::Project::load(&output).unwrap().layers[1].pixels[4], [3, 4, 5, 255]);
+    assert!(cli(&["paint", input_path, changed_path, "0", "0", "0", "1", "1", "1", "255"]).status.success());
+    let stale = cli(&["apply-proposal", changed_path, rejected_path, proposal_path]);
+    assert!(!stale.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&stale.stderr).unwrap();
+    assert!(error["error"].as_str().unwrap().contains("stale"));
+    assert!(!rejected.exists());
+    // No-clobber also applies to proposals, even when the revision is valid.
+    let existing = fs::read(&output).unwrap();
+    assert!(!cli(&["apply-proposal", input_path, output_path, proposal_path]).status.success());
+    assert_eq!(fs::read(&output).unwrap(), existing);
+    let mut invalid = proposal_json.clone();
+    invalid["operations"][1]["layer"] = serde_json::json!(99);
+    fs::write(&proposal, serde_json::to_vec(&invalid).unwrap()).unwrap();
+    assert!(!cli(&["apply-proposal", input_path, rejected_path, proposal_path]).status.success());
+    assert!(!rejected.exists());
+    invalid["extra"] = serde_json::json!("unknown");
+    fs::write(&proposal, serde_json::to_vec(&invalid).unwrap()).unwrap();
+    assert!(!cli(&["apply-proposal", input_path, rejected_path, proposal_path]).status.success());
+    fs::write(&proposal, vec![b' '; perveance::MAX_PROPOSAL_BYTES as usize + 1]).unwrap();
+    let too_large = cli(&["apply-proposal", input_path, rejected_path, proposal_path]);
+    assert!(!too_large.status.success());
+    assert!(!rejected.exists());
+}
+
+#[test]
+fn fingerprint_is_based_on_project_content_not_json_formatting() {
+    let dir = TempDir::new();
+    let compact = dir.0.join("compact.json");
+    let pretty = dir.0.join("pretty.json");
+    assert!(cli(&["new", "2", "2", compact.to_str().unwrap()]).status.success());
+    let project: serde_json::Value = serde_json::from_slice(&fs::read(&compact).unwrap()).unwrap();
+    fs::write(&pretty, serde_json::to_vec_pretty(&project).unwrap()).unwrap();
+    let a: serde_json::Value = serde_json::from_slice(&cli(&["inspect", compact.to_str().unwrap()]).stdout).unwrap();
+    let b: serde_json::Value = serde_json::from_slice(&cli(&["inspect", pretty.to_str().unwrap()]).stdout).unwrap();
+    assert_eq!(a["revision"], b["revision"]);
 }

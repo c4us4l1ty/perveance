@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{FlipAxis, History, Project};
+use perveance::{EditProposal, FlipAxis, History, Operation, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,11 @@ struct Studio {
     shape_filled: bool,
     path: String,
     png_path: String,
+    proposal_path: String,
+    ai_prompt: String,
+    ai_model: String,
+    ai_key: String,
+    ai_pending: Option<std::sync::mpsc::Receiver<Result<EditProposal, String>>>,
     status: String,
     history: History,
     confirm_open: bool,
@@ -87,7 +92,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(),
+            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -152,6 +157,100 @@ impl Studio {
             self.status = error;
         }
     }
+    fn apply_proposal(&mut self, proposal: &EditProposal) {
+        let original_count = self.project.layers.len();
+        match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.apply_proposal(proposal)) {
+            Ok(changed) => {
+                if changed { self.layer = selection_after_operations(self.layer, original_count, &proposal.operations); }
+                self.layer = self.layer.min(self.project.layers.len() - 1);
+                self.rename_buffer = self.project.layers[self.layer].name.clone();
+                self.status = if changed { "Proposal applied (undoable)." } else { "Proposal made no changes." }.into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn start_ai(&mut self, ctx: &egui::Context) {
+        if self.ai_pending.is_some() { return; }
+        if let Err(error) = perveance::provider::validate_request(&self.ai_model, &self.ai_key, &self.ai_prompt) {
+            self.status = error;
+            return;
+        }
+        let task = match perveance::provider::TaskContext::from_project(&self.project) {
+            Ok(task) => task,
+            Err(error) => { self.status = error; return; }
+        };
+        let model = self.ai_model.clone();
+        let prompt = self.ai_prompt.clone();
+        // The key is not persisted or passed to a subprocess. Rust does not promise
+        // zeroization of the GUI widget, HTTP headers, or these temporary strings.
+        let key = std::mem::take(&mut self.ai_key);
+        let (send, receive) = std::sync::mpsc::channel();
+        self.ai_pending = Some(receive);
+        self.status = "Requesting pixel edits from OpenRouter...".into();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result = perveance::provider::propose_openrouter(&task, &model, &key, &prompt);
+            let _ = send.send(result);
+            ctx.request_repaint();
+        });
+    }
+    fn poll_ai(&mut self, ctx: &egui::Context) {
+        if self.ai_pending.is_none() { return; }
+        // Do not inject a discrete edit into an active brush/shape gesture or dialog.
+        if self.confirm_close || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            return;
+        }
+        let result = self.ai_pending.as_ref().unwrap().try_recv();
+        match result {
+            Ok(result) => {
+                self.ai_pending = None;
+                match result {
+                    Ok(proposal) => self.apply_proposal(&proposal),
+                    Err(error) => self.status = error,
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.ai_pending = None;
+                self.status = "Provider request stopped unexpectedly.".into();
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+    fn ai_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        ui.heading("Prompt to pixels (experimental)");
+        ui.small("Sends your prompt, canvas size and layer count to OpenRouter and your chosen model. Fees may apply; no spend cap. Pixels and layer names are not sent.");
+        ui.label("Model ID");
+        ui.text_edit_singleline(&mut self.ai_model);
+        ui.label("OpenRouter API key (not saved)");
+        ui.add(egui::TextEdit::singleline(&mut self.ai_key).password(true));
+        ui.label("Art prompt");
+        ui.add(egui::TextEdit::multiline(&mut self.ai_prompt).desired_rows(3));
+        let send = ui.add_enabled(self.ai_pending.is_none(), egui::Button::new("Send to OpenRouter"));
+        if send.clicked() { self.start_ai(ui.ctx()); }
+        ui.small("Adds and paints new layers only. Request may be charged even if rejected or the app closes. Live provider compatibility is unverified.");
+        send
+    }
+    fn agent_handoff_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        ui.heading("Agent handoff");
+        ui.small("Data-only proposals must match the current project revision.");
+        if ui.button("Copy current revision").clicked() {
+            match self.project.revision() {
+                Ok(revision) => { ui.ctx().copy_text(revision); self.status = "Revision sent to clipboard.".into(); }
+                Err(error) => self.status = error,
+            }
+        }
+        ui.label("Proposal JSON path");
+        ui.text_edit_singleline(&mut self.proposal_path);
+        let apply = ui.button("Apply proposal");
+        if apply.clicked() {
+            match EditProposal::load(Path::new(&self.proposal_path)) {
+                Ok(proposal) => self.apply_proposal(&proposal),
+                Err(error) => self.status = error,
+            }
+        }
+        apply
+    }
     fn pick_color(&mut self, point: [u32; 2]) {
         match self.project.sample_composite(point[0], point[1]) {
             Ok(color) => { self.color = color; self.status = format!("Sampled composite RGBA {color:?}."); }
@@ -161,6 +260,32 @@ impl Studio {
     fn set_status(&mut self, result: Result<(), String>, success: &str) {
         self.status = match result { Ok(()) => success.into(), Err(error) => error };
     }
+}
+
+/// Preserve the selected layer through successful index-changing proposal edits.
+/// Only called after the full batch has validated against the original project.
+fn selection_after_operations(mut selected: usize, mut count: usize, operations: &[Operation]) -> usize {
+    for op in operations {
+        match op {
+            Operation::AddLayer => count += 1,
+            Operation::DuplicateLayer { layer } => {
+                if *layer < selected { selected += 1; }
+                count += 1;
+            }
+            Operation::RemoveLayer { layer } => {
+                count -= 1;
+                if *layer < selected { selected -= 1; }
+                selected = selected.min(count - 1);
+            }
+            Operation::MoveLayer { from, to } if from != to => {
+                if selected == *from { selected = *to; }
+                else if *from < selected && *to >= selected { selected -= 1; }
+                else if *from > selected && *to <= selected { selected += 1; }
+            }
+            _ => {}
+        }
+    }
+    selected
 }
 
 /// Inclusive endpoints in either direction produce a positive pixel bounding box.
@@ -180,6 +305,7 @@ impl eframe::App for Studio {
                 self.confirm_close = true;
             }
         }
+        self.poll_ai(ctx);
         // Do not intercept shortcuts while a dialog, text field, or brush gesture is active.
         if !self.confirm_close && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
             let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
@@ -286,7 +412,11 @@ impl eframe::App for Studio {
             }
             ui.small("PNG import uses 8-bit pixels; color profiles are not retained.");
             ui.separator();
-            ui.small("AI and autonomous feature building are not implemented.");
+            self.agent_handoff_ui(ui);
+            ui.separator();
+            self.ai_ui(ui);
+            ui.separator();
+            ui.small("Autonomous feature building is not implemented.");
           });
         });
         egui::SidePanel::right("layers").default_width(190.0).show(ctx, |ui| {
@@ -577,6 +707,161 @@ mod tests {
         assert!(!studio.has_unsaved_changes());
         studio.saved_project = None; // A new or imported canvas is unsaved even if blank.
         assert!(studio.has_unsaved_changes());
+    }
+
+    #[test]
+    fn agent_proposals_are_one_undoable_edit_and_reject_stale() {
+        let mut studio = Studio::default();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
+            perveance::Operation::AddLayer,
+            perveance::Operation::Pixel { layer: 1, x: 0, y: 0, color: [1, 2, 3, 255] },
+        ] };
+        studio.apply_proposal(&proposal);
+        assert_eq!(studio.project.layers.len(), 2);
+        studio.undo_edit();
+        assert_eq!(studio.project.layers.len(), 1);
+        assert!(studio.history.can_redo());
+        let mut stale = proposal.clone();
+        stale.base_revision = format!("sha256-json-v1:{}", "0".repeat(64));
+        studio.apply_proposal(&stale);
+        assert!(studio.status.contains("stale"));
+        assert!(studio.history.can_redo());
+        studio.redo_edit();
+        assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn proposal_button_loads_file_and_rejects_replay() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Rect {
+            let mut rect = Rect::NOTHING;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { rect = studio.agent_handoff_ui(ui).rect; });
+            });
+            rect
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proposal.json");
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
+            Operation::Pixel { layer: 0, x: 1, y: 1, color: [7, 8, 9, 255] },
+        ] };
+        std::fs::write(&path, serde_json::to_vec(&proposal).unwrap()).unwrap();
+        studio.proposal_path = path.to_str().unwrap().to_owned();
+        let ctx = egui::Context::default();
+        let apply = frame(&ctx, &mut studio, vec![]).center();
+        click(&ctx, &mut studio, apply);
+        assert_eq!(studio.project.layers[0].pixels[33], [7, 8, 9, 255]);
+        assert!(studio.history.can_undo());
+        click(&ctx, &mut studio, apply);
+        assert!(studio.status.contains("stale"));
+        studio.undo_edit();
+        assert_eq!(studio.project.layers[0].pixels[33], [0; 4]);
+    }
+
+    #[test]
+    fn ai_send_control_validates_without_leaking_credentials() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Rect {
+            let mut rect = Rect::NOTHING;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { rect = studio.ai_ui(ui).rect; });
+            });
+            rect
+        }
+        let mut studio = Studio::default();
+        studio.ai_key = "fake-secret".into();
+        studio.ai_prompt = "draw a flower".into();
+        // Empty model ID fails before any network request starts.
+        let ctx = egui::Context::default();
+        let pos = frame(&ctx, &mut studio, vec![]).center();
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        frame(&ctx, &mut studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+        frame(&ctx, &mut studio, vec![button(false)]);
+        assert_eq!(studio.status, "invalid model ID");
+        assert!(!studio.status.contains("fake-secret"));
+        assert!(studio.ai_pending.is_none());
+    }
+
+    #[test]
+    fn provider_result_waits_for_active_shape_gesture() {
+        let mut studio = Studio::default();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![Operation::AddLayer] };
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Ok(proposal)).unwrap();
+        studio.ai_pending = Some(receive);
+        studio.shape_start = Some([0, 0]);
+        let ctx = egui::Context::default();
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_some());
+        assert_eq!(studio.project.layers.len(), 1);
+        studio.shape_start = None;
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_none());
+        assert_eq!(studio.project.layers.len(), 2);
+    }
+
+    #[test]
+    fn provider_results_apply_atomically_or_reject_stale_gui_artwork() {
+        let mut studio = Studio::default();
+        let original = studio.project.clone();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: original.revision().unwrap(), operations: vec![
+            Operation::AddLayer,
+            Operation::Pixel { layer: 1, x: 1, y: 1, color: [5, 6, 7, 255] },
+        ] };
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Ok(proposal.clone())).unwrap();
+        studio.ai_pending = Some(receive);
+        studio.poll_ai(&egui::Context::default());
+        assert_eq!(studio.project.layers[1].pixels[33], [5, 6, 7, 255]);
+        assert_eq!(studio.project.layers[0], original.layers[0]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        studio.tool = Tool::Line;
+        studio.commit_shape([2, 2], [2, 2]);
+        let before = studio.project.clone();
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Ok(proposal)).unwrap();
+        studio.ai_pending = Some(receive);
+        studio.poll_ai(&egui::Context::default());
+        assert!(studio.status.contains("stale"));
+        assert_eq!(studio.project, before);
+    }
+
+    #[test]
+    fn proposal_selection_follows_layer_reorder_and_undo() {
+        let mut studio = Studio::default();
+        studio.project.add_layer().unwrap();
+        studio.project.rename_layer(1, "Selected").unwrap();
+        studio.layer = 1;
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
+            Operation::DuplicateLayer { layer: 0 },
+            Operation::MoveLayer { from: 2, to: 0 },
+        ] };
+        studio.apply_proposal(&proposal);
+        assert_eq!(studio.layer, 0);
+        assert_eq!(studio.project.layers[studio.layer].name, "Selected");
+        studio.undo_edit();
+        assert_eq!(studio.layer, 1);
+        assert_eq!(studio.project.layers[studio.layer].name, "Selected");
+        studio.redo_edit();
+        assert_eq!(studio.layer, 0);
+        assert_eq!(studio.project.layers[studio.layer].name, "Selected");
+    }
+
+    #[test]
+    fn proposal_selection_follows_insert_remove_and_move_indices() {
+        assert_eq!(selection_after_operations(1, 3, &[Operation::DuplicateLayer { layer: 0 }]), 2);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::RemoveLayer { layer: 0 }]), 0);
+        assert_eq!(selection_after_operations(2, 3, &[Operation::RemoveLayer { layer: 2 }]), 1);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::MoveLayer { from: 0, to: 2 }]), 0);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::MoveLayer { from: 2, to: 0 }]), 2);
+        assert_eq!(selection_after_operations(1, 3, &[Operation::MoveLayer { from: 1, to: 2 }]), 2);
     }
 
     #[test]

@@ -35,3 +35,7 @@ Perform small, time-boxed experiments after START; do not count them as the fina
 5. Record a decision with evidence: **integrate**, **reuse selected modules**, **fork**, or **compose**. Choose the smallest approach that passes gates; revisit if the spike fails. Record actual license notices and transitive dependencies before distribution.
 
 Avoid cloning or committing an upstream project wholesale until the decision and license review are complete. No code has been copied at planning time.
+
+## Experimental provider transport
+
+The prototype OpenRouter adapter uses [`ureq` 2.12.1](https://github.com/algesten/ureq/tree/2.12.1), whose manifest declares MIT OR Apache-2.0. TLS is enabled, while compression, cookies and environment proxy detection are disabled. This is a preliminary package check, not a complete transitive license or security audit. No live provider or harness compatibility test has been performed.

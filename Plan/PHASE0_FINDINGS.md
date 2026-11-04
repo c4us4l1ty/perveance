@@ -35,3 +35,9 @@ The diagnostic rerun ([41799783606](https://github.com/c4us4l1ty/perveance/actio
 The default-feature `cargo check --locked -p graphene-cli` succeeded in [run 41800196385](https://github.com/c4us4l1ty/perveance/actions/runs/41800196385) on the pinned upstream revision. This checks compilation, not a runnable export, graphical usability, headless GPU availability, or integration. The feature-disabled failure remains relevant. The foundation choice is still open.
 
 Perveance now has a committed Cargo.lock, and CI tests with `--locked`. A full license inventory remains outstanding before release. CI launches the desktop window under X11, but full desktop interaction and visual testing remain outstanding.
+
+## Bubblewrap fixed-test feasibility probe
+
+The fixed-code, non-destructive `tools/isolation_probe.py` reports narrow observations and always leaves autonomous execution disabled. It exercises a synthetic host sentinel, workspace, symlink, `/proc` root paths, host IPv4 loopback, and a synthetic environment variable. It is not a production sandbox profile or a security certification. Automated tests also run the fixed worker without isolation against disposable fixtures and verify it detects the missing boundary.
+
+In [CI run 41816238642](https://github.com/c4us4l1ty/perveance/actions/runs/41816238642), bubblewrap was installed but the fixed test did not start: `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. The CI workflow passed because it verifies that this failure is reported and execution remains disabled, **not** because isolation passed. In the Arena development sandbox bubblewrap was not found. These observations do not establish whether another host/configuration can run bubblewrap safely; do not elevate privileges or silently omit network isolation to bypass this failure. No candidate code was executed.

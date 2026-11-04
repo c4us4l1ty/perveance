@@ -5,14 +5,15 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 ## Current prototype
 
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse and composite-eyedropper tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
+- An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
-This is **not** the finished product: AI providers, autonomous development, sandbox enforcement, vector artwork, a full editor, atomic/revision-aware project updates, and broad OS support are not implemented. Do not rely on this prototype for important artwork. It does not execute generated code.
+This is **not** the finished product: autonomous development, sandbox enforcement, vector artwork, a full editor, atomic/revision-aware project updates, and broad OS support are not implemented. Do not rely on this prototype for important artwork. It does not execute generated code.
 
 ## Development and verification
 
-Use a current stable Rust toolchain and the Linux X11 development dependencies, including the `libxkbcommon-x11` runtime library. `cargo test --locked --all-targets` runs the Rust tests. GitHub Actions compiles and runs these tests and a CLI round trip. The Python diagnostic `python3 tools/phase0_probe.py` reports a few local development prerequisites; it is **not** a sandbox certification. Run its tests with `python3 -m unittest discover -s tests -v`.
+Use a current stable Rust toolchain and the Linux X11 development dependencies, including the `libxkbcommon-x11` runtime library. `cargo test --locked --all-targets` runs the Rust tests. GitHub Actions compiles and runs these tests and a CLI round trip. The Python diagnostic `python3 tools/phase0_probe.py` reports a few local development prerequisites; it is **not** a sandbox certification. Run its tests with `python3 -m unittest discover -s tests -v`. A separate fixed-test diagnostic, `python3 tools/isolation_probe.py`, checks a few bubblewrap behaviors on Linux and exits nonzero if unavailable or failed. It never runs model code or enables autonomy, and passing is **not** sandbox certification.
 
 ### Headless batch editing
 
@@ -69,3 +70,38 @@ perveance-cli sample project.json 2 3 layer 0
 ```
 
 Both commands return straight-alpha RGBA bytes as JSON. Raw pixels preserve their RGB bytes even when alpha is zero; the visible composite uses the same blending as PNG export.
+
+### Revision-checked agent handoff
+
+External tools or agents can prepare a **data-only** edit proposal for a particular project snapshot. First obtain `revision` from `perveance-cli inspect project.json`, then write a JSON file such as:
+
+```json
+{
+  "version": 1,
+  "base_revision": "<revision returned by inspect>",
+  "operations": [
+    {"op":"add_layer"},
+    {"op":"pixel","layer":1,"x":0,"y":0,"color":[255,0,0,255]}
+  ]
+}
+```
+
+Run `perveance-cli apply-proposal project.json edited.json proposal.json`; the output must not exist. Alternatively, in the GUI's **Agent handoff** section, copy the current in-memory revision and apply a proposal file. GUI application is one undoable edit. Proposals are limited to 256 KiB and 1,024 existing typed operations; unknown fields, stale revisions and invalid operations fail without applying any edits. The proposal format cannot run code or invoke commands, and an agent is not automatically connected to the GUI. A valid proposal can still clear pixels or delete layers; review untrusted proposals and keep backups. The size and operation-count limits are not CPU or execution-time quotas.
+
+The revision is `sha256-json-v1:` followed by the lowercase SHA-256 of the compact v1 project serialization (including hidden layer pixels and metadata). It fingerprints the document, not its file formatting. **It is not a lock, permission token, or atomic compare-and-swap:** the CLI checks the snapshot it loads, cannot see unsaved GUI edits, and another process may change a file after it is read. It never replaces the input file. Cross-process coordination and conflict-safe in-place updates remain unimplemented.
+
+### Experimental prompt-to-pixels
+
+In the GUI, scroll to **Prompt to pixels**, enter a model ID and an OpenRouter API key in the app itself, then enter a prompt and click **Send to OpenRouter**. Do not send API keys in chat. The key is not stored in the project or passed to a subprocess; the input field clears when a request starts. It remains in process/HTTP memory temporarily, and secure memory erasure is not guaranteed.
+
+This sends your prompt, canvas dimensions, layer count, and selected model ID to OpenRouter and the selected model provider; existing pixels, layer names, filenames and the project revision are not included. The request is opt-in and may incur charges even when the result is rejected or the app closes. Output is capped at 2,048 tokens, but **there is no dollar spend cap**. Review the provider's terms and billing settings. Redirects and environment-configured proxies are disabled. Requests have a 60-second timeout, although DNS can exceed it; cancelling a pending request is not implemented.
+
+The model is asked for JSON containing existing typed raster operations. The app only permits it to add and paint new layers, validates the complete batch, and applies it as one undoable edit if the project revision has not changed while the request was in flight. Invalid, stale, oversized, truncated, or disallowed results are rejected. A new top layer can still obscure existing artwork. This does **not** run generated code, build features, call an agent harness, or provide a sandbox. An adversarial provider/model remains untrusted.
+
+Only local mock HTTP tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
+
+### Isolation feasibility diagnostic
+
+The optional bubblewrap diagnostic creates its own temporary sentinel and workspace and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink and `/proc` root links), host IPv4 loopback access, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled.
+
+These are narrow observations, not a safety guarantee. In particular, the test binds host system directories read-only and does not test kernel escapes, all network paths, resource quotas, credential brokering or malicious build scripts. Do not use the diagnostic command as a sandbox for untrusted code. The tested build-and-activation supervisor still needs to be designed and independently validated.

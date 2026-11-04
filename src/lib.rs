@@ -1,7 +1,10 @@
 //! Small, deliberately limited pixel-art prototype shared by the GUI and CLI.
 //! It does not execute AI-generated code or implement a sandbox.
 
+pub mod provider;
+
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Write};
 use std::path::Path;
@@ -12,6 +15,9 @@ pub const MAX_DIMENSION: u32 = 256;
 // escaped layer names, not merely its much smaller in-memory pixel payload.
 const MAX_PROJECT_BYTES: u64 = 40 * 1024 * 1024;
 pub const MAX_PNG_BYTES: u64 = 8 * 1024 * 1024;
+pub const MAX_PROPOSAL_BYTES: u64 = 256 * 1024;
+pub const PROPOSAL_VERSION: u32 = 1;
+const REVISION_PREFIX: &str = "sha256-json-v1:";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -155,6 +161,27 @@ pub enum Operation {
     RectangleOutline { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     Ellipse { layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4] },
     Fill { layer: usize, x: u32, y: u32, color: [u8; 4] },
+}
+
+/// An untrusted, data-only batch bound to a specific project snapshot.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditProposal {
+    pub version: u32,
+    pub base_revision: String,
+    pub operations: Vec<Operation>,
+}
+
+impl EditProposal {
+    /// Bound file input before parsing; no code, paths, or commands are executed.
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("open proposal: {e}"))?;
+        let mut bytes = Vec::new();
+        BufReader::new(file).take(MAX_PROPOSAL_BYTES + 1).read_to_end(&mut bytes)
+            .map_err(|e| format!("read proposal: {e}"))?;
+        if bytes.len() as u64 > MAX_PROPOSAL_BYTES { return Err("proposal exceeds size limit".into()); }
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse proposal: {e}"))
+    }
 }
 
 pub const MAX_OPERATIONS: usize = 1024;
@@ -441,6 +468,25 @@ impl Project {
         }
         *self = candidate;
         Ok(())
+    }
+
+    /// SHA-256 of the compact, deterministic v1 project serialization. This is a
+    /// content fingerprint, not a lock or an authorization token.
+    pub fn revision(&self) -> Result<String, String> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(|e| format!("serialize project: {e}"))?;
+        Ok(format!("{REVISION_PREFIX}{:x}", Sha256::digest(&bytes)))
+    }
+
+    /// Check an edit proposal against this in-memory snapshot and apply atomically.
+    pub fn apply_proposal(&mut self, proposal: &EditProposal) -> Result<(), String> {
+        if proposal.version != PROPOSAL_VERSION { return Err("unsupported proposal version".into()); }
+        let hash = proposal.base_revision.strip_prefix(REVISION_PREFIX).ok_or("invalid proposal revision")?;
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err("invalid proposal revision".into());
+        }
+        if proposal.base_revision != self.revision()? { return Err("proposal base revision is stale".into()); }
+        self.apply_operations(&proposal.operations)
     }
 
     /// Read a raw layer pixel, even if its layer is hidden, preserving all RGBA bytes.
@@ -828,6 +874,35 @@ mod tests {
         assert!(p.apply_operations(&ops).is_err());
         assert_eq!(p, before);
         assert!(serde_json::from_str::<Operation>(r#"{"op":"flip_layer","layer":0,"axis":"diagonal"}"#).is_err());
+    }
+
+    #[test]
+    fn revision_fingerprints_are_stable_and_proposals_are_atomic() {
+        let mut project = Project::new(1, 1).unwrap();
+        let original = project.clone();
+        let revision = project.revision().unwrap();
+        assert_eq!(revision, "sha256-json-v1:b18d6488536a8ef7c24740d546896273228abc3d2c3aa01129bf5a5c46b1edde");
+        let proposal = EditProposal {
+            version: PROPOSAL_VERSION, base_revision: revision.clone(),
+            operations: vec![Operation::Pixel { layer: 0, x: 0, y: 0, color: [1, 2, 3, 4] }],
+        };
+        project.apply_proposal(&proposal).unwrap();
+        assert_ne!(project.revision().unwrap(), revision);
+        let updated = project.clone();
+        assert!(project.apply_proposal(&proposal).unwrap_err().contains("stale"));
+        assert_eq!(project, updated);
+        let mut bad = proposal.clone();
+        bad.base_revision = project.revision().unwrap();
+        bad.operations.push(Operation::Pixel { layer: 9, x: 0, y: 0, color: [0; 4] });
+        assert!(project.apply_proposal(&bad).is_err());
+        assert_eq!(project, updated);
+        bad.version = 2;
+        assert!(project.apply_proposal(&bad).is_err());
+        assert_eq!(project, updated);
+        bad.version = PROPOSAL_VERSION;
+        bad.base_revision = "sha256-json-v1:INVALID".into();
+        assert!(project.apply_proposal(&bad).is_err());
+        assert_eq!(original.revision().unwrap(), revision);
     }
 
     #[test]

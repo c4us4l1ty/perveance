@@ -27,3 +27,7 @@ This does not confer access to the user's local desktop, installed software, key
 ## Concurrent editing and file safety
 
 Use project revisions and explicit transaction preconditions for headless access; detect conflicts with a GUI or other agents, reject stale writes and offer reload/rebase where safe. No blanket destructive command. Outputs use explicit paths and safe atomic replacement. A sandboxed external agent may only access the files it is given; Perveance must not escalate that access.
+
+## Prototype implementation: data-only proposal handoff
+
+`inspect` exposes a content fingerprint; `apply-proposal` and the GUI can check a bounded version-1 proposal against the loaded/in-memory snapshot and apply existing typed raster operations transactionally. GUI application is one undoable edit. The CLI still writes a new output file only. The hash is not a lock, an authorization token, a capability registry, or a way to see another process's unsaved edits. No provider, harness, agent execution or sandbox is implemented by this handoff; arbitrary code and commands are not proposal operations.
