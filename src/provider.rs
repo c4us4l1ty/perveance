@@ -8,7 +8,8 @@ use std::io::Read;
 use std::time::Duration;
 
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-const MAX_PROMPT_BYTES: usize = 4000;
+pub const MAX_PROMPT_BYTES: usize = 4000;
+pub const MAX_API_KEY_BYTES: usize = 512;
 const MAX_RESPONSE_BYTES: u64 = 256 * 1024;
 const MAX_AI_OPERATIONS: usize = 256;
 const MAX_OUTPUT_TOKENS: u32 = 2048;
@@ -36,7 +37,7 @@ pub fn validate_request(model: &str, key: &str, prompt: &str) -> Result<(), Stri
     if model.is_empty() || model.len() > 128 || !model.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._:-".contains(&b)) {
         return Err("invalid model ID".into());
     }
-    if key.is_empty() || key.len() > 512 || !key.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
+    if key.is_empty() || key.len() > MAX_API_KEY_BYTES || !key.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
         return Err("invalid API key format".into());
     }
     if prompt.trim().is_empty() || prompt.len() > MAX_PROMPT_BYTES {
@@ -115,6 +116,14 @@ fn parse_response(context: &TaskContext, bytes: &[u8]) -> Result<EditProposal, S
     let generated: GeneratedOperations = serde_json::from_str(&content).map_err(|_| "provider did not return valid typed operations")?;
     validate_generated(&generated.operations, context.layers)?;
     Ok(EditProposal { version: PROPOSAL_VERSION, base_revision: context.revision.clone(), operations: generated.operations })
+}
+
+/// Apply only provider-safe, revision-bound operations. Even a forged proposal
+/// cannot modify old layers; normal project validation is also transactional.
+pub fn apply_generated(project: &mut Project, proposal: &EditProposal) -> Result<(), String> {
+    project.validate()?;
+    validate_generated(&proposal.operations, project.layers.len())?;
+    project.apply_proposal(proposal)
 }
 
 fn validate_generated(operations: &[Operation], initial_layers: usize) -> Result<(), String> {

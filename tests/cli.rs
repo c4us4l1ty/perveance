@@ -468,3 +468,40 @@ fn resize_proposal_and_export_preserve_layers_and_refuse_unapproved_crop() {
     assert_eq!((info.width, info.height), (3, 3));
     assert_eq!(&pixels[(2 * 3 + 2) * 4..(2 * 3 + 3) * 4], &[99,88,77,255]);
 }
+
+#[test]
+fn openrouter_cli_preflight_is_opt_in_and_does_not_leak_secret() {
+    use std::io::Write;
+    use std::process::Stdio;
+    fn invoke(args: &[&str], key: &[u8]) -> Output {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(args)
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(key).unwrap();
+        child.wait_with_output().unwrap()
+    }
+    let dir = TempDir::new();
+    let project = dir.0.join("base.json");
+    let output = dir.0.join("out.json");
+    let prompt = dir.0.join("prompt.txt");
+    assert!(cli(&["new", "2", "2", project.to_str().unwrap()]).status.success());
+    fs::write(&prompt, "draw a private test scene").unwrap();
+    let run = |model: &str, secret: &[u8]| invoke(&["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), model, prompt.to_str().unwrap()], secret);
+    let result = run("invalid model", b"private-fake-key\n");
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    let message = String::from_utf8(result.stderr).unwrap();
+    assert!(!message.contains("private-fake-key"));
+    assert!(!message.contains("private test scene"));
+    assert!(!output.exists());
+    let invalid = run("invalid model", &[b'x'; 513]);
+    assert!(!invalid.status.success());
+    assert!(!output.exists());
+    fs::write(&prompt, vec![b'x'; perveance::provider::MAX_PROMPT_BYTES + 1]).unwrap();
+    // Prompt is rejected before the key is read or any network request starts.
+    let result = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), "test/model", prompt.to_str().unwrap()]).output().unwrap();
+    assert!(!result.status.success());
+    assert!(!output.exists());
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "prompt-openrouter"));
+    assert_eq!(caps["autonomous_execution"], false);
+}

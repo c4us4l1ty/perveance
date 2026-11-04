@@ -31,3 +31,7 @@ Use project revisions and explicit transaction preconditions for headless access
 ## Prototype implementation: data-only proposal handoff
 
 `inspect` exposes a content fingerprint; `apply-proposal` and the GUI can check a bounded version-1 proposal against the loaded/in-memory snapshot and apply existing typed raster operations transactionally. GUI application is one undoable edit. The CLI still writes a new output file only. The hash is not a lock, an authorization token, a capability registry, or a way to see another process's unsaved edits. No provider, harness, agent execution or sandbox is implemented by this handoff; arbitrary code and commands are not proposal operations.
+
+## Experimental headless prompt-to-pixels
+
+The opt-in `prompt-openrouter` CLI command reads a UTF-8 prompt file and a key from non-terminal stdin, asks the same fixed OpenRouter adapter for restricted typed edits, checks and applies them to one loaded snapshot, and writes a create-new project. It is not an agent harness, credential broker, sandbox, code execution system or live-validated provider integration. Network requests can incur charges and no spend cap exists; output preflight is not a reservation, and input changes after loading are not detected. See README for confidentiality and operational limitations.

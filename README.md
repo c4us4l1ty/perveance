@@ -5,7 +5,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 ## Current prototype
 
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse and composite-eyedropper tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
-- An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
+- An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -135,7 +135,20 @@ This sends your prompt, canvas dimensions, layer count, and selected model ID to
 
 The model is asked for JSON containing existing typed raster operations. The app only permits it to add and paint new layers, validates the complete batch, and applies it as one undoable edit if the project revision has not changed while the request was in flight. Invalid, stale, oversized, truncated, or disallowed results are rejected. A new top layer can still obscure existing artwork. This does **not** run generated code, build features, call an agent harness, or provide a sandbox. An adversarial provider/model remains untrusted.
 
-Only local mock HTTP tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
+#### Headless OpenRouter request
+
+To opt in from the CLI, put the art prompt in a UTF-8 file and supply the key through redirected stdin (or a trusted secret manager pipe):
+
+```sh
+perveance-cli prompt-openrouter input.json output.json MODEL_ID prompt.txt < /path/to/private-key-file
+perveance-cli export-png output.json output.png
+```
+
+Do not put a key in chat, the command line, shell history, project files or an environment variable for this command. If using a key file, secure its permissions and handle its lifecycle yourself. The CLI reads at most 512 key bytes plus an optional newline from stdin, waits for EOF, and refuses a terminal as stdin to avoid echoing a key. The key is held in CLI and HTTP process memory; secure erasure is not guaranteed. Other local processes, the invoking tool, a pipe or key file may expose it depending on the environment. There is no credential broker.
+
+The command makes a **paid network request** to the same fixed OpenRouter endpoint and uses the same restricted new-layer-only adapter described above. There is no dollar spend cap or cancellation; a request may be charged even if the response is rejected, the output already appears, or the save fails. The initial output-existence check is not a reservation. Input is loaded as a snapshot; edits to the input or unsaved GUI changes during the request are not detected. Output is a new project file only, with no overwrite. A successful response can also contain no effective edits. The CLI returns revisions and operation count, not a PNG; export separately. The prompt file is limited to 4,000 bytes. Use trusted paths and verify the resulting artwork.
+
+Only local mock HTTP and simulated CLI pipeline tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
 
 ### Isolation feasibility diagnostic
 
