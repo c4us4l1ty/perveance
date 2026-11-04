@@ -36,3 +36,13 @@ GUI, CLI, examples, build metadata and a checksum, then download and exercise
 the artifact. Actual status depends on the corresponding CI run. It is not a
 formal release, does not prove compatibility outside the runner, and does not
 complete the other criteria above. Autonomous execution is still disabled.
+
+## Next increment: agent/editor handoff
+
+The Python bridge now supports the current Rust typed raster layer and canvas
+operations under its stricter bounds, and CI is configured to exercise a
+bridge-created project through a GUI edit and back to a revision-bound bridge
+edit and PNG comparison. Check the relevant CI run for the actual result. This
+is an automated X11/file-transfer test, not direct Arena integration or
+validation on a user's desktop. Native installation, real model/provider
+validation, usability and security/reliability work remain open.

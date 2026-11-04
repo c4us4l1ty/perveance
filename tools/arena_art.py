@@ -107,7 +107,15 @@ def apply_operations(project, operations):
                 raise ValueError("layer limit reached")
             layers.append(new_layer(len(layers) + 1))
             continue
-        fields = {"rename_layer": ("op", "layer", "name"),
+        fields = {"duplicate_layer": ("op", "layer"),
+                  "clear_layer": ("op", "layer"),
+                  "replace_color": ("op", "layer", "from", "to"),
+                  "flip_layer": ("op", "layer", "axis"),
+                  "translate_layer": ("op", "layer", "dx", "dy", "clip"),
+                  "resize_canvas": ("op", "width", "height", "clip"),
+                  "move_layer": ("op", "from", "to"),
+                  "remove_layer": ("op", "layer"),
+                  "rename_layer": ("op", "layer", "name"),
                   "set_visibility": ("op", "layer", "visible"),
                   "pixel": ("op", "layer", "x", "y", "color"),
                   "line": ("op", "layer", "from", "to", "color"),
@@ -119,7 +127,76 @@ def apply_operations(project, operations):
         if name not in fields:
             raise ValueError("operation is not supported by the bridge")
         exact(op, fields[name])
-        layer = layers[integer(op["layer"], 0, len(layers) - 1)]
+        if name == "resize_canvas":
+            nw = integer(op["width"], 1, MAX_DIMENSION)
+            nh = integer(op["height"], 1, MAX_DIMENSION)
+            if type(op["clip"]) is not bool:
+                raise ValueError("clip must be boolean")
+            if not op["clip"] and any(pixel != [0, 0, 0, 0]
+                    for layer in layers for y in range(h) for x in range(w)
+                    if x >= nw or y >= nh for pixel in (layer["pixels"][y * w + x],)):
+                raise ValueError("resize would clip nonzero pixel data")
+            for layer in layers:
+                old_pixels = layer["pixels"]
+                resized = [[0, 0, 0, 0] for _ in range(nw * nh)]
+                for y in range(min(h, nh)):
+                    resized[y * nw:y * nw + min(w, nw)] = old_pixels[y * w:y * w + min(w, nw)]
+                layer["pixels"] = resized
+            w, h = nw, nh
+            project["width"], project["height"] = w, h
+            continue
+        if name == "move_layer":
+            source = integer(op["from"], 0, len(layers) - 1)
+            target = integer(op["to"], 0, len(layers) - 1)
+            layers.insert(target, layers.pop(source))
+            continue
+        index = integer(op["layer"], 0, len(layers) - 1)
+        layer = layers[index]
+        if name == "remove_layer":
+            if len(layers) == 1:
+                raise ValueError("cannot remove last layer")
+            layers.pop(index)
+            continue
+        if name == "duplicate_layer":
+            if len(layers) >= MAX_LAYERS:
+                raise ValueError("layer limit reached")
+            duplicate = copy.deepcopy(layer)
+            encoded = duplicate["name"].encode("utf-8")
+            if len(encoded) + 5 > 256:
+                duplicate["name"] = encoded[:251].decode("utf-8", errors="ignore")
+            duplicate["name"] += " copy"
+            layers.insert(index + 1, duplicate)
+            continue
+        if name == "clear_layer":
+            layer["pixels"] = [[0, 0, 0, 0] for _ in range(w * h)]
+            continue
+        if name == "replace_color":
+            old, new = color(op["from"]), color(op["to"])
+            layer["pixels"] = [new.copy() if pixel == old else pixel for pixel in layer["pixels"]]
+            continue
+        if name == "flip_layer":
+            if op["axis"] not in ("horizontal", "vertical"):
+                raise ValueError("invalid flip axis")
+            pixels = layer["pixels"]
+            layer["pixels"] = [pixels[(y if op["axis"] == "horizontal" else h - 1 - y) * w +
+                                      (w - 1 - x if op["axis"] == "horizontal" else x)]
+                               for y in range(h) for x in range(w)]
+            continue
+        if name == "translate_layer":
+            dx, dy = integer(op["dx"], -256, 256), integer(op["dy"], -256, 256)
+            if type(op["clip"]) is not bool:
+                raise ValueError("clip must be boolean")
+            translated = [[0, 0, 0, 0] for _ in range(w * h)]
+            for y in range(h):
+                for x in range(w):
+                    pixel = layer["pixels"][y * w + x]
+                    tx, ty = x + dx, y + dy
+                    if 0 <= tx < w and 0 <= ty < h:
+                        translated[ty * w + tx] = pixel
+                    elif not op["clip"] and pixel != [0, 0, 0, 0]:
+                        raise ValueError("translation would clip nonzero pixel data")
+            layer["pixels"] = translated
+            continue
         if name == "rename_layer":
             text = op["name"]
             if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 256:
@@ -296,7 +373,7 @@ def main(args):
         return {"ok": True, "bridge": "experimental-python-data-only", "project_version": 1,
                 "max_dimension": MAX_DIMENSION, "max_layers": MAX_LAYERS, "max_export_scale": MAX_EXPORT_SCALE,
                 "max_brush_size": MAX_BRUSH_SIZE, "max_region_pixels": MAX_REGION_PIXELS,
-                "operations": ["add_layer", "rename_layer", "set_visibility", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
+                "operations": ["add_layer", "duplicate_layer", "clear_layer", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "rename_layer", "move_layer", "remove_layer", "set_visibility", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
                 "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "read-region", "export-png", "export-png-scaled"],
                 "autonomous_execution": False, "rust_cli_parity": False}
     if len(args) == 5 and args[0] == "create":
