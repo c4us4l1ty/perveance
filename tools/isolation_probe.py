@@ -19,13 +19,14 @@ from typing import Any
 
 CHECKS = (
     "workspace_read_write", "host_secret_hidden", "host_write_blocked",
-    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "environment_cleared",
+    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "workspace_host_socket_blocked", "environment_cleared",
 )
 LIMITATIONS = [
     "Fixed test code only; a pass is not a sandbox certification or an execution authorization.",
     "No kernel escape, syscall, GPU, cgroup/quota, network egress, dependency, credential-broker, or persistence audit.",
     "The diagnostic binds host /usr, /bin and libraries read-only; it is not a production worker profile.",
-    "Only host IPv4 loopback is tested, not all network protocols or destinations.",
+    "Only host IPv4 loopback and a planted workspace Unix socket are tested, not all network protocols or destinations.",
+    "A host Unix socket exposed through a bind-mounted workspace may remain reachable across network namespaces.",
     "Probe output and tool availability are not trusted authorization for autonomous execution.",
 ]
 
@@ -76,6 +77,13 @@ try:
         checks['host_loopback_blocked'] = False
 except OSError:
     checks['host_loopback_blocked'] = True
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(1)
+        client.connect(str(work / 'host.sock'))
+        checks['workspace_host_socket_blocked'] = False
+except OSError:
+    checks['workspace_host_socket_blocked'] = True
 checks['environment_cleared'] = 'PERVEANCE_PROBE_SECRET' not in os.environ
 print(json.dumps(checks, sort_keys=True))
 '''
@@ -90,7 +98,7 @@ def classify(checks: Any) -> str:
 
 def report(status: str, reason: str, checks: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "probe": "bubblewrap-fixed-checks-v1",
+        "probe": "bubblewrap-fixed-checks-v2",
         "status": status,
         "reason": reason,
         "checks": checks or {},
@@ -107,7 +115,18 @@ def run_fixed_probe(bwrap: str) -> dict[str, Any]:
         workspace = root / "workspace"
         workspace.mkdir()
         (workspace / "outside-link").symlink_to(secret)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_listener:
+            # A deliberately unsafe input fixture: a live host socket in the
+            # bound workspace. Network namespaces alone do not necessarily deny it.
+            socket_path = workspace / "host.sock"
+            unix_listener.bind(str(socket_path))
+            unix_listener.listen(2)
+            unix_listener.settimeout(2)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
+                control.settimeout(2)
+                control.connect(str(socket_path))
+                accepted, _ = unix_listener.accept()
+                accepted.close()
             listener.bind(("127.0.0.1", 0))
             listener.listen(2)
             listener.settimeout(2)

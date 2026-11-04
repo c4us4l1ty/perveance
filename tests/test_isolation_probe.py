@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import socket
 import subprocess
@@ -46,6 +47,8 @@ class IsolationProbeTests(unittest.TestCase):
             for option in ("--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--clearenv", "--tmpfs"):
                 self.assertIn(option, command)
             self.assertEqual(command[command.index("-c") + 1], probe.WORKER)
+            self.assertIn("--bind", command)
+            self.assertEqual(command[command.index("--bind") + 2], "/work")
             self.assertEqual(kwargs["env"]["PERVEANCE_PROBE_SECRET"], "probe-only-environment-sentinel")
             self.assertNotIn("HOME", kwargs["env"])
             kwargs["stdout"].write(json.dumps({name: True for name in probe.CHECKS}).encode())
@@ -60,13 +63,15 @@ class IsolationProbeTests(unittest.TestCase):
     def test_fixed_worker_detects_unisolated_access(self):
         # This deliberately runs only the fixed probe code without bubblewrap, against
         # disposable fixtures. It proves the checks detect an unconfined environment.
-        with tempfile.TemporaryDirectory() as tmp, socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        with tempfile.TemporaryDirectory() as tmp, socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_listener:
             root = Path(tmp)
             sentinel = root / "host-sentinel"
             sentinel.write_bytes(b"probe-only-secret")
             workspace = root / "workspace"
             workspace.mkdir()
             (workspace / "outside-link").symlink_to(sentinel)
+            unix_listener.bind(str(workspace / "host.sock"))
+            unix_listener.listen(1)
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
             result = subprocess.run(
@@ -79,6 +84,39 @@ class IsolationProbeTests(unittest.TestCase):
             self.assertTrue(checks["workspace_read_write"])
             for name in set(probe.CHECKS) - {"workspace_read_write"}:
                 self.assertFalse(checks[name], name)
+            self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("unshare"), "Linux unshare is required")
+    def test_network_namespace_does_not_isolate_exposed_host_unix_socket(self):
+        # Fixed disposable worker only. This deliberately shows why a shared
+        # workspace must not carry a host socket into a future worker.
+        with tempfile.TemporaryDirectory() as tmp, socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_listener:
+            root = Path(tmp)
+            sentinel = root / "host-sentinel"
+            sentinel.write_bytes(b"probe-only-secret")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            (workspace / "outside-link").symlink_to(sentinel)
+            unix_listener.bind(str(workspace / "host.sock"))
+            unix_listener.listen(2)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
+                control.connect(str(workspace / "host.sock"))
+                accepted, _ = unix_listener.accept()
+                accepted.close()
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            result = subprocess.run(
+                [shutil.which("unshare"), "-Urn", sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace)],
+                env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"},
+                capture_output=True, timeout=10,
+            )
+            if result.returncode != 0 and any(reason in result.stderr for reason in (b"Operation not permitted", b"Permission denied", b"Invalid argument", b"Function not implemented")):
+                self.skipTest("unprivileged user/network namespace unavailable")
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            checks = json.loads(result.stdout)
+            self.assertTrue(checks["host_loopback_blocked"])
+            self.assertFalse(checks["workspace_host_socket_blocked"])
+            self.assertEqual(probe.classify(checks), "failed")
             self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
 
     def test_tool_failure_and_timeout_fail_closed(self):
