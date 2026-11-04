@@ -55,6 +55,21 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
     });
 }
 
+// Session-only swatches: deliberately not part of the v1 project format.
+const DEFAULT_PALETTE: [[u8; 4]; 16] = [
+    [166, 215, 74, 255], [255, 255, 255, 255], [25, 25, 30, 255], [128, 128, 128, 255],
+    [229, 82, 82, 255], [255, 156, 73, 255], [255, 218, 98, 255], [88, 185, 101, 255],
+    [64, 173, 183, 255], [73, 124, 206, 255], [143, 99, 194, 255], [230, 119, 170, 255],
+    [105, 67, 48, 255], [185, 131, 94, 255], [244, 201, 159, 255], [0, 0, 0, 0],
+];
+
+// Preview transparency against a neutral background; the stored color remains straight RGBA.
+fn swatch_preview(color: [u8; 4]) -> Color32 {
+    let a = color[3] as u32;
+    let channel = |v: u8| ((v as u32 * a + 96 * (255 - a) + 127) / 255) as u8;
+    Color32::from_rgb(channel(color[0]), channel(color[1]), channel(color[2]))
+}
+
 struct Studio {
     project: Project,
     // A snapshot of the last successfully saved/opened project (or initial blank canvas).
@@ -64,6 +79,8 @@ struct Studio {
     allow_close: bool,
     layer: usize,
     color: [u8; 4],
+    palette: [[u8; 4]; 16],
+    palette_slot: usize,
     tool: Tool,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
@@ -92,7 +109,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
+            color: [166, 215, 74, 255], palette: DEFAULT_PALETTE, palette_slot: 0, tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
             new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -216,6 +233,35 @@ impl Studio {
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
+    }
+    // Return controls' rectangles for interaction tests; the palette is editor state,
+    // so choosing/storing a color does not edit the document or create undo entries.
+    fn palette_ui(&mut self, ui: &mut egui::Ui) -> (Vec<Rect>, Rect, Rect) {
+        ui.label("Palette (session only)");
+        let mut slots = Vec::with_capacity(self.palette.len());
+        for row in 0..4 {
+            ui.horizontal(|ui| {
+                for col in 0..4 {
+                    let index = row * 4 + col;
+                    let color = self.palette[index];
+                    let preview = swatch_preview(color);
+                    let brightness = 299 * preview.r() as u32 + 587 * preview.g() as u32 + 114 * preview.b() as u32;
+                    let text_color = if brightness > 140_000 { Color32::BLACK } else { Color32::WHITE };
+                    let label = format!("{}{}", if index == self.palette_slot { "•" } else { "" }, index + 1);
+                    let button = egui::Button::new(egui::RichText::new(label).color(text_color))
+                        .fill(preview).min_size(Vec2::new(34.0, 22.0));
+                    let response = ui.add(button).on_hover_text(format!("Slot {}: RGBA {}, {}, {}, {}", index + 1, color[0], color[1], color[2], color[3]));
+                    slots.push(response.rect);
+                    if response.clicked() { self.palette_slot = index; self.color = color; }
+                }
+            });
+        }
+        ui.small(format!("Selected slot: {} · RGBA {:?}", self.palette_slot + 1, self.palette[self.palette_slot]));
+        let store = ui.button("Store current color").on_hover_text("Replace the selected slot with the current drawing color, including alpha");
+        if store.clicked() { self.palette[self.palette_slot] = self.color; }
+        let reset = ui.button("Reset palette").on_hover_text("Restore session swatches; current drawing color is unchanged");
+        if reset.clicked() { self.palette = DEFAULT_PALETTE; self.palette_slot = 0; }
+        (slots, store.rect, reset.rect)
     }
     fn ai_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.heading("Prompt to pixels (experimental)");
@@ -347,6 +393,7 @@ impl eframe::App for Studio {
             ui.separator();
             ui.label("Color");
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
+            self.palette_ui(ui);
             ui.add_space(16.0);
             ui.heading("Project");
             ui.horizontal(|ui| {
@@ -728,6 +775,54 @@ mod tests {
         assert!(studio.history.can_redo());
         studio.redo_edit();
         assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn session_palette_buttons_select_store_alpha_and_reset_without_editing_art() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Vec<Rect>, Rect, Rect) {
+            let mut controls = (Vec::new(), Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.palette_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let ctx = egui::Context::default();
+        let mut studio = Studio::default();
+        let original = studio.project.clone();
+        let (slots, _, _) = frame(&ctx, &mut studio, vec![]);
+        assert_eq!(slots.len(), 16);
+        click(&ctx, &mut studio, slots[15].center());
+        assert_eq!(studio.palette_slot, 15);
+        assert_eq!(studio.color, [0, 0, 0, 0]);
+        studio.color = [7, 21, 99, 63];
+        let (_, store, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, store.center());
+        assert_eq!(studio.palette[15], [7, 21, 99, 63]);
+        let (slots, _, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, slots[0].center());
+        click(&ctx, &mut studio, slots[15].center());
+        assert_eq!(studio.color, [7, 21, 99, 63]);
+        assert_eq!(studio.project, original);
+        assert!(!studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        assert_eq!(studio.project.layers[0].pixels[0], [7, 21, 99, 63]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        let (_, _, reset) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, reset.center());
+        assert_eq!(studio.palette, DEFAULT_PALETTE);
+        assert_eq!(studio.palette_slot, 0);
+        assert_eq!(studio.color, [7, 21, 99, 63]);
+        assert_eq!(swatch_preview([255, 0, 0, 0]), Color32::from_gray(96));
+        assert_eq!(swatch_preview([255, 0, 0, 255]), Color32::from_rgb(255, 0, 0));
     }
 
     #[test]
