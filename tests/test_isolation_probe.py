@@ -89,19 +89,21 @@ class IsolationProbeTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             (workspace / "outside-link").symlink_to(sentinel)
+            (workspace / "input.fixture").write_bytes(b"fixed-probe-input")
             unix_listener.bind(str(workspace / "host.sock"))
             unix_listener.listen(1)
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
             result = subprocess.run(
-                [sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace)],
+                [sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace), str(workspace / "host.sock")],
                 env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"},
                 capture_output=True, check=True, timeout=10,
             )
             checks = json.loads(result.stdout)
             self.assertEqual(probe.classify(checks), "failed")
             self.assertTrue(checks["workspace_read_write"])
-            for name in set(probe.CHECKS) - {"workspace_read_write"}:
+            self.assertTrue(checks["staged_input_readable"])
+            for name in set(probe.CHECKS) - {"workspace_read_write", "staged_input_readable"}:
                 self.assertFalse(checks[name], name)
             self.assertEqual(sentinel.read_bytes(), b"changed-by-symlink")
 
@@ -116,6 +118,7 @@ class IsolationProbeTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             (workspace / "outside-link").symlink_to(sentinel)
+            (workspace / "input.fixture").write_bytes(b"fixed-probe-input")
             unix_listener.bind(str(workspace / "host.sock"))
             unix_listener.listen(2)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
@@ -125,7 +128,7 @@ class IsolationProbeTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
             result = subprocess.run(
-                [shutil.which("unshare"), "-Urn", sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace)],
+                [shutil.which("unshare"), "-Urn", sys.executable, "-I", "-c", probe.WORKER, str(sentinel), str(listener.getsockname()[1]), str(workspace), str(workspace / "host.sock")],
                 env={"PATH": "/usr/bin:/bin", "PERVEANCE_PROBE_SECRET": "probe-only-environment-sentinel"},
                 capture_output=True, timeout=10,
             )

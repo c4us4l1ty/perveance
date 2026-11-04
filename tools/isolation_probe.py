@@ -18,8 +18,8 @@ import tempfile
 from typing import Any
 
 CHECKS = (
-    "workspace_read_write", "host_secret_hidden", "host_write_blocked",
-    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "workspace_host_socket_unreachable", "environment_cleared",
+    "workspace_read_write", "staged_input_readable", "host_secret_hidden", "host_write_blocked",
+    "symlink_escape_blocked", "proc_root_escape_blocked", "host_loopback_blocked", "host_socket_path_hidden", "workspace_host_socket_unreachable", "environment_cleared",
 )
 LIMITATIONS = [
     "Fixed test code only; a pass is not a sandbox certification or an execution authorization.",
@@ -38,7 +38,12 @@ import json, os, pathlib, socket, sys
 secret = pathlib.Path(sys.argv[1])
 port = int(sys.argv[2])
 work = pathlib.Path(sys.argv[3])
+host_socket = pathlib.Path(sys.argv[4])
 checks = {}
+try:
+    checks['staged_input_readable'] = (work / 'input.fixture').read_bytes() == b'fixed-probe-input'
+except OSError:
+    checks['staged_input_readable'] = False
 p = work / 'scratch.txt'
 try:
     p.write_text('probe-workspace', encoding='utf-8')
@@ -78,6 +83,13 @@ try:
         checks['host_loopback_blocked'] = False
 except OSError:
     checks['host_loopback_blocked'] = True
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(1)
+        client.connect(str(host_socket))
+        checks['host_socket_path_hidden'] = False
+except OSError:
+    checks['host_socket_path_hidden'] = True
 try:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(1)
@@ -122,6 +134,7 @@ def run_fixed_probe(bwrap: str) -> dict[str, Any]:
         # deliberately mounts a live host socket. No input directory is copied.
         for workspace in (clean, unsafe):
             (workspace / "outside-link").symlink_to(secret)
+            (workspace / "input.fixture").write_bytes(b"fixed-probe-input")
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_listener:
             socket_path = unsafe / "host.sock"
             unix_listener.bind(str(socket_path))
@@ -149,7 +162,7 @@ def run_fixed_probe(bwrap: str) -> dict[str, Any]:
                         command.extend(["--ro-bind", path, path])
                 command.extend(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
                                 "--bind", str(workspace), "/work", "--chdir", "/work",
-                                "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port), "/work"])
+                                "/usr/bin/python3", "-I", "-c", WORKER, str(secret), str(port), "/work", str(socket_path)])
                 # Fixed code only; keep output bounded even on failures.
                 import resource
                 def limit_output() -> None:

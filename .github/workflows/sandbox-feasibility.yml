@@ -26,7 +26,7 @@ jobs:
         run: |
           uname -sr
           . /etc/os-release; printf 'OS: %s\n' "$PRETTY_NAME"
-          bwrap --version
+          test "$(command -v bwrap)" = /usr/bin/bwrap
           stat -c 'bwrap mode: %a' /usr/bin/bwrap
           if command -v getcap >/dev/null; then getcap /usr/bin/bwrap; fi
           for path in /proc/sys/kernel/apparmor_restrict_unprivileged_userns /proc/sys/kernel/unprivileged_userns_clone /proc/sys/user/max_user_namespaces; do
@@ -34,6 +34,8 @@ jobs:
           done
           # Do not run a setuid, setgid or file-capability-enabled helper.
           python3 -c 'import os,stat; s=os.stat("/usr/bin/bwrap"); assert not s.st_mode & (stat.S_ISUID|stat.S_ISGID); caps=os.getxattr("/usr/bin/bwrap", "security.capability") if "security.capability" in os.listxattr("/usr/bin/bwrap") else b""; assert not caps'
+          bwrap --version
+          python3 -c 'import os,platform,subprocess; paths=("/proc/sys/kernel/apparmor_restrict_unprivileged_userns","/proc/sys/kernel/unprivileged_userns_clone","/proc/sys/user/max_user_namespaces"); values=[os.path.basename(p)+"="+(open(p).read().strip() if os.path.isfile(p) else "missing") for p in paths]; print("::notice::Runner "+platform.release()+"; "+subprocess.check_output(["/usr/bin/bwrap","--version"],text=True).strip()+"; "+"; ".join(values))'
       - name: Run fixed probe and report observations
         run: |
           if python3 tools/isolation_probe.py > /tmp/perveance-isolation-matrix.json; then code=0; else code=$?; fi
