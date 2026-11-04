@@ -2,6 +2,7 @@
 //! It does not execute AI-generated code or implement a sandbox.
 
 pub mod provider;
+pub mod workspace;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,6 +12,8 @@ use std::path::Path;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DIMENSION: u32 = 256;
+pub const MAX_BRUSH_SIZE: u32 = 16;
+pub const MAX_EXPORT_SCALE: u32 = 8;
 // Must accommodate the worst valid 256×256×32 RGBA project as JSON, including
 // escaped layer names, not merely its much smaller in-memory pixel payload.
 const MAX_PROJECT_BYTES: u64 = 40 * 1024 * 1024;
@@ -36,6 +39,44 @@ pub struct Project {
     pub height: u32,
     /// Bottom to top.
     pub layers: Vec<Layer>,
+}
+
+/// A portable, separate swatch file; it is not embedded in a project.
+pub const PALETTE_VERSION: u32 = 1;
+pub const PALETTE_SLOTS: usize = 16;
+pub const MAX_PALETTE_BYTES: u64 = 8 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Palette {
+    pub version: u32,
+    /// Straight-alpha RGBA bytes in slot order.
+    pub colors: [[u8; 4]; PALETTE_SLOTS],
+}
+
+impl Palette {
+    pub fn new(colors: [[u8; 4]; PALETTE_SLOTS]) -> Self {
+        Self { version: PALETTE_VERSION, colors }
+    }
+
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("open palette: {e}"))?;
+        let mut bytes = Vec::new();
+        BufReader::new(file).take(MAX_PALETTE_BYTES + 1).read_to_end(&mut bytes)
+            .map_err(|e| format!("read palette: {e}"))?;
+        if bytes.len() as u64 > MAX_PALETTE_BYTES { return Err("palette exceeds size limit".into()); }
+        let palette: Self = serde_json::from_slice(&bytes).map_err(|e| format!("parse palette: {e}"))?;
+        if palette.version != PALETTE_VERSION { return Err("unsupported palette version".into()); }
+        Ok(palette)
+    }
+
+    /// Staged no-clobber write; same filesystem limitations as project saves.
+    pub fn save_new(&self, path: &Path) -> Result<(), String> {
+        if self.version != PALETTE_VERSION { return Err("unsupported palette version".into()); }
+        let bytes = serde_json::to_vec(self).map_err(|e| format!("serialize palette: {e}"))?;
+        if bytes.len() as u64 > MAX_PALETTE_BYTES { return Err("palette exceeds size limit".into()); }
+        write_new(path, &bytes)
+    }
 }
 
 /// Undo/redo snapshots for the local editor. Each stack is limited by count and
@@ -150,13 +191,17 @@ pub enum Operation {
     AddLayer,
     DuplicateLayer { layer: usize },
     ClearLayer { layer: usize },
+    ReplaceColor { layer: usize, from: [u8; 4], to: [u8; 4] },
     FlipLayer { layer: usize, axis: FlipAxis },
+    TranslateLayer { layer: usize, dx: i32, dy: i32, clip: bool },
+    ResizeCanvas { width: u32, height: u32, clip: bool },
     SetVisibility { layer: usize, visible: bool },
     RenameLayer { layer: usize, name: String },
     MoveLayer { from: usize, to: usize },
     RemoveLayer { layer: usize },
     Pixel { layer: usize, x: u32, y: u32, color: [u8; 4] },
     Line { layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4] },
+    BrushLine { layer: usize, from: [u32; 2], to: [u32; 2], size: u32, color: [u8; 4] },
     Rectangle { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     RectangleOutline { layer: usize, x: u32, y: u32, width: u32, height: u32, color: [u8; 4] },
     Ellipse { layer: usize, x: u32, y: u32, width: u32, height: u32, filled: bool, color: [u8; 4] },
@@ -233,6 +278,45 @@ impl Project {
         Ok(())
     }
 
+    /// Resize every raster layer, anchored at the top left with no resampling.
+    /// Reject loss of any nonzero RGBA bytes, including hidden/transparent data,
+    /// unless clipping is explicitly enabled. Failure leaves all layers unchanged.
+    pub fn resize_canvas(&mut self, width: u32, height: u32, clip: bool) -> Result<(), String> {
+        self.validate()?;
+        if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+            return Err(format!("dimensions must be between 1 and {MAX_DIMENSION}"));
+        }
+        if (width, height) == (self.width, self.height) { return Ok(()); }
+        let old_width = self.width as usize;
+        let old_height = self.height as usize;
+        let new_width = width as usize;
+        let new_height = height as usize;
+        if !clip {
+            for layer in &self.layers {
+                for y in 0..old_height {
+                    for x in 0..old_width {
+                        if (x >= new_width || y >= new_height) && layer.pixels[y * old_width + x] != [0; 4] {
+                            return Err("resize would clip nonzero pixel data; enable clipping to proceed".into());
+                        }
+                    }
+                }
+            }
+        }
+        for layer in &mut self.layers {
+            let mut pixels = vec![[0; 4]; new_width * new_height];
+            let copy_width = old_width.min(new_width);
+            for y in 0..old_height.min(new_height) {
+                let from = y * old_width;
+                let to = y * new_width;
+                pixels[to..to + copy_width].copy_from_slice(&layer.pixels[from..from + copy_width]);
+            }
+            layer.pixels = pixels;
+        }
+        self.width = width;
+        self.height = height;
+        Ok(())
+    }
+
     pub fn add_layer(&mut self) -> Result<(), String> {
         self.validate()?;
         if self.layers.len() >= 32 { return Err("layer limit reached".into()); }
@@ -269,6 +353,23 @@ impl Project {
         Ok(())
     }
 
+    /// Replace exact straight-alpha RGBA matches throughout one raw layer,
+    /// including hidden layers and RGB bytes in fully transparent pixels.
+    /// Returns the number of pixels actually changed (zero when colors match).
+    pub fn replace_color(&mut self, layer: usize, from: [u8; 4], to: [u8; 4]) -> Result<usize, String> {
+        self.validate()?;
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        if from == to { return Ok(0); }
+        let mut count = 0;
+        for pixel in &mut target.pixels {
+            if *pixel == from {
+                *pixel = to;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     /// Reflect an entire layer in its canvas bounds; preserve exact RGBA bytes.
     pub fn flip_layer(&mut self, layer: usize, axis: FlipAxis) -> Result<(), String> {
         self.validate()?;
@@ -285,6 +386,34 @@ impl Project {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Translate raw layer pixels in canvas coordinates. Vacated pixels become
+    /// transparent black; out-of-bounds nonzero RGBA is rejected unless clipping
+    /// was explicitly authorized. This applies to hidden and transparent pixels too.
+    pub fn translate_layer(&mut self, layer: usize, dx: i32, dy: i32, clip: bool) -> Result<(), String> {
+        self.validate()?;
+        if !(-256..=256).contains(&dx) || !(-256..=256).contains(&dy) {
+            return Err("translation offsets must be between -256 and 256".into());
+        }
+        let target = self.layers.get_mut(layer).ok_or("layer does not exist")?;
+        if dx == 0 && dy == 0 { return Ok(()); }
+        let width = self.width as i32;
+        let height = self.height as i32;
+        let mut result = vec![[0; 4]; target.pixels.len()];
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = target.pixels[(y * width + x) as usize];
+                let (to_x, to_y) = (x + dx, y + dy);
+                if (0..width).contains(&to_x) && (0..height).contains(&to_y) {
+                    result[(to_y * width + to_x) as usize] = pixel;
+                } else if !clip && pixel != [0; 4] {
+                    return Err("translation would clip nonzero pixel data; enable clipping to proceed".into());
+                }
+            }
+        }
+        target.pixels = result;
         Ok(())
     }
 
@@ -390,10 +519,20 @@ impl Project {
 
     /// Draw an inclusive, one-pixel-wide Bresenham line on a single layer.
     pub fn draw_line(&mut self, layer: usize, from: [u32; 2], to: [u32; 2], color: [u8; 4]) -> Result<(), String> {
+        self.brush_line(layer, from, to, 1, color)
+    }
+
+    /// Stamp a square brush at each inclusive Bresenham point. Even sizes are
+    /// biased toward the top left; stamps are clipped at the canvas boundary.
+    /// This replaces raw pixels, rather than blending the brush color.
+    pub fn brush_line(&mut self, layer: usize, from: [u32; 2], to: [u32; 2], size: u32, color: [u8; 4]) -> Result<(), String> {
         self.validate()?;
+        if size == 0 || size > MAX_BRUSH_SIZE { return Err(format!("brush size must be between 1 and {MAX_BRUSH_SIZE}")); }
         if layer >= self.layers.len() || from[0] >= self.width || from[1] >= self.height || to[0] >= self.width || to[1] >= self.height {
             return Err("line endpoint or layer is outside the project".into());
         }
+        let (width, height) = (self.width as i32, self.height as i32);
+        let pixels = &mut self.layers[layer].pixels;
         let (mut x, mut y) = (from[0] as i32, from[1] as i32);
         let (end_x, end_y) = (to[0] as i32, to[1] as i32);
         let dx = (end_x - x).abs();
@@ -402,7 +541,15 @@ impl Project {
         let sy = if y < end_y { 1 } else { -1 };
         let mut error = dx + dy;
         loop {
-            self.layers[layer].pixels[(y as u32 * self.width + x as u32) as usize] = color;
+            let left = x - (size as i32 / 2);
+            let top = y - (size as i32 / 2);
+            let right = (left + size as i32).min(width);
+            let bottom = (top + size as i32).min(height);
+            for row in top.max(0)..bottom {
+                let start = (row * width + left.max(0)) as usize;
+                let end = (row * width + right) as usize;
+                pixels[start..end].fill(color);
+            }
             if x == end_x && y == end_y { break; }
             let twice = 2 * error;
             if twice >= dy { error += dy; x += sx; }
@@ -449,7 +596,10 @@ impl Project {
                 Operation::AddLayer => candidate.add_layer(),
                 Operation::DuplicateLayer { layer } => candidate.duplicate_layer(*layer).map(|_| ()),
                 Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
+                Operation::ReplaceColor { layer, from, to } => candidate.replace_color(*layer, *from, *to).map(|_| ()),
                 Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
+                Operation::TranslateLayer { layer, dx, dy, clip } => candidate.translate_layer(*layer, *dx, *dy, *clip),
+                Operation::ResizeCanvas { width, height, clip } => candidate.resize_canvas(*width, *height, *clip),
                 Operation::SetVisibility { layer, visible } => match candidate.layers.get_mut(*layer) {
                     Some(item) => { item.visible = *visible; Ok(()) },
                     None => Err("layer does not exist".into()),
@@ -459,6 +609,7 @@ impl Project {
                 Operation::RemoveLayer { layer } => candidate.remove_layer(*layer),
                 Operation::Pixel { layer, x, y, color } => candidate.set_pixel(*layer, *x, *y, *color),
                 Operation::Line { layer, from, to, color } => candidate.draw_line(*layer, *from, *to, *color),
+                Operation::BrushLine { layer, from, to, size, color } => candidate.brush_line(*layer, *from, *to, *size, *color),
                 Operation::Rectangle { layer, x, y, width, height, color } => candidate.rectangle(*layer, *x, *y, *width, *height, *color),
                 Operation::RectangleOutline { layer, x, y, width, height, color } => candidate.rectangle_outline(*layer, *x, *y, *width, *height, *color),
                 Operation::Ellipse { layer, x, y, width, height, filled, color } => candidate.ellipse(*layer, *x, *y, *width, *height, *filled, *color),
@@ -539,10 +690,31 @@ impl Project {
     }
 
     pub fn export_png_new(&self, path: &Path) -> Result<(), String> {
+        self.export_png_scaled_new(path, 1)
+    }
+
+    /// Create a PNG using integer nearest-neighbor enlargement of the visible
+    /// composite. Scale is bounded; artwork and its editable dimensions are unchanged.
+    pub fn export_png_scaled_new(&self, path: &Path, scale: u32) -> Result<(), String> {
+        if scale == 0 || scale > MAX_EXPORT_SCALE {
+            return Err(format!("PNG export scale must be between 1 and {MAX_EXPORT_SCALE}"));
+        }
         let pixels = self.rgba()?;
+        let (width, height) = (self.width * scale, self.height * scale);
+        let pixels = if scale == 1 { pixels } else {
+            let mut result = Vec::with_capacity((width * height * 4) as usize);
+            for source_row in pixels.chunks_exact(self.width as usize * 4) {
+                let mut row = Vec::with_capacity(width as usize * 4);
+                for pixel in source_row.chunks_exact(4) {
+                    for _ in 0..scale { row.extend_from_slice(pixel); }
+                }
+                for _ in 0..scale { result.extend_from_slice(&row); }
+            }
+            result
+        };
         let mut bytes = Vec::new();
         {
-            let mut encoder = png::Encoder::new(&mut bytes, self.width, self.height);
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().map_err(|e| format!("PNG header: {e}"))?;

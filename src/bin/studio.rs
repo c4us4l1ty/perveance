@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
-use perveance::{EditProposal, FlipAxis, History, Operation, Project};
+use perveance::{EditProposal, FlipAxis, History, Operation, Palette, Project};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,6 +55,28 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
     });
 }
 
+// Session-only swatches: deliberately not part of the v1 project format.
+const DEFAULT_PALETTE: [[u8; 4]; 16] = [
+    [166, 215, 74, 255], [255, 255, 255, 255], [25, 25, 30, 255], [128, 128, 128, 255],
+    [229, 82, 82, 255], [255, 156, 73, 255], [255, 218, 98, 255], [88, 185, 101, 255],
+    [64, 173, 183, 255], [73, 124, 206, 255], [143, 99, 194, 255], [230, 119, 170, 255],
+    [105, 67, 48, 255], [185, 131, 94, 255], [244, 201, 159, 255], [0, 0, 0, 0],
+];
+
+// Preview transparency against a neutral background; the stored color remains straight RGBA.
+fn swatch_preview(color: [u8; 4]) -> Color32 {
+    let a = color[3] as u32;
+    let channel = |v: u8| ((v as u32 * a + 96 * (255 - a) + 127) / 255) as u8;
+    Color32::from_rgb(channel(color[0]), channel(color[1]), channel(color[2]))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CanvasReplacement {
+    New { width: u32, height: u32 },
+    Project(String),
+    Png(String),
+}
+
 struct Studio {
     project: Project,
     // A snapshot of the last successfully saved/opened project (or initial blank canvas).
@@ -64,7 +86,13 @@ struct Studio {
     allow_close: bool,
     layer: usize,
     color: [u8; 4],
+    replace_from: [u8; 4],
+    palette: [[u8; 4]; 16],
+    palette_slot: usize,
+    palette_path: String,
+    allow_translation_clip: bool,
     tool: Tool,
+    brush_size: u32,
     stroke_last: Option<[u32; 2]>,
     stroke_recorded: bool,
     shape_start: Option<[u32; 2]>,
@@ -72,16 +100,22 @@ struct Studio {
     shape_filled: bool,
     path: String,
     png_path: String,
+    export_path: String,
+    export_scale: u32,
     proposal_path: String,
     ai_prompt: String,
     ai_model: String,
     ai_key: String,
+    ai_include_composite: bool,
     ai_pending: Option<std::sync::mpsc::Receiver<Result<EditProposal, String>>>,
     status: String,
     history: History,
-    confirm_open: bool,
+    pending_replacement: Option<CanvasReplacement>,
     new_width: u32,
     new_height: u32,
+    resize_width: u32,
+    resize_height: u32,
+    allow_resize_clip: bool,
     zoom: f32,
     show_grid: bool,
     rename_buffer: String,
@@ -92,9 +126,9 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], tool: Tool::Pencil, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_pending: None,
-            status: "Prototype: save and export create new files only.".into(), history: History::default(), confirm_open: false,
-            new_width: 32, new_height: 32, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
+            color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
+            status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
+            new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
 }
 
@@ -102,25 +136,124 @@ impl Studio {
     fn has_unsaved_changes(&self) -> bool {
         self.saved_project.as_ref().map_or(true, |saved| *saved != self.project)
     }
+    // Capture the requested path/dimensions at click time; never keep a blanket
+    // "allow replacement" setting that can outlive the user's confirmation.
+    fn request_replacement(&mut self, replacement: CanvasReplacement) {
+        if self.confirm_close || self.pending_replacement.is_some() { return; }
+        if self.has_unsaved_changes() || self.shape_start.is_some() || self.stroke_last.is_some() {
+            self.pending_replacement = Some(replacement);
+        } else {
+            self.replace_canvas(replacement);
+        }
+    }
+    fn replace_canvas(&mut self, replacement: CanvasReplacement) {
+        let (result, is_saved, message) = match replacement {
+            CanvasReplacement::New { width, height } => (Project::new(width, height), false, "New canvas created."),
+            CanvasReplacement::Project(path) => (Project::load(Path::new(&path)), true, "Project opened."),
+            CanvasReplacement::Png(path) => (Project::from_png(Path::new(&path)), false, "PNG opened as a new canvas."),
+        };
+        match result {
+            Ok(project) => {
+                self.saved_project = if is_saved { Some(project.clone()) } else { None };
+                self.project = project;
+                self.layer = 0;
+                self.history.clear();
+                self.shape_start = None;
+                self.shape_current = None;
+                self.stroke_last = None;
+                self.stroke_recorded = false;
+                self.rename_buffer = self.project.layers[0].name.clone();
+                self.sync_resize_dimensions();
+                self.allow_resize_clip = false;
+                self.allow_translation_clip = false;
+                self.status = message.into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn resolve_replacement(&mut self, discard: bool) {
+        if let Some(replacement) = self.pending_replacement.take() {
+            if discard { self.replace_canvas(replacement); }
+        }
+    }
+    fn replacement_dialog_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.heading("Unsaved project");
+        ui.label("Your current artwork has unsaved changes.");
+        ui.label("Cancel to save as a new project file, or discard and replace it. Replacement cannot be undone.");
+        let mut buttons = (Rect::NOTHING, Rect::NOTHING);
+        ui.horizontal(|ui| {
+            let cancel = ui.button("Cancel");
+            let discard = ui.button("Discard and replace");
+            buttons = (cancel.rect, discard.rect);
+            if cancel.clicked() { self.resolve_replacement(false); }
+            if discard.clicked() { self.resolve_replacement(true); }
+        });
+        buttons
+    }
     fn save_project(&mut self) -> Result<(), String> {
         self.project.save_new(Path::new(&self.path))?;
         self.saved_project = Some(self.project.clone());
         Ok(())
     }
+    fn export_png_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        ui.label("PNG export path");
+        ui.text_edit_singleline(&mut self.export_path);
+        ui.add(egui::DragValue::new(&mut self.export_scale).range(1..=perveance::MAX_EXPORT_SCALE).prefix("Scale ×"));
+        ui.small("Nearest-neighbor; export does not save the project.");
+        let button = ui.button("Export PNG as new file");
+        if button.clicked() {
+            self.status = match self.project.export_png_scaled_new(Path::new(&self.export_path), self.export_scale) {
+                Ok(()) => format!("Exported {} ({} × {}).", self.export_path,
+                    self.project.width * self.export_scale, self.project.height * self.export_scale),
+                Err(error) => error,
+            };
+        }
+        button
+    }
     fn checkpoint(&mut self) {
         self.history.checkpoint_with_selection(&self.project, self.layer);
     }
+    fn sync_resize_dimensions(&mut self) {
+        self.resize_width = self.project.width;
+        self.resize_height = self.project.height;
+    }
     fn undo_edit(&mut self) {
+        let dimensions = (self.project.width, self.project.height);
         if self.history.undo_with_selection(&mut self.project, &mut self.layer) {
+            if dimensions != (self.project.width, self.project.height) { self.sync_resize_dimensions(); }
             self.layer = self.layer.min(self.project.layers.len() - 1);
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
     }
     fn redo_edit(&mut self) {
+        let dimensions = (self.project.width, self.project.height);
         if self.history.redo_with_selection(&mut self.project, &mut self.layer) {
+            if dimensions != (self.project.width, self.project.height) { self.sync_resize_dimensions(); }
             self.layer = self.layer.min(self.project.layers.len() - 1);
             self.rename_buffer = self.project.layers[self.layer].name.clone();
         }
+    }
+    fn apply_stroke_point(&mut self, point: [u32; 2]) {
+        // One snapshot per gesture; failures and no-ops must not discard redo.
+        let before = if self.stroke_recorded { None } else { Some(self.project.clone()) };
+        let result = if self.tool == Tool::Fill {
+            self.project.fill(self.layer, point[0], point[1], self.color)
+        } else {
+            let color = if self.tool == Tool::Eraser { [0; 4] } else { self.color };
+            self.project.brush_line(self.layer, self.stroke_last.unwrap_or(point), point, self.brush_size, color)
+        };
+        match result {
+            Ok(()) => {
+                if let Some(before) = before {
+                    if before != self.project {
+                        self.history.checkpoint_with_selection(&before, self.layer);
+                        self.stroke_recorded = true;
+                    }
+                }
+            }
+            Err(error) => self.status = error,
+        }
+        self.stroke_last = Some(point);
     }
     fn commit_shape(&mut self, start: [u32; 2], end: [u32; 2]) {
         let (x, y, width, height) = shape_box(start, end);
@@ -151,6 +284,84 @@ impl Studio {
             self.status = error;
         }
     }
+    fn resize_canvas(&mut self) {
+        let (width, height, clip) = (self.resize_width, self.resize_height, self.allow_resize_clip);
+        match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.resize_canvas(width, height, clip)) {
+            Ok(changed) => {
+                self.sync_resize_dimensions();
+                self.allow_resize_clip = false;
+                self.status = if changed { "Canvas resized (undoable)." } else { "Canvas size unchanged." }.into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn resize_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.small("Top-left anchored; no scaling. Shrinking can permanently discard pixel data (including hidden layers). Undo is bounded.");
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut self.resize_width).range(1..=256).prefix("W "));
+            ui.add(egui::DragValue::new(&mut self.resize_height).range(1..=256).prefix("H "));
+        });
+        let clip = ui.checkbox(&mut self.allow_resize_clip, "Allow clipping");
+        let apply = ui.button("Resize canvas");
+        if apply.clicked() { self.resize_canvas(); }
+        (clip.rect, apply.rect)
+    }
+    fn nudge_selected(&mut self, dx: i32, dy: i32) {
+        let layer = self.layer;
+        let clip = self.allow_translation_clip;
+        match self.history.apply_with_selection(&mut self.project, layer, |p| p.translate_layer(layer, dx, dy, clip)) {
+            Ok(true) => self.status = "Layer moved (undoable); enabled clipping discards pixels outside the canvas.".into(),
+            Ok(false) => self.status = "Layer move made no changes.".into(),
+            Err(error) => self.status = error,
+        }
+    }
+    fn nudge_ui(&mut self, ui: &mut egui::Ui) -> Vec<Rect> {
+        ui.label("Nudge selected layer by 1 pixel");
+        ui.small("Off-canvas pixel data is lost if clipping is enabled.");
+        ui.checkbox(&mut self.allow_translation_clip, "Allow clipping");
+        let mut rects = Vec::new();
+        ui.horizontal(|ui| {
+            for (label, dx, dy) in [("←", -1, 0), ("↑", 0, -1), ("↓", 0, 1), ("→", 1, 0)] {
+                let response = ui.button(label).on_hover_text("Move the selected layer by one pixel");
+                rects.push(response.rect);
+                if response.clicked() { self.nudge_selected(dx, dy); }
+            }
+        });
+        rects
+    }
+    fn replace_selected_color(&mut self) {
+        let layer = self.layer;
+        let from = self.replace_from;
+        let to = self.color;
+        let mut count = 0usize;
+        match self.history.apply_with_selection(&mut self.project, layer, |p| {
+            count = p.replace_color(layer, from, to)?;
+            Ok(())
+        }) {
+            Ok(true) => self.status = format!("Replaced {count} pixels on selected layer (undoable)."),
+            Ok(false) => self.status = "No pixels changed on selected layer.".into(),
+            Err(error) => self.status = error,
+        }
+    }
+    fn replace_color_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.small("Replace every exact RGBA match on the selected layer, including transparent pixels. Undo is bounded.");
+        ui.label("Match RGBA");
+        for row in 0..2 {
+            ui.horizontal(|ui| {
+                for col in 0..2 {
+                    let i = row * 2 + col;
+                    let label = ["R ", "G ", "B ", "A "][i];
+                    ui.add(egui::DragValue::new(&mut self.replace_from[i]).range(0..=255).prefix(label));
+                }
+            });
+        }
+        let sample = ui.button("Use current color as match");
+        if sample.clicked() { self.replace_from = self.color; }
+        ui.small(format!("Replacement: current drawing color {:?}", self.color));
+        let replace = ui.button("Replace matches (undoable)");
+        if replace.clicked() { self.replace_selected_color(); }
+        (sample.rect, replace.rect)
+    }
     fn clear_selected(&mut self) {
         let layer = self.layer;
         if let Err(error) = self.history.apply_with_selection(&mut self.project, layer, |p| p.clear_layer(layer)) {
@@ -159,9 +370,11 @@ impl Studio {
     }
     fn apply_proposal(&mut self, proposal: &EditProposal) {
         let original_count = self.project.layers.len();
+        let dimensions = (self.project.width, self.project.height);
         match self.history.apply_with_selection(&mut self.project, self.layer, |p| p.apply_proposal(proposal)) {
             Ok(changed) => {
                 if changed { self.layer = selection_after_operations(self.layer, original_count, &proposal.operations); }
+                if dimensions != (self.project.width, self.project.height) { self.sync_resize_dimensions(); }
                 self.layer = self.layer.min(self.project.layers.len() - 1);
                 self.rename_buffer = self.project.layers[self.layer].name.clone();
                 self.status = if changed { "Proposal applied (undoable)." } else { "Proposal made no changes." }.into();
@@ -169,13 +382,24 @@ impl Studio {
             Err(error) => self.status = error,
         }
     }
+    fn prepare_ai_context(&mut self) -> Result<perveance::provider::TaskContext, String> {
+        let context = if self.ai_include_composite {
+            perveance::provider::TaskContext::from_project_with_composite(&self.project)?
+        } else {
+            perveance::provider::TaskContext::from_project(&self.project)?
+        };
+        // Consent is one request only. Validation failure retains the checkbox.
+        self.ai_include_composite = false;
+        Ok(context)
+    }
     fn start_ai(&mut self, ctx: &egui::Context) {
         if self.ai_pending.is_some() { return; }
         if let Err(error) = perveance::provider::validate_request(&self.ai_model, &self.ai_key, &self.ai_prompt) {
             self.status = error;
             return;
         }
-        let task = match perveance::provider::TaskContext::from_project(&self.project) {
+        let sharing_composite = self.ai_include_composite;
+        let task = match self.prepare_ai_context() {
             Ok(task) => task,
             Err(error) => { self.status = error; return; }
         };
@@ -186,7 +410,7 @@ impl Studio {
         let key = std::mem::take(&mut self.ai_key);
         let (send, receive) = std::sync::mpsc::channel();
         self.ai_pending = Some(receive);
-        self.status = "Requesting pixel edits from OpenRouter...".into();
+        self.status = if sharing_composite { "Requesting pixel edits from OpenRouter with visible artwork..." } else { "Requesting pixel edits from OpenRouter without artwork..." }.into();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = perveance::provider::propose_openrouter(&task, &model, &key, &prompt);
@@ -197,7 +421,7 @@ impl Studio {
     fn poll_ai(&mut self, ctx: &egui::Context) {
         if self.ai_pending.is_none() { return; }
         // Do not inject a discrete edit into an active brush/shape gesture or dialog.
-        if self.confirm_close || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
+        if self.confirm_close || self.pending_replacement.is_some() || self.shape_start.is_some() || self.stroke_last.is_some() || ctx.input(|i| i.pointer.any_down()) {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
             return;
         }
@@ -217,15 +441,73 @@ impl Studio {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
+    fn save_palette(&mut self) {
+        match Palette::new(self.palette).save_new(Path::new(&self.palette_path)) {
+            Ok(()) => self.status = "Palette saved as a new file.".into(),
+            Err(error) => self.status = error,
+        }
+    }
+    fn load_palette(&mut self) {
+        match Palette::load(Path::new(&self.palette_path)) {
+            Ok(palette) => {
+                self.palette = palette.colors;
+                self.palette_slot = 0;
+                self.status = "Palette loaded; current drawing color is unchanged.".into();
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn palette_file_ui(&mut self, ui: &mut egui::Ui) -> (Rect, Rect) {
+        ui.label("Palette file path");
+        ui.text_edit_singleline(&mut self.palette_path);
+        let save = ui.button("Save palette as new file");
+        if save.clicked() { self.save_palette(); }
+        let load = ui.button("Load palette (replaces swatches)");
+        if load.clicked() { self.load_palette(); }
+        ui.small("Separate file; load does not change the current drawing color.");
+        (save.rect, load.rect)
+    }
+    // Return controls' rectangles for interaction tests; the palette is editor state,
+    // so choosing/storing a color does not edit the document or create undo entries.
+    fn palette_ui(&mut self, ui: &mut egui::Ui) -> (Vec<Rect>, Rect, Rect) {
+        ui.label("Palette");
+        let mut slots = Vec::with_capacity(self.palette.len());
+        for row in 0..4 {
+            ui.horizontal(|ui| {
+                for col in 0..4 {
+                    let index = row * 4 + col;
+                    let color = self.palette[index];
+                    let preview = swatch_preview(color);
+                    let brightness = 299 * preview.r() as u32 + 587 * preview.g() as u32 + 114 * preview.b() as u32;
+                    let text_color = if brightness > 140_000 { Color32::BLACK } else { Color32::WHITE };
+                    let label = format!("{}{}", if index == self.palette_slot { "•" } else { "" }, index + 1);
+                    let button = egui::Button::new(egui::RichText::new(label).color(text_color))
+                        .fill(preview).min_size(Vec2::new(34.0, 22.0));
+                    let response = ui.add(button).on_hover_text(format!("Slot {}: RGBA {}, {}, {}, {}", index + 1, color[0], color[1], color[2], color[3]));
+                    slots.push(response.rect);
+                    if response.clicked() { self.palette_slot = index; self.color = color; }
+                }
+            });
+        }
+        ui.small(format!("Selected slot: {} · RGBA {:?}", self.palette_slot + 1, self.palette[self.palette_slot]));
+        let store = ui.button("Store current color").on_hover_text("Replace the selected slot with the current drawing color, including alpha");
+        if store.clicked() { self.palette[self.palette_slot] = self.color; }
+        let reset = ui.button("Reset palette").on_hover_text("Restore default swatches; current drawing color is unchanged");
+        if reset.clicked() { self.palette = DEFAULT_PALETTE; self.palette_slot = 0; }
+        egui::CollapsingHeader::new("Palette files").show(ui, |ui| { self.palette_file_ui(ui); });
+        (slots, store.rect, reset.rect)
+    }
     fn ai_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.heading("Prompt to pixels (experimental)");
-        ui.small("Sends your prompt, canvas size and layer count to OpenRouter and your chosen model. Fees may apply; no spend cap. Pixels and layer names are not sent.");
+        ui.small("Sends your prompt, canvas size and layer count to OpenRouter and your chosen model. Fees may apply; no spend cap. Layer names are not sent.");
         ui.label("Model ID");
         ui.text_edit_singleline(&mut self.ai_model);
         ui.label("OpenRouter API key (not saved)");
         ui.add(egui::TextEdit::singleline(&mut self.ai_key).password(true));
         ui.label("Art prompt");
         ui.add(egui::TextEdit::multiline(&mut self.ai_prompt).desired_rows(3));
+        ui.checkbox(&mut self.ai_include_composite, "Send visible artwork for this request");
+        ui.small("Optional: sends visible composite pixels (max 1,024 pixels) to OpenRouter and the model. This may increase costs; hidden layers are excluded. Resets after a request starts.");
         let send = ui.add_enabled(self.ai_pending.is_none(), egui::Button::new("Send to OpenRouter"));
         if send.clicked() { self.start_ai(ui.ctx()); }
         ui.small("Adds and paints new layers only. Request may be charged even if rejected or the app closes. Live provider compatibility is unverified.");
@@ -303,11 +585,12 @@ impl eframe::App for Studio {
             if self.confirm_close || self.has_unsaved_changes() || self.shape_start.is_some() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.confirm_close = true;
+                self.pending_replacement = None;
             }
         }
         self.poll_ai(ctx);
         // Do not intercept shortcuts while a dialog, text field, or brush gesture is active.
-        if !self.confirm_close && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
+        if !self.confirm_close && self.pending_replacement.is_none() && !ctx.wants_keyboard_input() && !ctx.input(|input| input.pointer.any_down()) {
             let redo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
             let redo_alternate = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
             let undo = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -344,22 +627,24 @@ impl eframe::App for Studio {
             if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
                 ui.checkbox(&mut self.shape_filled, "Filled shape");
             }
+            if matches!(self.tool, Tool::Pencil | Tool::Eraser) {
+                ui.add(egui::Slider::new(&mut self.brush_size, 1..=perveance::MAX_BRUSH_SIZE).text("Brush size"));
+                ui.small("Square brush; edge strokes are clipped.");
+            }
             ui.separator();
             ui.label("Color");
             ui.color_edit_button_srgba_unmultiplied(&mut self.color);
+            self.palette_ui(ui);
             ui.add_space(16.0);
             ui.heading("Project");
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(&mut self.new_width).range(1..=256).prefix("W "));
                 ui.add(egui::DragValue::new(&mut self.new_height).range(1..=256).prefix("H "));
             });
-            ui.checkbox(&mut self.confirm_open, "Allow replacing current canvas");
-            if ui.add_enabled(self.confirm_open, egui::Button::new("New canvas")).clicked() {
-                match Project::new(self.new_width, self.new_height) {
-                    Ok(project) => { self.project = project; self.saved_project = None; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.confirm_open = false; self.status = "New canvas created.".into(); }
-                    Err(error) => self.status = error,
-                }
+            if ui.button("New canvas").clicked() {
+                self.request_replacement(CanvasReplacement::New { width: self.new_width, height: self.new_height });
             }
+            egui::CollapsingHeader::new("Resize existing canvas").show(ui, |ui| { self.resize_ui(ui); });
             ui.separator();
             ui.label("File path");
             ui.text_edit_singleline(&mut self.path);
@@ -367,16 +652,9 @@ impl eframe::App for Studio {
                 let result = self.save_project();
                 self.set_status(result, "Project saved.");
             }
-            if ui.button("Export PNG as new file").clicked() {
-                let output = format!("{}.png", self.path);
-                let result = self.project.export_png_new(Path::new(&output));
-                self.set_status(result, &format!("Exported {output}"));
-            }
-            if ui.add_enabled(self.confirm_open, egui::Button::new("Open project")).clicked() {
-                match Project::load(Path::new(&self.path)) {
-                    Ok(project) => { self.saved_project = Some(project.clone()); self.project = project; self.layer = 0; self.history.clear(); self.shape_start = None; self.shape_current = None; self.rename_buffer = self.project.layers[0].name.clone(); self.status = "Project opened.".into(); self.confirm_open = false; }
-                    Err(error) => self.status = error,
-                }
+            self.export_png_ui(ui);
+            if ui.button("Open project").clicked() {
+                self.request_replacement(CanvasReplacement::Project(self.path.clone()));
             }
             ui.separator();
             ui.label("PNG path");
@@ -394,21 +672,8 @@ impl eframe::App for Studio {
                     Err(error) => self.status = error,
                 }
             }
-            if ui.add_enabled(self.confirm_open, egui::Button::new("Open PNG as canvas")).clicked() {
-                match Project::from_png(Path::new(&self.png_path)) {
-                    Ok(project) => {
-                        self.project = project;
-                        self.saved_project = None;
-                        self.layer = 0;
-                        self.history.clear();
-                        self.shape_start = None;
-                        self.shape_current = None;
-                        self.rename_buffer = self.project.layers[0].name.clone();
-                        self.confirm_open = false;
-                        self.status = "PNG opened as a new canvas.".into();
-                    }
-                    Err(error) => self.status = error,
-                }
+            if ui.button("Open PNG as canvas").clicked() {
+                self.request_replacement(CanvasReplacement::Png(self.png_path.clone()));
             }
             ui.small("PNG import uses 8-bit pixels; color profiles are not retained.");
             ui.separator();
@@ -488,6 +753,9 @@ impl eframe::App for Studio {
                 if ui.button("Flip V").on_hover_text("Mirror selected layer vertically across the canvas").clicked() { self.flip_selected(FlipAxis::Vertical); }
             });
             if ui.button("Clear layer").on_hover_text("Clear selected layer pixels (undoable)").clicked() { self.clear_selected(); }
+            ui.separator();
+            self.nudge_ui(ui);
+            egui::CollapsingHeader::new("Replace layer color").show(ui, |ui| { self.replace_color_ui(ui); });
           });
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| { ui.label(&self.status); });
@@ -591,27 +859,7 @@ impl eframe::App for Studio {
                 }
                 if response.clicked() || response.dragged() || response.drag_started() {
                     if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) {
-                        // Delay the checkpoint until the first actual change in this gesture.
-                        // No-op strokes and failed edits must not discard the redo branch.
-                        let before = if self.stroke_recorded { None } else { Some(self.project.clone()) };
-                        let result = if self.tool == Tool::Fill {
-                            self.project.fill(self.layer, point[0], point[1], self.color)
-                        } else {
-                            let color = if self.tool == Tool::Eraser { [0; 4] } else { self.color };
-                            self.project.draw_line(self.layer, self.stroke_last.unwrap_or(point), point, color)
-                        };
-                        match result {
-                            Ok(()) => {
-                                if let Some(before) = before {
-                                    if before != self.project {
-                                        self.history.checkpoint_with_selection(&before, self.layer);
-                                        self.stroke_recorded = true;
-                                    }
-                                }
-                            }
-                            Err(error) => self.status = error,
-                        }
-                        self.stroke_last = Some(point);
+                        self.apply_stroke_point(point);
                     } else {
                         self.stroke_last = None;
                     }
@@ -624,6 +872,10 @@ impl eframe::App for Studio {
               });
             });
         });
+        if self.pending_replacement.is_some() && !self.confirm_close {
+            egui::Modal::new(egui::Id::new("unsaved_replace")).show(ctx, |ui| { self.replacement_dialog_ui(ui); });
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) { self.resolve_replacement(false); }
+        }
         if self.confirm_close {
             let mut keep_editing = false;
             let mut discard = false;
@@ -673,6 +925,47 @@ fn main() -> eframe::Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn adjustable_brush_gesture_is_one_undo_and_eraser_replaces_raw_pixels() {
+        let mut studio = Studio::default();
+        studio.brush_size = 3;
+        studio.tool = Tool::Pencil;
+        studio.apply_stroke_point([3,3]);
+        studio.apply_stroke_point([7,3]);
+        assert!(studio.stroke_recorded);
+        assert_eq!(studio.project.sample_layer(0, 2, 2).unwrap(), studio.color);
+        assert_eq!(studio.project.sample_layer(0, 8, 4).unwrap(), studio.color);
+        assert_eq!(studio.project.sample_layer(0, 9, 4).unwrap(), [0;4]);
+        let drawn = studio.project.clone();
+        studio.stroke_last = None;
+        studio.stroke_recorded = false;
+        studio.undo_edit();
+        assert!(studio.project.layers[0].pixels.iter().all(|pixel| *pixel == [0;4]));
+        assert!(studio.history.can_redo());
+        // A no-op and a rejected brush do not discard redo.
+        studio.color = [0;4];
+        studio.apply_stroke_point([3,3]);
+        assert!(!studio.stroke_recorded);
+        assert!(studio.history.can_redo());
+        studio.stroke_last = None;
+        studio.brush_size = 0;
+        studio.apply_stroke_point([3,3]);
+        assert!(studio.status.contains("brush size"));
+        assert!(studio.history.can_redo());
+        studio.stroke_last = None;
+        studio.brush_size = 3;
+        studio.redo_edit();
+        assert_eq!(studio.project, drawn);
+        studio.tool = Tool::Eraser;
+        studio.apply_stroke_point([3,3]);
+        assert_eq!(studio.project.sample_layer(0, 2, 2).unwrap(), [0;4]);
+        assert_eq!(studio.project.sample_layer(0, 8, 4).unwrap(), [166,215,74,255]);
+        studio.stroke_last = None;
+        studio.stroke_recorded = false;
+        studio.undo_edit();
+        assert_eq!(studio.project, drawn);
+    }
+
+    #[test]
     fn shape_drag_is_reversible_and_uses_inclusive_bounds() {
         assert_eq!(shape_box([4, 5], [2, 3]), (2, 3, 3, 3));
         let mut studio = Studio::default();
@@ -710,6 +1003,112 @@ mod tests {
     }
 
     #[test]
+    fn replacement_confirmation_preserves_work_on_cancel_and_open_failure() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.replacement_dialog_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0,0], [0,0]);
+        let original = studio.project.clone();
+        let ctx = egui::Context::default();
+        studio.request_replacement(CanvasReplacement::New { width: 7, height: 8 });
+        assert!(studio.pending_replacement.is_some());
+        assert_eq!(studio.project, original);
+        let (cancel, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, cancel.center());
+        assert!(studio.pending_replacement.is_none());
+        assert_eq!(studio.project, original);
+        assert!(studio.history.can_undo());
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.json");
+        studio.request_replacement(CanvasReplacement::Project(missing.to_str().unwrap().into()));
+        let (_, discard) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, discard.center());
+        assert!(studio.pending_replacement.is_none());
+        assert_eq!(studio.project, original);
+        assert!(studio.history.can_undo());
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.status.contains("open project"));
+        studio.request_replacement(CanvasReplacement::New { width: 7, height: 8 });
+        let (_, discard) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, discard.center());
+        assert_eq!((studio.project.width, studio.project.height), (7,8));
+        assert!(!studio.history.can_undo());
+        assert!(studio.has_unsaved_changes());
+        assert_eq!((studio.resize_width, studio.resize_height), (7,8));
+    }
+
+    #[test]
+    fn replacement_uses_captured_request_and_correct_saved_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("other.json");
+        let png = dir.path().join("image.png");
+        let other = Project::new(3, 4).unwrap();
+        other.save_new(&path).unwrap();
+        other.export_png_new(&png).unwrap();
+        let mut studio = Studio::default();
+        // An unchanged document can be replaced without a warning.
+        studio.request_replacement(CanvasReplacement::Project(path.to_str().unwrap().into()));
+        assert!(studio.pending_replacement.is_none());
+        assert_eq!(studio.project, other);
+        assert!(!studio.has_unsaved_changes());
+        studio.tool = Tool::Line;
+        studio.commit_shape([0,0], [0,0]);
+        studio.path = path.to_str().unwrap().into();
+        studio.allow_resize_clip = true;
+        studio.allow_translation_clip = true;
+        studio.request_replacement(CanvasReplacement::Png(png.to_str().unwrap().into()));
+        studio.png_path = "changed-after-request.png".into();
+        assert!(studio.pending_replacement.is_some());
+        studio.resolve_replacement(true);
+        assert_eq!((studio.project.width, studio.project.height), (3,4));
+        assert_eq!(studio.project.layers[0].name, "Imported PNG");
+        assert!(studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+        assert!(!studio.allow_resize_clip);
+        assert!(!studio.allow_translation_clip);
+        studio.request_replacement(CanvasReplacement::Project(path.to_str().unwrap().into()));
+        assert!(studio.pending_replacement.is_some()); // An imported canvas remains unsaved.
+        studio.resolve_replacement(true);
+        assert_eq!(studio.project, other);
+        assert!(!studio.has_unsaved_changes());
+        studio.shape_start = Some([0,0]);
+        studio.request_replacement(CanvasReplacement::New { width: 8, height: 8 });
+        assert!(studio.pending_replacement.is_some()); // Do not silently drop an active gesture.
+    }
+
+    #[test]
+    fn provider_result_waits_for_replacement_confirmation() {
+        let mut studio = Studio::default();
+        studio.tool = Tool::Line;
+        studio.commit_shape([0,0], [0,0]);
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![Operation::AddLayer] };
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Ok(proposal)).unwrap();
+        studio.ai_pending = Some(receive);
+        studio.request_replacement(CanvasReplacement::New { width: 8, height: 8 });
+        let ctx = egui::Context::default();
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_some());
+        assert_eq!(studio.project.layers.len(), 1);
+        studio.resolve_replacement(false);
+        studio.poll_ai(&ctx);
+        assert!(studio.ai_pending.is_none());
+        assert_eq!(studio.project.layers.len(), 2);
+    }
+
+    #[test]
     fn agent_proposals_are_one_undoable_edit_and_reject_stale() {
         let mut studio = Studio::default();
         let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: studio.project.revision().unwrap(), operations: vec![
@@ -728,6 +1127,303 @@ mod tests {
         assert!(studio.history.can_redo());
         studio.redo_edit();
         assert_eq!(studio.project.layers[1].pixels[0], [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn session_palette_buttons_select_store_alpha_and_reset_without_editing_art() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Vec<Rect>, Rect, Rect) {
+            let mut controls = (Vec::new(), Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.palette_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let ctx = egui::Context::default();
+        let mut studio = Studio::default();
+        let original = studio.project.clone();
+        let (slots, _, _) = frame(&ctx, &mut studio, vec![]);
+        assert_eq!(slots.len(), 16);
+        click(&ctx, &mut studio, slots[15].center());
+        assert_eq!(studio.palette_slot, 15);
+        assert_eq!(studio.color, [0, 0, 0, 0]);
+        studio.color = [7, 21, 99, 63];
+        let (_, store, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, store.center());
+        assert_eq!(studio.palette[15], [7, 21, 99, 63]);
+        let (slots, _, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, slots[0].center());
+        click(&ctx, &mut studio, slots[15].center());
+        assert_eq!(studio.color, [7, 21, 99, 63]);
+        assert_eq!(studio.project, original);
+        assert!(!studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+        studio.tool = Tool::Line;
+        studio.commit_shape([0, 0], [0, 0]);
+        assert_eq!(studio.project.layers[0].pixels[0], [7, 21, 99, 63]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        let (_, _, reset) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, reset.center());
+        assert_eq!(studio.palette, DEFAULT_PALETTE);
+        assert_eq!(studio.palette_slot, 0);
+        assert_eq!(studio.color, [7, 21, 99, 63]);
+        assert_eq!(swatch_preview([255, 0, 0, 0]), Color32::from_gray(96));
+        assert_eq!(swatch_preview([255, 0, 0, 255]), Color32::from_rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn palette_file_load_save_is_explicit_and_failure_preserves_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("palette.json");
+        let mut studio = Studio::default();
+        let original = studio.project.clone();
+        studio.palette_path = path.to_str().unwrap().into();
+        studio.palette[3] = [2, 4, 8, 32];
+        studio.save_palette();
+        assert!(studio.status.contains("saved"));
+        studio.palette = DEFAULT_PALETTE;
+        studio.palette_slot = 5;
+        studio.color = [99, 88, 77, 66];
+        studio.load_palette();
+        assert_eq!(studio.palette[3], [2, 4, 8, 32]);
+        assert_eq!(studio.palette_slot, 0);
+        assert_eq!(studio.color, [99, 88, 77, 66]);
+        let saved_bytes = std::fs::read(&path).unwrap();
+        studio.palette[3] = [0; 4];
+        studio.save_palette();
+        assert_eq!(std::fs::read(&path).unwrap(), saved_bytes);
+        std::fs::write(&path, b"invalid palette").unwrap();
+        let before = studio.palette;
+        studio.palette_slot = 3;
+        studio.load_palette();
+        assert_eq!(studio.palette, before);
+        assert_eq!(studio.palette_slot, 3);
+        assert!(studio.status.contains("parse palette"));
+        assert_eq!(studio.color, [99, 88, 77, 66]);
+        assert_eq!(studio.project, original);
+        assert!(!studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+    }
+
+    #[test]
+    fn palette_file_buttons_save_and_load() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.palette_file_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("palette.json");
+        studio.palette_path = path.to_str().unwrap().into();
+        studio.palette[3] = [3, 5, 9, 18];
+        let ctx = egui::Context::default();
+        let (save, load) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, save.center());
+        assert!(path.exists());
+        studio.palette[3] = [0; 4];
+        click(&ctx, &mut studio, load.center());
+        assert_eq!(studio.palette[3], [3, 5, 9, 18]);
+    }
+
+    #[test]
+    fn layer_nudge_controls_reject_clipping_and_undo_after_opt_in() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Vec<Rect> {
+            let mut controls = Vec::new();
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.nudge_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.set_pixel(0, 0, 0, [1, 2, 3, 0]).unwrap();
+        let original = studio.project.clone();
+        let ctx = egui::Context::default();
+        let rects = frame(&ctx, &mut studio, vec![]);
+        assert_eq!(rects.len(), 4);
+        click(&ctx, &mut studio, rects[0].center());
+        assert_eq!(studio.project, original);
+        assert!(studio.status.contains("clip"));
+        assert!(!studio.history.can_undo());
+        click(&ctx, &mut studio, rects[3].center());
+        assert_eq!(studio.project.sample_layer(0, 1, 0).unwrap(), [1, 2, 3, 0]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        studio.allow_translation_clip = true;
+        click(&ctx, &mut studio, rects[0].center());
+        assert_eq!(studio.project.sample_layer(0, 0, 0).unwrap(), [0; 4]);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+    }
+
+    #[test]
+    fn resize_controls_require_opt_in_and_restore_dimensions_on_undo() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.resize_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.add_layer().unwrap();
+        studio.project.layers[1].visible = false;
+        studio.project.set_pixel(1, 31, 31, [8, 9, 10, 0]).unwrap();
+        studio.layer = 1;
+        let original = studio.project.clone();
+        studio.resize_width = 16;
+        studio.resize_height = 16;
+        let ctx = egui::Context::default();
+        let (checkbox, button) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, button.center());
+        assert_eq!(studio.project, original);
+        assert!(studio.status.contains("clip"));
+        assert!(!studio.history.can_undo());
+        click(&ctx, &mut studio, checkbox.center());
+        assert!(studio.allow_resize_clip);
+        click(&ctx, &mut studio, button.center());
+        assert_eq!((studio.project.width, studio.project.height), (16,16));
+        assert!(!studio.allow_resize_clip);
+        assert_eq!(studio.layer, 1);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        assert_eq!((studio.resize_width, studio.resize_height), (32,32));
+        assert_eq!(studio.layer, 1);
+        studio.redo_edit();
+        assert_eq!((studio.project.width, studio.project.height), (16,16));
+        assert_eq!((studio.resize_width, studio.resize_height), (16,16));
+        assert_eq!(studio.layer, 1);
+    }
+
+    #[test]
+    fn proposal_resize_refreshes_gui_dimensions_and_can_be_undone() {
+        let mut studio = Studio::default();
+        let revision = studio.project.revision().unwrap();
+        let proposal = EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision,
+            operations: vec![Operation::ResizeCanvas { width: 40, height: 25, clip: false }] };
+        studio.apply_proposal(&proposal);
+        assert_eq!((studio.project.width, studio.project.height), (40,25));
+        assert_eq!((studio.resize_width, studio.resize_height), (40,25));
+        studio.apply_proposal(&proposal);
+        assert!(studio.status.contains("stale"));
+        studio.undo_edit();
+        assert_eq!((studio.project.width, studio.project.height), (32,32));
+        assert_eq!((studio.resize_width, studio.resize_height), (32,32));
+    }
+
+    #[test]
+    fn scaled_export_control_writes_png_without_marking_project_saved() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> Rect {
+            let mut rect = Rect::NOTHING;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { rect = studio.export_png_ui(ui).rect; });
+            });
+            rect
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.set_pixel(0, 1, 1, [33, 44, 55, 255]).unwrap();
+        let original = studio.project.clone();
+        assert!(studio.has_unsaved_changes());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scaled.png");
+        studio.export_path = path.to_str().unwrap().to_owned();
+        studio.export_scale = 2;
+        let ctx = egui::Context::default();
+        let button = frame(&ctx, &mut studio, vec![]).center();
+        click(&ctx, &mut studio, button);
+        let before = std::fs::read(&path).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(&before)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!((info.width, info.height), (64,64));
+        let offset = (2 * 64 + 2) * 4;
+        assert_eq!(&pixels[offset..offset + 4], &[33,44,55,255]);
+        assert_eq!(studio.project, original);
+        assert!(studio.has_unsaved_changes());
+        assert!(!studio.history.can_undo());
+        click(&ctx, &mut studio, button);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(studio.has_unsaved_changes());
+        assert!(studio.status.contains("create output"));
+    }
+
+    #[test]
+    fn layer_recolor_controls_use_exact_values_and_preserve_redo_for_noops() {
+        fn frame(ctx: &egui::Context, studio: &mut Studio, events: Vec<egui::Event>) -> (Rect, Rect) {
+            let mut controls = (Rect::NOTHING, Rect::NOTHING);
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| { controls = studio.replace_color_ui(ui); });
+            });
+            controls
+        }
+        fn click(ctx: &egui::Context, studio: &mut Studio, pos: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            frame(ctx, studio, vec![egui::Event::PointerMoved(pos), button(true)]);
+            frame(ctx, studio, vec![button(false)]);
+        }
+        let mut studio = Studio::default();
+        studio.project.add_layer().unwrap();
+        studio.layer = 1;
+        studio.project.layers[1].visible = false;
+        studio.project.set_pixel(1, 0, 0, [9,8,7,0]).unwrap();
+        studio.project.set_pixel(1, 1, 0, [9,8,7,0]).unwrap();
+        let original = studio.project.clone();
+        studio.color = [9,8,7,0];
+        let ctx = egui::Context::default();
+        let (match_button, _) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, match_button.center());
+        assert_eq!(studio.replace_from, [9,8,7,0]);
+        studio.color = [30,60,90,128];
+        let (_, replace_button) = frame(&ctx, &mut studio, vec![]);
+        click(&ctx, &mut studio, replace_button.center());
+        assert_eq!(studio.project.sample_layer(1, 0, 0).unwrap(), [30,60,90,128]);
+        assert!(studio.status.contains("2 pixels"));
+        assert!(!studio.project.layers[1].visible);
+        let changed = studio.project.clone();
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
+        assert_eq!(studio.layer, 1);
+        assert!(studio.history.can_redo());
+        studio.color = studio.replace_from;
+        click(&ctx, &mut studio, replace_button.center());
+        assert!(studio.history.can_redo());
+        studio.redo_edit();
+        assert_eq!(studio.project, changed);
+        studio.undo_edit();
+        assert_eq!(studio.project, original);
     }
 
     #[test]
@@ -762,6 +1458,26 @@ mod tests {
         assert!(studio.status.contains("stale"));
         studio.undo_edit();
         assert_eq!(studio.project.layers[0].pixels[33], [0; 4]);
+    }
+
+    #[test]
+    fn visible_artwork_sharing_is_one_request_and_fails_before_network_when_too_large() {
+        let mut studio = Studio::default();
+        assert!(!studio.ai_include_composite);
+        studio.ai_include_composite = true;
+        assert!(studio.prepare_ai_context().is_ok());
+        assert!(!studio.ai_include_composite);
+        studio.project = Project::new(33, 32).unwrap();
+        studio.ai_include_composite = true;
+        studio.ai_model = "test/model".into();
+        studio.ai_key = "fake-secret".into();
+        studio.ai_prompt = "draw art".into();
+        studio.start_ai(&egui::Context::default());
+        assert!(studio.ai_pending.is_none());
+        assert!(studio.status.contains("1024"));
+        assert!(!studio.status.contains("fake-secret"));
+        assert!(studio.ai_include_composite);
+        assert_eq!(studio.ai_key, "fake-secret");
     }
 
     #[test]

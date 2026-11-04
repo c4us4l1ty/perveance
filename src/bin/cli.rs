@@ -1,6 +1,6 @@
-use perveance::{EditProposal, Operation, Project};
+use perveance::{provider, EditProposal, Operation, Palette, Project};
 use serde_json::json;
-use std::{env, fs::File, io::Read, path::Path, process};
+use std::{env, fs::{self, File}, io::{self, IsTerminal, Read}, path::Path, process};
 
 fn number(s: &str) -> Result<u32, String> { s.parse().map_err(|_| format!("invalid number: {s}")) }
 fn byte(s: &str) -> Result<u8, String> { s.parse().map_err(|_| format!("invalid color channel: {s}")) }
@@ -35,13 +35,64 @@ fn read_region(project: &Project, x: u32, y: u32, width: u32, height: u32, layer
         "layer": layer, "pixels": rows}))
 }
 
+// Reads one key from a pipe or file, not a visible terminal, command argument or env var.
+// Accept an optional single LF/CRLF; no other whitespace is stripped.
+fn read_key<R: Read>(reader: R) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    reader.take((provider::MAX_API_KEY_BYTES + 3) as u64).read_to_end(&mut bytes)
+        .map_err(|_| "could not read API key from stdin")?;
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+        if bytes.ends_with(b"\r") { bytes.pop(); }
+    }
+    if bytes.len() > provider::MAX_API_KEY_BYTES { return Err("invalid API key format".into()); }
+    String::from_utf8(bytes).map_err(|_| "invalid API key format".into())
+}
+
+fn read_prompt(path: &Path) -> Result<String, String> {
+    let file = File::open(path).map_err(|e| format!("open prompt: {e}"))?;
+    let mut bytes = Vec::new();
+    file.take((provider::MAX_PROMPT_BYTES + 1) as u64).read_to_end(&mut bytes)
+        .map_err(|e| format!("read prompt: {e}"))?;
+    if bytes.len() > provider::MAX_PROMPT_BYTES { return Err("prompt exceeds size limit".into()); }
+    String::from_utf8(bytes).map_err(|_| "prompt must be valid UTF-8".into())
+}
+
+fn prompt_to_project<F>(input: &Path, output: &Path, model: &str, prompt: &str, key: &str, include_composite: bool, request: F) -> Result<serde_json::Value, String>
+where F: FnOnce(&provider::TaskContext, &str, &str, &str) -> Result<EditProposal, String> {
+    provider::validate_request(model, key, prompt)?;
+    // A preflight avoids an obvious charge on an occupied path. This is NOT a
+    // reservation: a race or write failure may still occur after a paid request.
+    match fs::symlink_metadata(output) {
+        Ok(_) => return Err("output already exists".into()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {},
+        Err(e) => return Err(format!("check output: {e}")),
+    }
+    let mut project = Project::load(input)?;
+    let base_revision = project.revision()?;
+    let context = if include_composite { provider::TaskContext::from_project_with_composite(&project)? } else { provider::TaskContext::from_project(&project)? };
+    let proposal = request(&context, model, key, prompt)?;
+    provider::apply_generated(&mut project, &proposal)?;
+    let revision = project.revision()?;
+    project.save_new(output)?;
+    Ok(json!({"ok": true, "output": output.to_string_lossy(), "applied": proposal.operations.len(), "base_revision": base_revision, "revision": revision, "shared_composite": include_composite}))
+}
+
+fn prompt_openrouter(input: &str, output: &str, model: &str, prompt_path: &str, include_composite: bool) -> Result<serde_json::Value, String> {
+    let prompt = read_prompt(Path::new(prompt_path))?;
+    let stdin = io::stdin();
+    if stdin.is_terminal() { return Err("API key must come from a pipe or redirected stdin, not a terminal".into()); }
+    let key = read_key(stdin.lock())?;
+    prompt_to_project(Path::new(input), Path::new(output), model, &prompt, &key, include_composite, provider::propose_openrouter)
+}
+
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "sample", "read-region", "paint", "apply", "apply-proposal", "import-png", "export-png"],
-            "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "flip_layer", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "rectangle", "rectangle_outline", "ellipse", "fill"],
-            "limits": {"canvas_dimension": 256, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
+            "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
+            "limits": {"canvas_dimension": 256, "png_export_scale": perveance::MAX_EXPORT_SCALE, "brush_size": perveance::MAX_BRUSH_SIZE, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
                 "rename_layer": {"op": "rename_layer", "layer": 0, "name": "Ink"},
                 "move_layer": {"op": "move_layer", "from": 0, "to": 1},
@@ -50,19 +101,26 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "add_layer": {"op": "add_layer"},
                 "duplicate_layer": {"op": "duplicate_layer", "layer": 0},
                 "clear_layer": {"op": "clear_layer", "layer": 0},
+                "replace_color": {"op": "replace_color", "layer": 0, "from": [0, 0, 0, 0], "to": [255, 0, 0, 255]},
                 "flip_layer": {"op": "flip_layer", "layer": 0, "axis": "horizontal"},
+                "translate_layer": {"op": "translate_layer", "layer": 0, "dx": 1, "dy": 0, "clip": false},
+                "resize_canvas": {"op": "resize_canvas", "width": 32, "height": 32, "clip": false},
                 "pixel": {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]},
                 "line": {"op": "line", "layer": 0, "from": [0, 0], "to": [1, 1], "color": [255, 0, 0, 255]},
+                "brush_line": {"op": "brush_line", "layer": 0, "from": [0, 0], "to": [1, 1], "size": 3, "color": [255, 0, 0, 255]},
                 "rectangle": {"op": "rectangle", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "color": [255, 0, 0, 255]},
                 "rectangle_outline": {"op": "rectangle_outline", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "color": [255, 0, 0, 255]},
                 "ellipse": {"op": "ellipse", "layer": 0, "x": 0, "y": 0, "width": 1, "height": 1, "filled": true, "color": [255, 0, 0, 255]},
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
+            "experimental_prompt_openrouter": {"key_input": "stdin only; pipe or redirected input, not a terminal", "prompt_input": "UTF-8 file", "max_prompt_bytes": provider::MAX_PROMPT_BYTES, "visible_composite_opt_in": "--include-composite", "max_composite_pixels": provider::MAX_COMPOSITE_CONTEXT_PIXELS, "model_compatibility": "unverified", "network": "fixed OpenRouter HTTPS endpoint", "cost": "may incur charges; no spend cap", "execution": "data-only typed edits on new layers; no generated code"},
+            "project_staging": {"operation": "verify-project-staging", "platform": "linux", "contents": "one validated project snapshot", "persistent": false, "autonomous_execution": false, "security_boundary": false},
+            "palette_format": {"version": perveance::PALETTE_VERSION, "slots": perveance::PALETTE_SLOTS, "max_bytes": perveance::MAX_PALETTE_BYTES, "color": "straight-alpha RGBA bytes"},
             "proposal_version": perveance::PROPOSAL_VERSION,
             "proposal_example": {"version": 1, "base_revision": "<revision from inspect>", "operations": [{"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}]},
             "proposal_semantics": "Data-only typed edits bound to a project snapshot fingerprint; input is loaded once and output is create-new. This does not lock files or detect unsaved edits in another process.",
-            "batch_semantics": "Layer indices are bottom-to-top; duplicates are inserted immediately above their source. Flips reflect the full layer across canvas bounds. RGBA channels are straight-alpha bytes. Shape dimensions are positive and must fit the canvas; ellipse outlines use four-connected edges. Operations apply in order to a clone; on failure no output is created.",
-            "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "no AI in CLI"]})),
+            "batch_semantics": "Layer indices are bottom-to-top; duplicates are inserted immediately above their source. Color replacement matches exact raw RGBA across the selected layer, including hidden/transparent data. Flips reflect the full layer across canvas bounds. Translations shift raw pixels; canvas resize is top-left anchored without resampling. Both require explicit clip=true to discard nonzero RGBA outside the canvas. Brush strokes replace raw pixels, use square stamps clipped to canvas, and bias even sizes toward the top left. RGBA channels are straight-alpha bytes. Shape dimensions are positive and must fit the canvas; ellipse outlines use four-connected edges. Operations apply in order to a clone; on failure no output is created.",
+            "limitations": ["create-new outputs only", "PNG import requires static images and converts to 8-bit RGBA without color management", "no vector support", "experimental OpenRouter integration is unverified against a live provider"]})),
         [command, width, height, output] if command == "new" => {
             let project = Project::new(number(width)?, number(height)?)?;
             project.save_new(Path::new(output))?;
@@ -78,6 +136,18 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.import_png_layer(Path::new(png_path))?;
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "layer": project.layers.len() - 1}))
+        }
+        [command, input, parent] if command == "verify-project-staging" => {
+            let project = Project::load(Path::new(input))?;
+            let staged = perveance::workspace::stage_project(&project, Path::new(parent))?;
+            let revision = staged.revision().to_owned();
+            staged.close()?;
+            Ok(json!({"ok": true, "revision": revision, "staged_files": 1, "persistent": false,
+                "autonomous_execution": false, "security_boundary": false}))
+        }
+        [command, input] if command == "inspect-palette" => {
+            let palette = Palette::load(Path::new(input))?;
+            Ok(json!({"ok": true, "version": palette.version, "colors": palette.colors}))
         }
         [command, input] if command == "inspect" => {
             let project = Project::load(Path::new(input))?;
@@ -105,6 +175,12 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             let project = Project::load(Path::new(input))?;
             let index: usize = layer.parse().map_err(|_| "invalid layer index".to_string())?;
             read_region(&project, number(x)?, number(y)?, number(width)?, number(height)?, Some(index))
+        }
+        [command, input, output, model, prompt_path] if command == "prompt-openrouter" => {
+            prompt_openrouter(input, output, model, prompt_path, false)
+        }
+        [command, input, output, model, prompt_path, flag] if command == "prompt-openrouter" && flag == "--include-composite" => {
+            prompt_openrouter(input, output, model, prompt_path, true)
         }
         [command, input, output, layer, x, y, r, g, b, a] if command == "paint" => {
             let mut project = Project::load(Path::new(input))?;
@@ -134,12 +210,18 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "applied": proposal.operations.len(), "base_revision": base_revision, "revision": revision}))
         }
+        [command, input, output, scale] if command == "export-png-scaled" => {
+            let project = Project::load(Path::new(input))?;
+            let scale = number(scale)?;
+            project.export_png_scaled_new(Path::new(output), scale)?;
+            Ok(json!({"ok": true, "output": output, "width": project.width * scale, "height": project.height * scale, "scale": scale}))
+        }
         [command, input, output] if command == "export-png" => {
             let project = Project::load(Path::new(input))?;
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 
@@ -148,5 +230,108 @@ fn main() {
     match run(&args) {
         Ok(value) => println!("{value}"),
         Err(error) => { eprintln!("{}", json!({"ok": false, "error": error})); process::exit(1); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn secret_input_is_bounded_and_never_in_errors() {
+        assert_eq!(read_key(&b"test-key\n"[..]).unwrap(), "test-key");
+        assert_eq!(read_key(&b"test-key\r\n"[..]).unwrap(), "test-key");
+        assert_eq!(read_key(&b"test-key"[..]).unwrap(), "test-key");
+        assert_eq!(read_key(vec![b'x'; provider::MAX_API_KEY_BYTES].as_slice()).unwrap().len(), provider::MAX_API_KEY_BYTES);
+        assert!(read_key(vec![b'x'; provider::MAX_API_KEY_BYTES + 1].as_slice()).is_err());
+        assert!(read_key(&[0xff][..]).is_err());
+        let key = read_key(&b"secret\nextra\n"[..]).unwrap();
+        let error = provider::validate_request("test/model", &key, "draw").unwrap_err();
+        assert!(!error.contains("secret"));
+    }
+
+    #[test]
+    fn opt_in_context_is_bounded_before_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.json");
+        let output = dir.path().join("output.json");
+        let p = Project::new(33, 32).unwrap();
+        p.save_new(&input).unwrap();
+        let called = Cell::new(false);
+        let result = prompt_to_project(&input, &output, "test/model", "draw", "fake-key", true, |_, _, _, _| {
+            called.set(true); unreachable!()
+        });
+        assert!(result.unwrap_err().contains("1024"));
+        assert!(!called.get());
+        assert!(!output.exists());
+        let revision = p.revision().unwrap();
+        let result = prompt_to_project(&input, &output, "test/model", "draw", "fake-key", false, |_, _, _, _| {
+            Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision, operations: vec![Operation::AddLayer] })
+        }).unwrap();
+        assert_eq!(result["shared_composite"], false);
+    }
+
+    #[test]
+    fn opt_in_context_flag_is_reported_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.json");
+        let output = dir.path().join("output.json");
+        let p = Project::new(2, 2).unwrap();
+        p.save_new(&input).unwrap();
+        let revision = p.revision().unwrap();
+        let result = prompt_to_project(&input, &output, "test/model", "draw", "fake-key", true, |_, _, _, _| {
+            Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision, operations: vec![Operation::AddLayer] })
+        }).unwrap();
+        assert_eq!(result["shared_composite"], true);
+    }
+
+    #[test]
+    fn prompt_pipeline_applies_only_new_layers_and_preserves_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.json");
+        let output = dir.path().join("output.json");
+        let rejected = dir.path().join("rejected.json");
+        let mut p = Project::new(2, 2).unwrap();
+        p.set_pixel(0, 0, 0, [12, 34, 56, 255]).unwrap();
+        p.save_new(&input).unwrap();
+        let original = std::fs::read(&input).unwrap();
+        let revision = p.revision().unwrap();
+        let value = prompt_to_project(&input, &output, "test/model", "draw a star", "fake-key", false, |_, model, key, prompt| {
+            assert_eq!((model, key, prompt), ("test/model", "fake-key", "draw a star"));
+            Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision.clone(), operations: vec![
+                Operation::AddLayer,
+                Operation::Pixel { layer: 1, x: 1, y: 1, color: [1, 2, 3, 255] },
+            ] })
+        }).unwrap();
+        assert_eq!(value["applied"], 2);
+        assert!(!value.to_string().contains("fake-key"));
+        assert!(!value.to_string().contains("draw a star"));
+        assert_eq!(std::fs::read(&input).unwrap(), original);
+        let result = Project::load(&output).unwrap();
+        assert_eq!(result.layers[0], p.layers[0]);
+        assert_eq!(result.sample_layer(1, 1, 1).unwrap(), [1, 2, 3, 255]);
+        let called = Cell::new(false);
+        assert!(prompt_to_project(&input, &output, "test/model", "draw", "fake-key", false, |_, _, _, _| {
+            called.set(true); unreachable!()
+        }).is_err());
+        assert!(!called.get());
+        for ops in [
+            vec![Operation::Pixel { layer: 0, x: 0, y: 0, color: [0; 4] }],
+            vec![Operation::AddLayer, Operation::ResizeCanvas { width: 1, height: 1, clip: true }],
+            vec![Operation::AddLayer, Operation::Pixel { layer: 1, x: 99, y: 0, color: [1; 4] }],
+        ] {
+            let failure = prompt_to_project(&input, &rejected, "test/model", "draw", "fake-key", false, |_, _, _, _| {
+                Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: revision.clone(), operations: ops })
+            });
+            assert!(failure.is_err());
+            assert!(!rejected.exists());
+        }
+        let stale = prompt_to_project(&input, &rejected, "test/model", "draw", "fake-key", false, |_, _, _, _| {
+            Ok(EditProposal { version: perveance::PROPOSAL_VERSION, base_revision: format!("sha256-json-v1:{}", "0".repeat(64)), operations: vec![Operation::AddLayer] })
+        });
+        assert!(stale.is_err());
+        assert!(!rejected.exists());
+        assert_eq!(std::fs::read(&input).unwrap(), original);
     }
 }

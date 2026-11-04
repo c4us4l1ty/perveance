@@ -367,3 +367,280 @@ fn read_region_exposes_revision_bound_rows_and_validates_bounds() {
     }
     assert_eq!(fs::read(edited).unwrap(), before);
 }
+
+#[test]
+fn inspect_palette_reports_colors_and_rejects_invalid_files() {
+    let dir = TempDir::new();
+    let path = dir.0.join("palette.json");
+    let mut colors = [[0; 4]; perveance::PALETTE_SLOTS];
+    colors[3] = [7, 8, 9, 12];
+    perveance::Palette::new(colors).save_new(&path).unwrap();
+    let output = cli(&["inspect-palette", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["version"], 1);
+    assert_eq!(value["colors"][3], serde_json::json!([7,8,9,12]));
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "inspect-palette"));
+    fs::write(&path, b"{}").unwrap();
+    let failed = cli(&["inspect-palette", path.to_str().unwrap()]);
+    assert!(!failed.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stderr).unwrap();
+    assert_eq!(error["ok"], false);
+}
+
+#[test]
+fn translation_is_discoverable_and_proposals_require_explicit_clipping() {
+    let dir = TempDir::new();
+    let input = dir.0.join("input.json");
+    let moved = dir.0.join("moved.json");
+    let rejected = dir.0.join("rejected.json");
+    let proposal = dir.0.join("proposal.json");
+    let mut project = perveance::Project::new(3, 2).unwrap();
+    project.set_pixel(0, 0, 0, [1, 2, 3, 0]).unwrap();
+    project.set_pixel(0, 1, 0, [4, 5, 6, 255]).unwrap();
+    project.save_new(&input).unwrap();
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "translate_layer"));
+    let revision = project.revision().unwrap();
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version": 1, "base_revision": revision,
+        "operations": [{"op":"translate_layer", "layer":0, "dx":1, "dy":1, "clip":false}]})).unwrap()).unwrap();
+    let args = ["apply-proposal", input.to_str().unwrap(), moved.to_str().unwrap(), proposal.to_str().unwrap()];
+    let result = cli(&args);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let result = perveance::Project::load(&moved).unwrap();
+    assert_eq!(result.sample_layer(0, 1, 1).unwrap(), [1, 2, 3, 0]);
+    assert_eq!(result.sample_layer(0, 2, 1).unwrap(), [4, 5, 6, 255]);
+    assert_eq!(perveance::Project::load(&input).unwrap(), project);
+    let revision = result.revision().unwrap();
+    for operation in [
+        serde_json::json!({"op":"translate_layer", "layer":0, "dx":1, "dy":0, "clip":false}),
+        serde_json::json!({"op":"translate_layer", "layer":0, "dx":1, "dy":0}),
+        serde_json::json!({"op":"translate_layer", "layer":0, "dx":1, "dy":0, "clip":true, "extra": 1}),
+    ] {
+        fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version": 1, "base_revision": revision, "operations": [operation]})).unwrap()).unwrap();
+        let attempt = cli(&["apply-proposal", moved.to_str().unwrap(), rejected.to_str().unwrap(), proposal.to_str().unwrap()]);
+        assert!(!attempt.status.success());
+        assert!(!rejected.exists());
+    }
+    assert_eq!(perveance::Project::load(moved.as_path()).unwrap(), result);
+}
+
+#[test]
+fn resize_proposal_and_export_preserve_layers_and_refuse_unapproved_crop() {
+    let dir = TempDir::new();
+    let input = dir.0.join("input.json");
+    let resized = dir.0.join("resized.json");
+    let invalid = dir.0.join("invalid.json");
+    let proposal = dir.0.join("proposal.json");
+    let png = dir.0.join("resized.png");
+    let mut project = perveance::Project::new(2, 2).unwrap();
+    project.set_pixel(0, 1, 1, [33, 44, 55, 255]).unwrap();
+    project.add_layer().unwrap();
+    project.layers[1].visible = false;
+    project.set_pixel(1, 0, 1, [7, 8, 9, 0]).unwrap();
+    project.save_new(&input).unwrap();
+    let revision = project.revision().unwrap();
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "resize_canvas"));
+    for op in [serde_json::json!({"op":"resize_canvas","width":1,"height":1,"clip":false}),
+        serde_json::json!({"op":"resize_canvas","width":3,"height":3}),
+        serde_json::json!({"op":"resize_canvas","width":3,"height":3,"clip":true,"extra":0})] {
+        fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[op]})).unwrap()).unwrap();
+        let result = cli(&["apply-proposal", input.to_str().unwrap(), invalid.to_str().unwrap(), proposal.to_str().unwrap()]);
+        assert!(!result.status.success());
+        assert!(!invalid.exists());
+    }
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[
+        {"op":"resize_canvas","width":3,"height":3,"clip":false},
+        {"op":"pixel","layer":0,"x":2,"y":2,"color":[99,88,77,255]}]})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", input.to_str().unwrap(), resized.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let output = perveance::Project::load(&resized).unwrap();
+    assert_eq!((output.width, output.height), (3,3));
+    assert_eq!(output.sample_layer(1, 0, 1).unwrap(), [7,8,9,0]);
+    assert!(!output.layers[1].visible);
+    assert_eq!(perveance::Project::load(&input).unwrap(), project);
+    assert!(cli(&["export-png", resized.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut pixels).unwrap();
+    assert_eq!((info.width, info.height), (3, 3));
+    assert_eq!(&pixels[(2 * 3 + 2) * 4..(2 * 3 + 3) * 4], &[99,88,77,255]);
+}
+
+#[test]
+fn openrouter_cli_preflight_is_opt_in_and_does_not_leak_secret() {
+    use std::io::Write;
+    use std::process::Stdio;
+    fn invoke(args: &[&str], key: &[u8]) -> Output {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(args)
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(key).unwrap();
+        child.wait_with_output().unwrap()
+    }
+    let dir = TempDir::new();
+    let project = dir.0.join("base.json");
+    let output = dir.0.join("out.json");
+    let prompt = dir.0.join("prompt.txt");
+    assert!(cli(&["new", "2", "2", project.to_str().unwrap()]).status.success());
+    fs::write(&prompt, "draw a private test scene").unwrap();
+    let run = |model: &str, secret: &[u8]| invoke(&["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), model, prompt.to_str().unwrap()], secret);
+    let result = run("invalid model", b"private-fake-key\n");
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    let message = String::from_utf8(result.stderr).unwrap();
+    assert!(!message.contains("private-fake-key"));
+    assert!(!message.contains("private test scene"));
+    assert!(!output.exists());
+    let flagged = invoke(&["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), "invalid model", prompt.to_str().unwrap(), "--include-composite"], b"private-fake-key\n");
+    assert!(!flagged.status.success());
+    let flagged_error = String::from_utf8(flagged.stderr).unwrap();
+    assert!(flagged_error.contains("invalid model ID"));
+    assert!(!flagged_error.contains("private-fake-key"));
+    assert!(!output.exists());
+    let unknown = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), "test/model", prompt.to_str().unwrap(), "--typo"]).output().unwrap();
+    assert!(!unknown.status.success());
+    assert!(!output.exists());
+    let invalid = run("invalid model", &[b'x'; 513]);
+    assert!(!invalid.status.success());
+    assert!(!output.exists());
+    fs::write(&prompt, vec![b'x'; perveance::provider::MAX_PROMPT_BYTES + 1]).unwrap();
+    // Prompt is rejected before the key is read or any network request starts.
+    let result = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["prompt-openrouter", project.to_str().unwrap(), output.to_str().unwrap(), "test/model", prompt.to_str().unwrap()]).output().unwrap();
+    assert!(!result.status.success());
+    assert!(!output.exists());
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "prompt-openrouter"));
+    assert_eq!(caps["autonomous_execution"], false);
+    assert_eq!(caps["experimental_prompt_openrouter"]["max_composite_pixels"], 1024);
+    assert_eq!(caps["experimental_prompt_openrouter"]["visible_composite_opt_in"], "--include-composite");
+}
+
+#[test]
+fn cli_scaled_export_reports_dimensions_and_never_overwrites() {
+    let dir = TempDir::new();
+    let project = dir.0.join("base.json");
+    let png = dir.0.join("scaled.png");
+    let invalid = dir.0.join("invalid.png");
+    let p = perveance::Project::new(3, 2).unwrap();
+    p.save_new(&project).unwrap();
+    let result = cli(&["export-png-scaled", project.to_str().unwrap(), png.to_str().unwrap(), "3"]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!((value["width"].as_u64(), value["height"].as_u64(), value["scale"].as_u64()), (Some(9), Some(6), Some(3)));
+    let before = fs::read(&png).unwrap();
+    assert!(!cli(&["export-png-scaled", project.to_str().unwrap(), png.to_str().unwrap(), "2"]).status.success());
+    assert_eq!(fs::read(&png).unwrap(), before);
+    for scale in ["0", "9", "-1", "4294967295", "nan"] {
+        assert!(!cli(&["export-png-scaled", project.to_str().unwrap(), invalid.to_str().unwrap(), scale]).status.success());
+        assert!(!invalid.exists());
+    }
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["limits"]["png_export_scale"], 8);
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "export-png-scaled"));
+    assert_eq!(perveance::Project::load(&project).unwrap(), p);
+}
+
+#[test]
+fn brush_operations_are_discoverable_transactional_and_exportable() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("output.json");
+    let bad = dir.0.join("bad.json");
+    let proposal = dir.0.join("proposal.json");
+    let png = dir.0.join("brush.png");
+    let p = perveance::Project::new(5, 5).unwrap();
+    p.save_new(&initial).unwrap();
+    let revision = p.revision().unwrap();
+    let ops = serde_json::json!([{"op":"brush_line", "layer":0, "from":[0,2], "to":[4,2], "size":3, "color":[10,20,30,255]}]);
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":ops})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", initial.to_str().unwrap(), output.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let edited = perveance::Project::load(&output).unwrap();
+    assert_eq!(edited.sample_layer(0, 4, 1).unwrap(), [10,20,30,255]);
+    assert_eq!(edited.sample_layer(0, 4, 4).unwrap(), [0;4]);
+    assert!(cli(&["export-png", output.to_str().unwrap(), png.to_str().unwrap()]).status.success());
+    let mut reader = png::Decoder::new(fs::File::open(png).unwrap()).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut pixels).unwrap();
+    assert_eq!(&pixels[(5 + 4) * 4..(5 + 5) * 4], &[10,20,30,255]);
+    let bad_op = serde_json::json!({"op":"brush_line", "layer":0, "from":[0,0], "to":[1,1], "size":17, "color":[1,2,3,4]});
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[bad_op]})).unwrap()).unwrap();
+    assert!(!cli(&["apply-proposal", initial.to_str().unwrap(), bad.to_str().unwrap(), proposal.to_str().unwrap()]).status.success());
+    assert!(!bad.exists());
+    assert_eq!(perveance::Project::load(&initial).unwrap(), p);
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["limits"]["brush_size"], 16);
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "brush_line"));
+}
+
+#[test]
+fn color_replacement_proposal_is_discoverable_atomic_and_preserves_source() {
+    let dir = TempDir::new();
+    let initial = dir.0.join("initial.json");
+    let output = dir.0.join("edited.json");
+    let bad = dir.0.join("bad.json");
+    let proposal = dir.0.join("proposal.json");
+    let mut p = perveance::Project::new(2, 2).unwrap();
+    p.set_pixel(0, 0, 0, [1,2,3,0]).unwrap();
+    p.set_pixel(0, 1, 0, [1,2,3,0]).unwrap();
+    p.save_new(&initial).unwrap();
+    let revision = p.revision().unwrap();
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[
+        {"op":"replace_color","layer":0,"from":[1,2,3,0],"to":[20,30,40,128]}]})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", initial.to_str().unwrap(), output.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let edited = perveance::Project::load(&output).unwrap();
+    assert_eq!(edited.sample_layer(0, 0, 0).unwrap(), [20,30,40,128]);
+    assert_eq!(edited.sample_layer(0, 1, 0).unwrap(), [20,30,40,128]);
+    assert_eq!(edited.sample_layer(0, 0, 1).unwrap(), [0;4]);
+    assert_eq!(perveance::Project::load(&initial).unwrap(), p);
+    for operation in [
+        serde_json::json!({"op":"replace_color","layer":99,"from":[0,0,0,0],"to":[1,2,3,4]}),
+        serde_json::json!({"op":"replace_color","layer":0,"from":[1,2,3,256],"to":[1,2,3,4]}),
+        serde_json::json!({"op":"replace_color","layer":0,"from":[0,0,0,0],"to":[1,2,3,4],"extra":true}),
+    ] {
+        fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":revision,"operations":[operation]})).unwrap()).unwrap();
+        assert!(!cli(&["apply-proposal", initial.to_str().unwrap(), bad.to_str().unwrap(), proposal.to_str().unwrap()]).status.success());
+        assert!(!bad.exists());
+    }
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert!(caps["batch_operations"].as_array().unwrap().iter().any(|v| v == "replace_color"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn staging_diagnostic_copies_only_project_and_cleans_up() {
+    let dir = TempDir::new();
+    let parent = dir.0.join("stage-parent");
+    fs::create_dir(&parent).unwrap();
+    let input = dir.0.join("project.json");
+    let mut p = perveance::Project::new(2, 2).unwrap();
+    p.set_pixel(0, 1, 1, [7,8,9,10]).unwrap();
+    p.save_new(&input).unwrap();
+    let sentinel = parent.join("host-secret");
+    fs::write(&sentinel, b"not project data").unwrap();
+    let result = cli(&["verify-project-staging", input.to_str().unwrap(), parent.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["revision"], p.revision().unwrap());
+    assert_eq!(value["staged_files"], 1);
+    assert_eq!(value["persistent"], false);
+    assert_eq!(value["autonomous_execution"], false);
+    assert_eq!(value["security_boundary"], false);
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+    assert_eq!(fs::read(&sentinel).unwrap(), b"not project data");
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    assert_eq!(caps["project_staging"]["security_boundary"], false);
+    assert!(caps["operations"].as_array().unwrap().iter().any(|v| v == "verify-project-staging"));
+    fs::write(&input, b"not json").unwrap();
+    let failed = cli(&["verify-project-staging", input.to_str().unwrap(), parent.to_str().unwrap()]);
+    assert!(!failed.status.success());
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+    fs::remove_file(&input).unwrap();
+    p.save_new(&input).unwrap();
+    let missing = cli(&["verify-project-staging", input.to_str().unwrap(), parent.join("missing").to_str().unwrap()]);
+    assert!(!missing.status.success());
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+}

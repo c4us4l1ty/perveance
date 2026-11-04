@@ -5,7 +5,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 ## Current prototype
 
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse and composite-eyedropper tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
-- An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
+- An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -17,7 +17,7 @@ Use a current stable Rust toolchain and the Linux X11 development dependencies, 
 
 ### Headless batch editing
 
-The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `flip_layer`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
+The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:
 
 ```json
 [
@@ -29,9 +29,59 @@ The prototype CLI can apply a JSON array of up to 1,024 typed operations in one 
 
 Layer duplicates are inserted immediately above their source and retain its visibility and exact pixel bytes. `flip_layer` mirrors a full layer across the canvas (`"axis":"horizontal"` or `"axis":"vertical"`); `clear_layer` resets all its pixels to transparent black. These edits are undoable in the GUI. Layer indices can change after a duplicate or reorder, so later batch operations use the resulting ordering.
 
+### Pencil and eraser brush size
+
+Select Pencil or Eraser and adjust **Brush size** from 1 to 16 pixels. Strokes stamp a solid square along an inclusive pixel line; stamps are clipped at the canvas edges. Even sizes are biased one pixel toward the top and left of the pointer. The pencil replaces raw RGBA rather than blending; the eraser writes transparent black. A continuous stroke is one undoable edit. Brush size is session-only and does not change the separate line or shape tools.
+
+Agents can use `{"op":"brush_line","layer":0,"from":[1,1],"to":[8,8],"size":3,"color":[255,0,0,255]}` in a batch or revision-bound proposal. Size 1 matches `line`. The experimental OpenRouter adapter does not accept `brush_line`.
+
+### Replace a layer color
+
+In the Layers panel, expand **Replace layer color**. Set the exact match RGBA bytes manually, or pick a color and click **Use current color as match**. Then choose the replacement as the current drawing color and click **Replace matches**. The operation affects every matching raw pixel on the selected layer, including hidden layers and fully transparent pixels. It is undoable; undo history is bounded, so keep backups.
+
+For agents, `{"op":"replace_color","layer":0,"from":[1,2,3,255],"to":[4,5,6,128]}` works in batches and revision-bound proposals. Matching is exact in all four straight-alpha bytes, not a tolerance or visible-composite match. It can turn transparent pixels opaque or vice versa. The experimental OpenRouter adapter does not accept this operation.
+
+### Moving a raster layer
+
+Use the four **Nudge selected layer** buttons in the Layers panel to move its pixels one canvas pixel at a time. This is undoable and works on hidden layers as well. By default a move is rejected if it would discard any nonzero RGBA data, including RGB bytes of transparent pixels. To permit loss at the canvas edge, enable **Allow clipping** first. Vacated pixels are transparent black; pixels do not wrap. The clipping checkbox is session-only.
+
+For headless batches or revision-checked proposals, use an explicit signed offset and clipping choice:
+
+```json
+{"op":"translate_layer","layer":0,"dx":1,"dy":-2,"clip":false}
+```
+
+Offsets range from -256 to 256 per axis. `clip` is required: `false` rejects data loss atomically; `true` discards out-of-bounds pixels and can clear an entire layer. Back up artwork and review untrusted proposals. This translates raster pixels, not a non-destructive object transform. The experimental OpenRouter adapter does not permit this operation.
+
 All colors are unpremultiplied RGBA bytes. A failed operation leaves the source project unchanged and does not create the requested output. These are editable raster operations, not vectors or generated executable code. Project saves and PNG exports stage and sync a temporary file before a no-clobber installation. Guarantees depend on the filesystem and platform; directory durability across power loss is not guaranteed, and a crash can leave a temporary file.
 
-The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder, duplicate, flip, clear or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas replaces the current in-memory artwork only after enabling the replacement checkbox. The editor warns before a normal window close if the project differs from the last successful project save or open. PNG exports do not mark a project saved. This is not crash recovery and cannot prevent data loss from force-quitting, system failure or external file changes. Unsupported project fields are rejected rather than silently discarded.
+The GUI can create a new canvas up to 256 × 256, zoom and scroll, and rename, reorder, duplicate, flip, clear or remove layers. Layer edits are undoable and redoable within a bounded local history (Ctrl+Z, Ctrl+Shift+Z, or Ctrl+Y). Opening or creating a canvas prompts immediately before replacing unsaved artwork; cancel to keep editing or discard and replace. Replacement clears undo history and cannot itself be undone. The editor also warns before a normal window close if the project differs from the last successful project save or open. PNG exports do not mark a project saved. This is not crash recovery and cannot prevent data loss from force-quitting, system failure or external file changes. Unsupported project fields are rejected rather than silently discarded.
+
+### Resizing a canvas
+
+In the GUI, expand **Resize existing canvas** in the Project section and enter the new width and height (1–256). Resize is undoable and affects every raster layer, including hidden layers. It is anchored at the top-left and does not scale or resample; added pixels are transparent black. Shrinking is rejected if it would discard nonzero RGBA data, including hidden RGB in fully transparent pixels, unless **Allow clipping** is explicitly enabled. Clipping can permanently discard artwork; undo history is bounded, so keep backups. After a successful resize the clipping option resets.
+
+Agents can use `{"op":"resize_canvas","width":64,"height":64,"clip":false}` in a batch or revision-bound proposal. The `clip` field is required and `true` permits destructive cropping. Changes are transactional; the experimental OpenRouter adapter cannot resize the canvas. This is a raster canvas resize, not image scaling or a non-destructive transform.
+
+### Palette
+
+Below the GUI color picker, select one of 16 numbered swatches to set the drawing color. Choose a slot, adjust the color picker (or use the eyedropper), then press **Store current color** to replace that slot, including alpha. **Reset palette** restores the default swatches and selects slot 1 without changing the current drawing color. Swatch previews blend transparency over gray; hover a slot to see its exact RGBA values.
+
+Swatches are separate from the project and undo history. To keep them, expand **Palette files**, enter a path, and save as a new file; existing files are never overwritten. Loading a palette explicitly replaces the 16 swatches and selects slot 1, but leaves the current drawing color unchanged. An invalid or unreadable file leaves the palette unchanged. Palette settings are otherwise session-only. Choosing, saving or loading swatches does not change artwork; drawing with them is undoable as usual.
+
+Palette files are version-1 JSON with exactly 16 straight-alpha RGBA colors, for example `{"version":1,"colors":[[0,0,0,255], ...]}` (the ellipsis is illustrative, not valid JSON). Files are limited to 8 KiB and unknown fields are rejected. Agents can inspect one using `perveance-cli inspect-palette palette.perveance.json`. Palette saves use the same staged create-new mechanism and filesystem caveats as projects.
+
+### Scaled PNG export
+
+The GUI Project section has a separate **PNG export path** and an integer **Scale** control from 1 to 8. Export uses nearest-neighbor pixel enlargement of the visible composite, without changing the editable project or marking it saved. It creates a new file and refuses to overwrite an existing one.
+
+The headless equivalent is:
+
+```sh
+perveance-cli export-png-scaled potion.json potion-4x.png 4
+```
+
+For example, a 16 × 16 canvas at 4× becomes a 64 × 64 PNG. Export is bounded to 2,048 × 2,048 pixels at the maximum project size and scale. Alpha and visible-layer compositing match regular PNG export; no interpolation or color management is applied. `export-png` remains the 1× command. The project/PNG import limit remains 256 × 256, so a larger exported PNG cannot be imported back into this prototype; keep the editable project.
 
 ### Example layered asset
 
@@ -47,7 +97,7 @@ These commands require paths that do not already exist. Open `potion.json` in th
 
 ### Importing PNG artwork
 
-The studio can open a static PNG as a new canvas, or import one as an editable top layer when its dimensions match the current canvas. Enter the PNG path in the left panel; replacing the canvas requires the existing confirmation checkbox. Layer import can be undone.
+The studio can open a static PNG as a new canvas, or import one as an editable top layer when its dimensions match the current canvas. Enter the PNG path in the left panel; replacing unsaved artwork requires a discard confirmation. Layer import can be undone.
 
 The headless equivalents also produce new files without overwriting:
 
@@ -105,14 +155,39 @@ The revision is `sha256-json-v1:` followed by the lowercase SHA-256 of the compa
 
 In the GUI, scroll to **Prompt to pixels**, enter a model ID and an OpenRouter API key in the app itself, then enter a prompt and click **Send to OpenRouter**. Do not send API keys in chat. The key is not stored in the project or passed to a subprocess; the input field clears when a request starts. It remains in process/HTTP memory temporarily, and secure memory erasure is not guaranteed.
 
-This sends your prompt, canvas dimensions, layer count, and selected model ID to OpenRouter and the selected model provider; existing pixels, layer names, filenames and the project revision are not included. The request is opt-in and may incur charges even when the result is rejected or the app closes. Output is capped at 2,048 tokens, but **there is no dollar spend cap**. Review the provider's terms and billing settings. Redirects and environment-configured proxies are disabled. Requests have a 60-second timeout, although DNS can exceed it; cancelling a pending request is not implemented.
+By default this sends your prompt, canvas dimensions, layer count, and selected model ID to OpenRouter and the selected model provider; existing pixels, layer names, filenames and the project revision are not included. You can explicitly choose **Send visible artwork for this request** to include the visible composite; the checkbox resets after a request starts. The request is opt-in and may incur charges even when the result is rejected or the app closes. Output is capped at 2,048 tokens, but **there is no dollar spend cap**. Review the provider's terms and billing settings. Redirects and environment-configured proxies are disabled. Requests have a 60-second timeout, although DNS can exceed it; cancelling a pending request is not implemented.
+
+When sharing is enabled, the current visible composite is sent as text rows of straight-alpha RGBA hex values, not as an image attachment. This transmits artwork that may be sensitive and can increase token usage and charges. Hidden layer pixels, raw pixels obscured by the composite, layer names, paths and revision are not included. A canvas may contain at most 1,024 pixels for this option; larger canvases fail before a request starts. Composite pixels with zero alpha are transparent black. Models may not understand this representation; visual understanding and live compatibility have not been verified.
 
 The model is asked for JSON containing existing typed raster operations. The app only permits it to add and paint new layers, validates the complete batch, and applies it as one undoable edit if the project revision has not changed while the request was in flight. Invalid, stale, oversized, truncated, or disallowed results are rejected. A new top layer can still obscure existing artwork. This does **not** run generated code, build features, call an agent harness, or provide a sandbox. An adversarial provider/model remains untrusted.
 
-Only local mock HTTP tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
+#### Headless OpenRouter request
+
+To opt in from the CLI, put the art prompt in a UTF-8 file and supply the key through redirected stdin (or a trusted secret manager pipe):
+
+```sh
+perveance-cli prompt-openrouter input.json output.json MODEL_ID prompt.txt < /path/to/private-key-file
+perveance-cli export-png output.json output.png
+```
+
+Do not put a key in chat, the command line, shell history, project files or an environment variable for this command. If using a key file, secure its permissions and handle its lifecycle yourself. The CLI reads at most 512 key bytes plus an optional newline from stdin, waits for EOF, and refuses a terminal as stdin to avoid echoing a key. The key is held in CLI and HTTP process memory; secure erasure is not guaranteed. Other local processes, the invoking tool, a pipe or key file may expose it depending on the environment. There is no credential broker.
+
+To include visible composite pixels in one CLI request, add `--include-composite` after `prompt.txt`. It is off by default and subject to the same 1,024-pixel limit. Successful output reports `shared_composite` as `true` or `false`. The prompt is still sent in both modes; do not put secrets in it.
+
+The command makes a **paid network request** to the same fixed OpenRouter endpoint and uses the same restricted new-layer-only adapter described above. There is no dollar spend cap or cancellation; a request may be charged even if the response is rejected, the output already appears, or the save fails. The initial output-existence check is not a reservation. Input is loaded as a snapshot; edits to the input or unsaved GUI changes during the request are not detected. Output is a new project file only, with no overwrite. A successful response can also contain no effective edits. The CLI returns revisions and operation count, not a PNG; export separately. The prompt file is limited to 4,000 bytes. Use trusted paths and verify the resulting artwork.
+
+Only local mock HTTP and simulated CLI pipeline tests have run; a real OpenRouter request and any specific model's JSON compatibility have **not** been tested. Some models may not support the requested JSON response mode. The provider error body is not displayed, so status errors can be generic. Do not rely on this prototype for important work.
+
+### Experimental project staging diagnostic
+
+On Linux, `perveance-cli verify-project-staging project.json TRUSTED_PARENT` stages a validated project in a private temporary directory, verifies that the only staged entry is a regular project file with matching content and revision, then removes the temporary directory. `TRUSTED_PARENT` must be an existing directory controlled by the user and not writable by untrusted processes. The source project path must also be trusted; normal project loading follows symlinks. The staged file includes **all** project data, including hidden pixels and layer names. The command does not copy neighboring files, directories, sockets or symlinks and does not start a worker.
+
+This is a diagnostic and preliminary data-only staging primitive—not a sandbox, an atomic filesystem snapshot, or a defense against a malicious same-user process or a tampered parent directory. Normal cleanup is checked, but a crash or forced termination can leave temporary files. It does not validate future arbitrary workspace copying, attachments, quotas, isolation, credentials or output activation, and it cannot enable autonomous execution. Use only trusted local paths.
 
 ### Isolation feasibility diagnostic
 
-The optional bubblewrap diagnostic creates its own temporary sentinel and workspace and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink and `/proc` root links), host IPv4 loopback access, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled.
+The optional bubblewrap diagnostic creates its own temporary sentinel, workspace, local TCP listener and Unix socket, and runs only fixed test code. It checks workspace access, whether a synthetic host sentinel can be read or written (including through a symlink and `/proc` root links), host IPv4 loopback access, access to a deliberately exposed host Unix socket in the workspace, and removal of a synthetic environment variable. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled. The planted socket intentionally represents an unsafe workspace input: if the worker can connect to it, the diagnostic fails even if network namespaces otherwise work.
+
+A separate fixed-code test observed that an unprivileged user/network namespace blocked the local IPv4 listener but could still connect to the planted Unix socket on the shared filesystem in the development environment. This test is **not** a bubblewrap test and does not establish a complete sandbox. Future worker staging must address special files and host sockets rather than assuming network namespaces isolate them.
 
 These are narrow observations, not a safety guarantee. In particular, the test binds host system directories read-only and does not test kernel escapes, all network paths, resource quotas, credential brokering or malicious build scripts. Do not use the diagnostic command as a sandbox for untrusted code. The tested build-and-activation supervisor still needs to be designed and independently validated.
