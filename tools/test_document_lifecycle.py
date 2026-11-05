@@ -35,7 +35,10 @@ def main():
             assert (completed.returncode == 0) == ok, (args[0], completed.returncode, completed.stderr[:500])
             raw = completed.stdout if ok else completed.stderr
             value = json.loads(raw)
-            assert value["ok"] == ok
+            # Existing discovery is a metadata object, not an {ok:...}
+            # operation reply. Keep that established CLI schema unchanged.
+            if args[0] != "capabilities":
+                assert value["ok"] == ok
             if not ok:
                 assert completed.stdout == b""
                 for secret in (str(base).encode(), b"private-native-name", b"opaque-private-sentinel"):
