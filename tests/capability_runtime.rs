@@ -158,6 +158,7 @@ fn zero_allocator_is_refused_after_real_instantiation_and_execution() {
 #[test]
 fn executed_reply_is_still_rejected_because_the_request_binding_is_wrong() {
     let (report, _) = invoke(Fixture::Reply);
+    eprintln!("report={}", serde_json::to_string(&report).unwrap());
     assert_eq!(report.outcome, Outcome::ReplyRejected);
     assert!(report.gates.code_executed);
     let reply = report.reply.as_ref().expect("engine produced a reply");
