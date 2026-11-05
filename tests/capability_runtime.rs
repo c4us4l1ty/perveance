@@ -3,7 +3,7 @@
 //! engine bookkeeping, not behavior or provenance verification.
 use perveance::{
     capability_runtime::{Outcome, RuntimeReport},
-    document::{CapabilityRef, Content, Document, OpaquePayload},
+    document::{CapabilityRef, Content, Document},
     extension_protocol::{Error, Intent, Kind},
     registry::{self, ArtifactDeclaration, ArtifactFormat, CapturedCandidate, EntryPoints, Manifest,
         OperationDeclaration, ProvenanceDeclaration, RuntimeDeclaration},
@@ -160,7 +160,7 @@ fn executed_reply_is_still_rejected_because_the_request_binding_is_wrong() {
     let (report, _) = invoke(Fixture::Reply);
     assert_eq!(report.outcome, Outcome::ReplyRejected);
     assert!(report.gates.code_executed);
-    let reply = report.reply.expect("engine produced a reply");
+    let reply = report.reply.as_ref().expect("engine produced a reply");
     assert!(!reply.wire_accepted && !reply.memory_window_checked);
     assert_eq!(reply.issue, Some(Error::RequestMismatch));
     no_authority(&report);
