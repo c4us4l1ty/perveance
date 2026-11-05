@@ -1,6 +1,6 @@
 # Build roadmap and acceptance gates
 
-**Planning only.** Start implementation only after the owner says START. Stages are gates, not delivery-date promises; report blockers instead of hiding them.
+**Implementation in progress, owner-authorized.** These stages are acceptance gates, not delivery-date promises or a claim they have passed. See [COMPLETION.md](COMPLETION.md) for the current gap assessment and next steps; report blockers instead of hiding them.
 
 ## Phase 0 — foundation and feasibility spike
 

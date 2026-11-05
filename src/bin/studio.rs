@@ -1,5 +1,8 @@
 #[path = "studio/path_browser.rs"]
 mod path_browser;
+#[path = "studio/region_editor.rs"]
+mod region_editor;
+use region_editor::RegionClipboard;
 use path_browser::{BrowserAction, BrowserTarget, PathBrowser};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
 use perveance::{EditProposal, FlipAxis, History, Operation, Palette, Project};
@@ -18,7 +21,7 @@ fn path_input_row(ui: &mut egui::Ui, value: &mut String, enabled: bool) -> bool 
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper }
+enum Tool { Pencil, Eraser, Fill, Rectangle, Ellipse, Line, Eyedropper, Select }
 
 impl Tool {
     fn shortcut(self) -> (egui::Key, &'static str, &'static str) {
@@ -30,6 +33,7 @@ impl Tool {
             Self::Ellipse => (egui::Key::O, "O", "Ellipse"),
             Self::Line => (egui::Key::L, "L", "Line"),
             Self::Eyedropper => (egui::Key::I, "I", "Eyedropper"),
+            Self::Select => (egui::Key::M, "M", "Select region"),
         }
     }
 }
@@ -74,6 +78,14 @@ fn tool_button(ui: &mut egui::Ui, current: &mut Tool, target: Tool, label: &str)
                 ui.painter().line_segment([p(3.0, 14.0), p(15.0, 4.0)], stroke);
                 ui.painter().circle_filled(p(3.0, 14.0), 1.5, tint);
                 ui.painter().circle_filled(p(15.0, 4.0), 1.5, tint);
+            }
+            Tool::Select => {
+                for (a, b) in [((3.0, 7.0), (3.0, 3.0)), ((3.0, 3.0), (7.0, 3.0)),
+                    ((11.0, 3.0), (15.0, 3.0)), ((15.0, 3.0), (15.0, 7.0)),
+                    ((15.0, 11.0), (15.0, 15.0)), ((15.0, 15.0), (11.0, 15.0)),
+                    ((7.0, 15.0), (3.0, 15.0)), ((3.0, 15.0), (3.0, 11.0))] {
+                    ui.painter().line_segment([p(a.0, a.1), p(b.0, b.1)], stroke);
+                }
             }
             Tool::Eyedropper => {
                 ui.painter().line_segment([p(4.0, 14.0), p(12.0, 6.0)], stroke);
@@ -134,6 +146,8 @@ struct Studio {
     shape_start: Option<[u32; 2]>,
     shape_current: Option<[u32; 2]>,
     shape_filled: bool,
+    selection: Option<[u32; 4]>,
+    clipboard: Option<RegionClipboard>,
     path: String,
     png_path: String,
     export_path: String,
@@ -162,7 +176,7 @@ impl Default for Studio {
     fn default() -> Self {
         let project = Project::new(32, 32).expect("valid initial canvas");
         Self { saved_project: Some(project.clone()), saved_path: None, recovery_dir: ".".into(), recovery: None, recovery_status: "Recovery checkpoints are off.".into(), path_browser: None, project, confirm_close: false, allow_close: false, layer: 0,
-            color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
+            color: [166, 215, 74, 255], replace_from: [0; 4], palette: DEFAULT_PALETTE, palette_slot: 0, palette_path: "palette.perveance.json".into(), allow_translation_clip: false, tool: Tool::Pencil, brush_size: 1, stroke_last: None, stroke_recorded: false, shape_start: None, shape_current: None, shape_filled: false, selection: None, clipboard: None, path: "art.perveance.json".into(), png_path: "image.png".into(), export_path: "art.png".into(), export_scale: 1, proposal_path: "proposal.json".into(), ai_prompt: String::new(), ai_model: String::new(), ai_key: String::new(), ai_include_composite: false, ai_pending: None,
             status: "Prototype: save and export create new files only.".into(), history: History::default(), pending_replacement: None,
             new_width: 32, new_height: 32, resize_width: 32, resize_height: 32, allow_resize_clip: false, zoom: 12.0, show_grid: false, rename_buffer: "Layer 1".into(), canvas_texture: None }
     }
@@ -344,12 +358,14 @@ impl Studio {
             self.save_current_with_status();
         } else if ctx.input_mut(|input| input.consume_shortcut(&open)) {
             self.open_path_browser(BrowserTarget::OpenProject);
+        } else if self.handle_region_shortcuts(ctx) {
+            // Selection commands are local to Select mode.
         } else if ctx.input(|input| input.events.iter().any(|event| matches!(event,
             egui::Event::Key { key: egui::Key::F9, pressed: true, modifiers, .. } if *modifiers == egui::Modifiers::NONE)))
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F9)) {
             self.manual_checkpoint(ctx, Instant::now());
         } else {
-            for tool in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Eyedropper] {
+            for tool in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Rectangle, Tool::Ellipse, Tool::Line, Tool::Eyedropper, Tool::Select] {
                 let (key, shortcut, name) = tool.shortcut();
                 // egui's consume_key ignores extra Shift/Alt, so require an
                 // exact unmodified key event before consuming a tool shortcut.
@@ -358,6 +374,7 @@ impl Studio {
                     if *pressed_key == key && *modifiers == egui::Modifiers::NONE)));
                 if unmodified && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)) {
                     self.tool = tool;
+                    if tool != Tool::Select { self.selection = None; }
                     self.status = format!("{name} tool selected ({shortcut}).");
                     break;
                 }
@@ -464,6 +481,7 @@ impl Studio {
         self.history.checkpoint_with_selection(&self.project, self.layer);
     }
     fn sync_resize_dimensions(&mut self) {
+        self.selection = None;
         self.resize_width = self.project.width;
         self.resize_height = self.project.height;
     }
@@ -506,6 +524,10 @@ impl Studio {
         self.stroke_last = Some(point);
     }
     fn commit_shape(&mut self, start: [u32; 2], end: [u32; 2]) {
+        if self.tool == Tool::Select {
+            self.select_region(start, end);
+            return;
+        }
         let (x, y, width, height) = shape_box(start, end);
         let layer = self.layer;
         let color = self.color;
@@ -874,10 +896,15 @@ impl eframe::App for Studio {
             tool_button(ui, &mut self.tool, Tool::Ellipse, "Ellipse");
             tool_button(ui, &mut self.tool, Tool::Line, "Line");
             tool_button(ui, &mut self.tool, Tool::Eyedropper, "Eyedropper");
+            tool_button(ui, &mut self.tool, Tool::Select, "Select region");
+            if self.tool == Tool::Select { self.region_ui(ui); } else { self.selection = None; }
             egui::CollapsingHeader::new("Keyboard shortcuts").show(ui, |ui| {
                 ui.small("B Pencil · E Eraser · G Fill");
                 ui.small("R Rectangle · O Ellipse");
-                ui.small("L Line · I Eyedropper");
+                ui.small("L Line · I Eyedropper · M Select");
+                ui.small("In Select: C Copy · X Cut · V Paste");
+                ui.small("Delete Clear · Esc Deselect");
+                ui.small("Ctrl+A Select all (Select mode)");
                 ui.small("Ctrl+O Open · Ctrl+S Save");
                 ui.small("F9 Recovery checkpoint");
                 ui.small("Ctrl+Z Undo");
@@ -1057,6 +1084,17 @@ impl eframe::App for Studio {
                         }
                     }
                 }
+                if self.tool == Tool::Select && self.shape_start.is_none() {
+                    if let Some([x, y, width, height]) = self.selection {
+                        let selected = Rect::from_min_size(Pos2::new(rect.min.x + x as f32 * scale, rect.min.y + y as f32 * scale), Vec2::new(width as f32 * scale, height as f32 * scale));
+                        let stroke = egui::Stroke::new(1.5, Color32::from_rgb(166, 215, 74));
+                        for edge in [[selected.left_top(), selected.right_top()], [selected.right_top(), selected.right_bottom()],
+                            [selected.right_bottom(), selected.left_bottom()], [selected.left_bottom(), selected.left_top()]] {
+                            ui.painter().line_segment(edge, egui::Stroke::new(3.5, Color32::BLACK));
+                            ui.painter().line_segment(edge, stroke);
+                        }
+                    }
+                }
                 let (width, height) = (self.project.width, self.project.height);
                 let to_pixel = |pos: Pos2| -> Option<[u32; 2]> {
                     if !rect.contains(pos) { return None; }
@@ -1070,7 +1108,7 @@ impl eframe::App for Studio {
                     if response.clicked() {
                         if let Some(point) = response.interact_pointer_pos().and_then(to_pixel) { self.pick_color(point); }
                     }
-                } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse | Tool::Line) {
+                } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse | Tool::Line | Tool::Select) {
                     if response.drag_started() {
                         self.shape_start = ctx.input(|input| input.pointer.press_origin()).and_then(to_pixel);
                         self.shape_current = self.shape_start;

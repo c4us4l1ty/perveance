@@ -256,3 +256,54 @@ fn bridge_transform_failures_match_rust_without_creating_outputs() {
         assert_eq!(Project::load(&base).unwrap(), project);
     }
 }
+
+#[test]
+fn bridge_region_edits_match_rust_for_overlaps_hidden_pixels_and_atomic_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let ops = dir.path().join("ops.json");
+    let mut project = Project::new(5, 4).unwrap();
+    for y in 0..4 { for x in 0..5 {
+        project.set_pixel(0, x, y, [x as u8 + 1, y as u8 + 1, 33, if x % 2 == 0 { 0 } else { 128 }]).unwrap();
+    }}
+    project.layers[0].visible = false;
+    project.add_layer().unwrap();
+    project.rectangle(1, 0, 0, 5, 4, [255; 4]).unwrap();
+    project.save_new(&base).unwrap();
+    let copy = serde_json::json!({"op":"copy_region","layer":0,"x":0,"y":0,"width":4,"height":3,"to_layer":0,"to_x":1,"to_y":1});
+    let batch = vec![copy.clone(),
+        serde_json::json!({"op":"copy_region","layer":0,"x":1,"y":1,"width":4,"height":3,"to_layer":0,"to_x":0,"to_y":0}),
+        serde_json::json!({"op":"copy_region","layer":0,"x":0,"y":0,"width":5,"height":4,"to_layer":1,"to_x":0,"to_y":0}),
+        serde_json::json!({"op":"clear_region","layer":0,"x":1,"y":1,"width":2,"height":2}),
+        serde_json::json!({"op":"clear_region","layer":1,"x":4,"y":0,"width":1,"height":4})];
+    for end in 1..=batch.len() {
+        let py = dir.path().join(format!("py-{end}.json"));
+        let rust = dir.path().join(format!("rust-{end}.json"));
+        std::fs::write(&ops, serde_json::to_vec(&batch[..end]).unwrap()).unwrap();
+        python(&["apply", base.to_str().unwrap(), py.to_str().unwrap(), ops.to_str().unwrap()]);
+        let result = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["apply", base.to_str().unwrap(), rust.to_str().unwrap(), ops.to_str().unwrap()]).output().unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        let py = Project::load(&py).unwrap();
+        let rust = Project::load(&rust).unwrap();
+        assert_eq!(py, rust, "region batch prefix {end}");
+        assert_eq!(py.revision().unwrap(), rust.revision().unwrap());
+        assert_eq!(py.rgba().unwrap(), rust.rgba().unwrap());
+    }
+    let mut bad = Vec::new();
+    for (field, value) in [("x", serde_json::json!(u32::MAX)), ("width", serde_json::json!(0)),
+        ("height", serde_json::json!(u32::MAX)), ("to_x", serde_json::json!(2)),
+        ("to_layer", serde_json::json!(2)), ("layer", serde_json::json!(true)), ("clip", serde_json::json!(true))] {
+        let mut op = copy.clone(); op[field] = value; bad.push(op);
+    }
+    bad.push(serde_json::json!({"op":"clear_region","layer":0,"x":0,"y":0,"width":5,"height":5}));
+    for (index, operation) in bad.into_iter().enumerate() {
+        let py = dir.path().join(format!("bad-py-{index}.json"));
+        let rust = dir.path().join(format!("bad-rust-{index}.json"));
+        std::fs::write(&ops, serde_json::to_vec(&vec![copy.clone(), operation]).unwrap()).unwrap();
+        let a = Command::new("python3").arg("tools/arena_art.py").args(["apply", base.to_str().unwrap(), py.to_str().unwrap(), ops.to_str().unwrap()]).output().unwrap();
+        let b = Command::new(env!("CARGO_BIN_EXE_perveance-cli")).args(["apply", base.to_str().unwrap(), rust.to_str().unwrap(), ops.to_str().unwrap()]).output().unwrap();
+        assert!(!a.status.success()); assert!(!b.status.success());
+        assert!(!py.exists()); assert!(!rust.exists());
+        assert_eq!(Project::load(&base).unwrap(), project);
+    }
+}

@@ -704,3 +704,55 @@ fn fixed_worker_cli_on_supported_host() {
     assert_eq!(fs::read(project).unwrap(), before);
     assert_eq!(fs::read_dir(parent).unwrap().count(), 0);
 }
+
+#[test]
+fn region_batches_and_revision_proposals_are_no_clobber_and_strict() {
+    let dir = TempDir::new();
+    let base = dir.0.join("base.json");
+    let output = dir.0.join("edited.json");
+    let rejected = dir.0.join("rejected.json");
+    let ops = dir.0.join("operations.json");
+    let proposal = dir.0.join("proposal.json");
+    let mut p = perveance::Project::new(4, 3).unwrap();
+    p.set_pixel(0, 0, 0, [7, 8, 9, 0]).unwrap();
+    p.set_pixel(0, 1, 0, [10, 20, 30, 128]).unwrap();
+    p.layers[0].visible = false;
+    p.add_layer().unwrap();
+    p.rectangle(1, 0, 0, 4, 3, [255; 4]).unwrap();
+    p.save_new(&base).unwrap();
+    let batch = serde_json::json!([
+        {"op":"copy_region","layer":0,"x":0,"y":0,"width":2,"height":1,"to_layer":1,"to_x":2,"to_y":2},
+        {"op":"clear_region","layer":0,"x":0,"y":0,"width":2,"height":1}
+    ]);
+    fs::write(&ops, serde_json::to_vec(&batch).unwrap()).unwrap();
+    fs::write(&proposal, serde_json::to_vec(&serde_json::json!({"version":1,"base_revision":p.revision().unwrap(),"operations":batch})).unwrap()).unwrap();
+    let result = cli(&["apply-proposal", base.to_str().unwrap(), output.to_str().unwrap(), proposal.to_str().unwrap()]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let edited = perveance::Project::load(&output).unwrap();
+    assert_eq!(edited.sample_layer(1, 2, 2).unwrap(), [7, 8, 9, 0]);
+    assert_eq!(edited.sample_layer(1, 3, 2).unwrap(), [10, 20, 30, 128]);
+    assert_eq!(edited.sample_layer(0, 0, 0).unwrap(), [0; 4]);
+    assert_eq!(perveance::Project::load(&base).unwrap(), p);
+    let bytes = fs::read(&output).unwrap();
+    assert!(!cli(&["apply", base.to_str().unwrap(), output.to_str().unwrap(), ops.to_str().unwrap()]).status.success());
+    assert_eq!(fs::read(&output).unwrap(), bytes);
+    assert!(!cli(&["apply-proposal", output.to_str().unwrap(), rejected.to_str().unwrap(), proposal.to_str().unwrap()]).status.success());
+    assert!(!rejected.exists());
+    for bad in [
+        r#"[{"op":"clear_region","layer":0,"x":0,"y":0,"width":1,"height":1,"clip":true}]"#,
+        r#"[{"op":"copy_region","layer":0,"x":0,"y":0,"width":1,"height":1,"to_layer":1,"to_x":0}]"#,
+        r#"[{"op":"copy_region","layer":0,"x":0,"y":0,"width":2,"height":1,"to_layer":1,"to_x":3,"to_y":0}]"#,
+        r#"[{"op":"clear_region","layer":0,"x":0,"y":0,"width":1,"height":1},{"op":"clear_region","layer":2,"x":0,"y":0,"width":1,"height":1}]"#,
+    ] {
+        fs::write(&ops, bad).unwrap();
+        assert!(!cli(&["apply", base.to_str().unwrap(), rejected.to_str().unwrap(), ops.to_str().unwrap()]).status.success());
+        assert!(!rejected.exists());
+        assert_eq!(perveance::Project::load(&base).unwrap(), p);
+    }
+    let caps: serde_json::Value = serde_json::from_slice(&cli(&["capabilities"]).stdout).unwrap();
+    for operation in ["clear_region", "copy_region"] {
+        assert!(caps["batch_operations"].as_array().unwrap().iter().any(|value| value == operation));
+        assert_eq!(caps["batch_examples"][operation]["op"], operation);
+        let _: perveance::Operation = serde_json::from_value(caps["batch_examples"][operation].clone()).unwrap();
+    }
+}

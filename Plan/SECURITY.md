@@ -54,3 +54,28 @@ An experimental in-memory model-call reservation counter rejects unknown/zero co
 ## Fixed worker lifecycle experiment
 
 A Linux-only Rust diagnostic stages a validated project and runs only an embedded fixed Python program through a network-unshared bubblewrap invocation. It rejects setuid/setgid and file-capability-enabled `/usr/bin/bwrap`, applies a regular-file size rlimit, bounds captured output, and attempts timeout/cancellation and immediate-child reaping. It marks non-stdio descriptors close-on-exec with `close_range`, failing startup if unavailable. One deliberately inheritable synthetic file descriptor is tested; this is not a complete descriptor audit. The trusted paths and system binaries are still subject to path races; descendant kill, CPU, memory, process count, total disk, sandbox escapes and crash recovery are not enforced or verified. Cancellation is best effort, not a hard deadline, and an interrupted supervisor can leave temporary state. It must not run generated or untrusted code, and success cannot open the autonomous gate.
+
+## Persistent raster task lifecycle (not autonomous execution)
+
+Linux data-only jobs snapshot validated projects and revision-bound proposals,
+preflight/apply only the compiled raster operations, and never invoke generated
+code, shells, plugins or providers. Private owned directories/files, bounded
+metadata, fixed basenames, final-component no-follow/nonblocking file opens,
+regular-file/single-link checks and advisory locks reduce accidental corruption
+and unsafe file consumption. They are not race-resistant path brokerage or a
+boundary against an attacker controlling directory ancestors or the same user.
+Initial source loading still assumes trusted regular paths and follows symlinks.
+
+Append-only bounded events record state; cancellation is a durable cooperative
+request checked between synchronous stages. A running record is not proof of a
+live process. Recovery requires obtaining the worker's exclusive advisory lock
+and records interruption without replay; partial outputs are retained but never
+advertised as successful. Completion and later successful inspection verify
+artifact bytes/hashes, project revision and PNG/composite parity. These checks
+are snapshots, not CAS or cryptographic authentication against the local owner.
+
+Files/directories are synced in sequence, but there is no power-loss guarantee,
+global disk/retention quota, hard deadline, OS resource enforcement, provider
+budget integration, protected activation, or arbitrary worker execution. Inputs
+and outputs retain hidden artwork until explicitly removed. All existing
+security gates still apply before an autonomous builder can be enabled.

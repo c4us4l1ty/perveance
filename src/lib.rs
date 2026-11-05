@@ -5,7 +5,9 @@ pub mod fixed_worker;
 pub mod file_browser;
 pub mod provider;
 pub mod recovery;
+pub mod region;
 pub mod supervisor;
+pub mod tasks;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};
@@ -195,6 +197,8 @@ pub enum Operation {
     AddLayer,
     DuplicateLayer { layer: usize },
     ClearLayer { layer: usize },
+    ClearRegion { layer: usize, x: u32, y: u32, width: u32, height: u32 },
+    CopyRegion { layer: usize, x: u32, y: u32, width: u32, height: u32, to_layer: usize, to_x: u32, to_y: u32 },
     ReplaceColor { layer: usize, from: [u8; 4], to: [u8; 4] },
     FlipLayer { layer: usize, axis: FlipAxis },
     TranslateLayer { layer: usize, dx: i32, dy: i32, clip: bool },
@@ -600,6 +604,8 @@ impl Project {
                 Operation::AddLayer => candidate.add_layer(),
                 Operation::DuplicateLayer { layer } => candidate.duplicate_layer(*layer).map(|_| ()),
                 Operation::ClearLayer { layer } => candidate.clear_layer(*layer),
+                Operation::ClearRegion { layer, x, y, width, height } => candidate.clear_region(*layer, *x, *y, *width, *height),
+                Operation::CopyRegion { layer, x, y, width, height, to_layer, to_x, to_y } => candidate.copy_region_to(*layer, [*x, *y, *width, *height], *to_layer, [*to_x, *to_y]),
                 Operation::ReplaceColor { layer, from, to } => candidate.replace_color(*layer, *from, *to).map(|_| ()),
                 Operation::FlipLayer { layer, axis } => candidate.flip_layer(*layer, *axis),
                 Operation::TranslateLayer { layer, dx, dy, clip } => candidate.translate_layer(*layer, *dx, *dy, *clip),

@@ -109,6 +109,8 @@ def apply_operations(project, operations):
             continue
         fields = {"duplicate_layer": ("op", "layer"),
                   "clear_layer": ("op", "layer"),
+                  "clear_region": ("op", "layer", "x", "y", "width", "height"),
+                  "copy_region": ("op", "layer", "x", "y", "width", "height", "to_layer", "to_x", "to_y"),
                   "replace_color": ("op", "layer", "from", "to"),
                   "flip_layer": ("op", "layer", "axis"),
                   "translate_layer": ("op", "layer", "dx", "dy", "clip"),
@@ -169,6 +171,24 @@ def apply_operations(project, operations):
             continue
         if name == "clear_layer":
             layer["pixels"] = [[0, 0, 0, 0] for _ in range(w * h)]
+            continue
+        if name in ("clear_region", "copy_region"):
+            x, y = integer(op["x"], 0, w - 1), integer(op["y"], 0, h - 1)
+            rw, rh = integer(op["width"], 1, w - x), integer(op["height"], 1, h - y)
+            if name == "copy_region":
+                target = layers[integer(op["to_layer"], 0, len(layers) - 1)]
+                tx, ty = integer(op["to_x"], 0, w - rw), integer(op["to_y"], 0, h - rh)
+                # Snapshot before writing: even same-layer overlapping copies
+                # must preserve the source bytes, with no internal list aliases.
+                region = [pixel.copy() for row in range(y, y + rh)
+                          for pixel in layer["pixels"][row * w + x:row * w + x + rw]]
+                for row in range(rh):
+                    start = (ty + row) * w + tx
+                    target["pixels"][start:start + rw] = region[row * rw:(row + 1) * rw]
+            else:
+                for row in range(y, y + rh):
+                    start = row * w + x
+                    layer["pixels"][start:start + rw] = [[0, 0, 0, 0] for _ in range(rw)]
             continue
         if name == "replace_color":
             old, new = color(op["from"]), color(op["to"])
@@ -376,8 +396,10 @@ def main(args):
         return {"ok": True, "bridge": "experimental-python-data-only", "project_version": 1,
                 "max_dimension": MAX_DIMENSION, "max_layers": MAX_LAYERS, "max_export_scale": MAX_EXPORT_SCALE,
                 "max_brush_size": MAX_BRUSH_SIZE, "max_region_pixels": MAX_REGION_PIXELS,
-                "operations": ["add_layer", "duplicate_layer", "clear_layer", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "rename_layer", "move_layer", "remove_layer", "set_visibility", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
+                "max_region_edit_pixels": MAX_DIMENSION * MAX_DIMENSION,
+                "operations": ["add_layer", "duplicate_layer", "clear_layer", "clear_region", "copy_region", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "rename_layer", "move_layer", "remove_layer", "set_visibility", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
                 "commands": ["capabilities", "create", "apply", "apply-proposal", "inspect", "sample", "read-region", "export-png", "export-png-scaled"],
+                "region_editing": {"source": "raw layer RGBA, including hidden pixels", "paste": "replace bytes, not alpha blending", "bounds": "source and destination must fit; no clipping", "overlap": "source snapshot before writing"},
                 "autonomous_execution": False, "rust_cli_parity": False}
     if len(args) == 5 and args[0] == "create":
         _, w, h, ops_path, output = args

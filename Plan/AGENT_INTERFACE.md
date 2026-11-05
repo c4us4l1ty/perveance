@@ -47,3 +47,32 @@ The supervisor module also contains an isolated in-memory model-call reservation
 ## Arena offline project bridge
 
 `tools/arena_art.py` is a limited Python standard-library, data-only path for an external agent to create, inspect, sample/read bounded pixel regions, edit into a new file and export editable raster projects and nearest-neighbor scaled PNGs without a Rust toolchain. It implements the current typed raster batch operations with stricter project limits, but not all Rust CLI commands. CI cross-checks representative bridge projects, layer/canvas edits, pixel regions, brushes, shapes and PNG pixels against the Rust model. A native X11 test covers a bridge-created project edited in the GUI and then read and revised by the bridge; this remains file handoff, not a live connector. This is independent code, not a running Rust app or an Arena invocation integration. It supports revision-bound v1 proposals against the loaded snapshot, but has no file locking, sandbox or autonomous feature development; callers must have the checkout and trusted local files. See README for usage and constraints.
+
+## Prototype raw-region edits
+
+`copy_region` and `clear_region` are typed batch/proposal operations in the
+Rust model/CLI and limited Python bridge. They operate on raw layer bytes,
+including hidden and zero-alpha RGB data; paste replaces rather than blends.
+Source and destination must fit completely, with no implicit clipping. A copy
+snapshots its source, including for same-layer overlaps. Ordered copy followed
+by clear is not an atomic overlapping move: the clear can erase the new copy.
+Use revision-bound proposals when editing a known snapshot; the existing
+create-new and file-locking limitations still apply. The GUI's selection and
+internal copy buffer are session-local and are not exposed to headless agents.
+The OpenRouter adapter does not permit these new operations.
+
+## Persistent data-only raster jobs
+
+The Linux Rust CLI adds `task-create PROJECT PROPOSAL PRIVATE_ROOT`, then
+`task-inspect`, `task-run`, `task-cancel` and `task-recover` with `PRIVATE_ROOT ID`.
+Creation captures a full validated project/proposal snapshot; no later disk or
+GUI changes are observed. Jobs run only existing typed raster edits and deliver
+new editable project/PNG files after verification. Three bounded append-only
+events and a cooperative lock track queued/running/terminal states across CLI
+processes. Cancellation is cooperative at stage boundaries, not a worker kill.
+Recovery refuses an active lock and marks an abandoned running job interrupted
+without replaying it or publishing partial outputs. See README for schemas,
+retention, trust and failure semantics. The Python bridge, GUI and provider
+adapter do not yet expose these jobs. The separate autonomy request inspection
+remains blocked; this is not a provider/harness, broker, sandbox, OS quota
+implementation, or permission to execute generated code.

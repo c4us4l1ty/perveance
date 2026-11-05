@@ -27,7 +27,10 @@ directories may require manual path entry. Non-UTF-8 paths are not supported;
 special-file entries are omitted and opening special files may block.
 
 Tool shortcuts: B Pencil, E Eraser, G Fill, R Rectangle, O Ellipse, L Line,
-and I Eyedropper. The Tools panel has a shortcut reference. Shortcuts are
+I Eyedropper, and M Select region. In Select mode, C copies, X cuts, V pastes,
+Delete clears and Escape deselects. This uses an internal session buffer, not
+the OS clipboard; paste replaces raw RGBA without blending or clipping.
+The Tools panel has a shortcut reference. Shortcuts are
 ignored while typing, in dialogs and during active drawing gestures.
 
 Use Save or Ctrl+S to create the first file (using the GUI's File path field),
@@ -59,6 +62,21 @@ Use new output filenames. Open potion.json in the GUI to edit the layers.
 Run perveance-cli capabilities for supported commands. The independent Python
 Arena bridge and its stricter limits are described in the repository README;
 it is not included in this binary bundle.
+
+Persistent raster jobs are available through the CLI on Linux:
+  mkdir -m 700 raster-tasks
+  perveance-cli task-create project.json proposal.json raster-tasks
+  perveance-cli task-run raster-tasks TASK_ID
+  perveance-cli task-inspect raster-tasks TASK_ID
+Use task.id returned by task-create in place of TASK_ID. The proposal must be
+version-1 and bound to the project's inspected revision. These jobs only run
+compiled typed raster edits; no model or generated code runs. task-cancel is
+cooperative between stages, not a process kill. task-recover marks an abandoned
+running job interrupted without replaying it. Successful jobs retain verified
+editable project/PNG outputs in raster-tasks/TASK_ID. Full snapshots, including
+hidden artwork and partial outputs, remain until you remove them. There is no
+global retention/disk quota, OS resource enforcement, or GUI/provider wiring.
+Use trusted private local paths and see the repository README for full limits.
 
 OpenRouter integration is experimental and not live-validated. Paid requests
 can incur charges, including when a request fails, and there is no spend cap.

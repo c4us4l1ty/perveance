@@ -149,6 +149,14 @@ jobs:
             exit 1
           fi
           cat "$RUNNER_TEMP/gui-shortcuts-test.log"
+      - name: Exercise native region editing and undo safety
+        run: |
+          if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_region_editing.sh "$RUNNER_TEMP/gui-regions" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/tools/send_x11_close.py" > "$RUNNER_TEMP/gui-regions-test.log" 2>&1; then
+            cat "$RUNNER_TEMP/gui-regions-test.log" "$RUNNER_TEMP/gui-regions/gui.log" 2>/dev/null || true
+            tail -n 10 "$RUNNER_TEMP/gui-regions-test.log" | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/gui-regions-test.log"
       - name: Exercise agent-to-GUI-to-agent handoff
         run: |
           if ! xvfb-run -a -s "-screen 0 1280x1024x24" tools/gui_agent_handoff.sh "$RUNNER_TEMP/agent-handoff" "$GITHUB_WORKSPACE/target/debug/perveance" "$GITHUB_WORKSPACE/target/debug/perveance-cli" "$GITHUB_WORKSPACE/tools/arena_art.py" "$GITHUB_WORKSPACE/examples/rocket-operations.json" "$GITHUB_WORKSPACE/tools/send_x11_close.py"; then
@@ -241,6 +249,15 @@ jobs:
           "$bundle/bin/perveance-cli" sample potion.json 6 7 composite > sample.json
           "$bundle/bin/perveance-cli" export-png potion.json potion.png
           python3 -c 'import json,struct; i=json.load(open("inspection.json")); s=json.load(open("sample.json")); p=open("potion.png","rb").read(24); assert i["ok"] and i["width"]==16 and i["height"]==16 and len(i["layers"])==3; assert s["color"]==[239,204,245,255]; assert p[:8]==b"\x89PNG\r\n\x1a\n" and struct.unpack(">II",p[16:24])==(16,16)'
+          # Exercise persistent jobs using the actual downloaded CLI, not cargo.
+          mkdir -m 700 task-store
+          python3 -c 'import json; i=json.load(open("inspection.json")); json.dump({"version":1,"base_revision":i["revision"],"operations":[{"op":"pixel","layer":0,"x":0,"y":0,"color":[11,22,33,44]}]},open("task-proposal.json","w"))'
+          "$bundle/bin/perveance-cli" task-create potion.json task-proposal.json task-store > task-queued.json
+          task_id=$(python3 -c 'import json; r=json.load(open("task-queued.json")); assert r["task"]["state"]=="queued" and not r["task"]["autonomous_execution"]; print(r["task"]["id"])')
+          "$bundle/bin/perveance-cli" task-run task-store "$task_id" > task-completed.json
+          "$bundle/bin/perveance-cli" task-inspect task-store "$task_id" > task-inspected.json
+          "$bundle/bin/perveance-cli" sample "task-store/$task_id/output.perveance.json" 0 0 layer 0 > task-sample.json
+          python3 -c 'import json; a=json.load(open("task-completed.json"))["task"]; b=json.load(open("task-inspected.json"))["task"]; assert a==b and a["state"]=="succeeded" and a["artifacts_verified"] and len(a["history"])==3 and not a["network_used"] and not a["autonomous_execution"]; assert json.load(open("task-sample.json"))["color"]==[11,22,33,44]; print("Downloaded CLI persistent raster-task round trip passed")'
           PERVEANCE_BIN="$bundle/bin/perveance" CLOSE_HELPER="$GITHUB_WORKSPACE/tools/send_x11_close.py" xvfb-run -a sh -c '
             set -eu
             export LIBGL_ALWAYS_SOFTWARE=1
