@@ -1,6 +1,13 @@
 use perveance::{document::{self, CapabilityObject, CapabilityRef, Content, Document, DocumentLayer, OpaquePayload, Operation, PixelEdit, Proposal}, Project};
 use serde_json::json;
 
+fn png(project: &Project) -> Vec<u8> {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("reference.png");
+    project.export_png_new(&path).unwrap();
+    std::fs::read(path).unwrap()
+}
+
 fn raster() -> Project {
     let mut project = Project::new(2, 2).unwrap();
     project.layers[0].name = "private-layer-sentinel".into();
@@ -32,7 +39,7 @@ fn native_import_is_lossless_deterministic_and_uses_the_existing_engine() {
     let doc = Document::from_project(&source).unwrap();
     assert_eq!(doc, Document::from_project(&source).unwrap());
     assert_eq!(doc.render_raster().unwrap(), source);
-    assert_eq!(doc.render_raster().unwrap().png_bytes(1).unwrap(), source.png_bytes(1).unwrap());
+    assert_eq!(png(&doc.render_raster().unwrap()), png(&source));
     assert_eq!(Document::from_bytes(&doc.canonical_bytes().unwrap()).unwrap(), doc);
     assert_eq!(doc.inspect().unwrap().rendering, "native_raster");
     assert_ne!(doc.revision().unwrap(), source.revision().unwrap());
@@ -105,7 +112,7 @@ fn native_edits_reordering_and_composition_match_v1_by_identity_not_old_index() 
     native.move_layer(1, 0).unwrap(); native.layers[1].visible = true;
     native.set_pixel(1, 0, 0, [91, 92, 93, 127]).unwrap();
     assert_eq!(doc.render_raster().unwrap(), native);
-    assert_eq!(doc.render_raster().unwrap().png_bytes(1).unwrap(), native.png_bytes(1).unwrap());
+    assert_eq!(png(&doc.render_raster().unwrap()), png(&native));
 }
 
 #[test]
@@ -263,7 +270,7 @@ mod private_io {
         let dir=root(); let held=PrivateDirectory::open(dir.path()).unwrap();
         assert!(opaque().export_png(&held, "blocked.png").is_err()); assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
         let source=raster(); let doc=Document::from_project(&source).unwrap(); doc.export_png(&held, "native.png").unwrap();
-        assert_eq!(fs::read(dir.path().join("native.png")).unwrap(), source.png_bytes(1).unwrap());
+        assert_eq!(fs::read(dir.path().join("native.png")).unwrap(), png(&source));
         assert!(doc.export_png(&held, "native.png").is_err()); assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }
