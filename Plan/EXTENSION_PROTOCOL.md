@@ -1,4 +1,4 @@
-# Data-only extension call/reply protocol — no execution or activation
+# Extension call/reply protocol — metered diagnostics, no verification or activation
 
 **2026-11-05 — verified at exact source `b1febc0`; see evidence below.**
 This continues the [static WASM signature diagnostic](MODULE_AUDIT.md) with a
@@ -280,3 +280,50 @@ actual editable capability document commits/composition, migrations/backup/
 rollback, and genuine missing-capability build/edit/render/save/reopen plus a
 distinct request reusing the exact installed capability. No vector functionality
 or completion of the protected extension contract is claimed by this increment.
+
+## Metered interpreter diagnostic (nonauthorizing)
+
+`src/capability_runtime.rs` and the `registry-invoke-capability` command now
+execute a quarantined slot's **exact frozen bytes** through wasmi 2.0.0 in a
+fresh instance per call. `ok:true` means the diagnostic completed, never that a
+capability works, verifies or exists.
+
+- Engine: wasmi 2.0.0, empty `Linker` (no host imports, no WASI, no network),
+  start functions refused, eager translation, deterministic mode, fuel metering.
+- Limits come from the stored manifest: fuel, memory bytes and output bytes; the
+  store also allows one memory, zero tables and no more than the declared memory.
+- Guest ABI exercised: `perveance_alloc_v1 (i32)->i32` must return a non-zero
+  pointer; the canonical request frame is written into that memory window; the
+  selected `(i32,i32)->i64` entrypoint returns packed pointer/length; the reply
+  is read back only through the bounded window and the existing strict reply
+  codec. Nothing is cached, replayed or re-read from the source path.
+- Panics are contained (`catch_unwind` with a suppressed hook) and reported as
+  `interpreter_panicked`. Traps, fuel exhaustion, allocation refusal, reply
+  rejection and instantiation refusal are distinct outcomes with engine facts.
+
+Observed fixture matrix, required for both the debug and the uploaded-then-
+downloaded release executable: zero allocator → `allocation_rejected`; reply
+writer with a wrong request binding → `reply_rejected` with
+`wire_accepted:false`, `memory_window_checked:true`, `issue:request_mismatch`
+and no candidate status; `loop`/`br 0` → `out_of_fuel`; `unreachable` →
+`trapped`; allocator trap → `trapped`. Repeated invocations are identical, and
+overwriting the source file after quarantine still executes the frozen slot.
+
+Execution is not verification or authority. Payload semantics, behavior,
+pointer safety, provenance and usefulness are unproven; there is no seccomp,
+namespace, cgroup or wall-clock CPU confinement around the interpreter; and no
+install, activation, availability, document mutation, PNG publication, provider
+network or autonomy follows. Every declared authority gate stays `false` for
+every outcome; only engine facts (compile, instantiate, execute, fuel, memory,
+output, deterministic, eager) can be `true`.
+
+Evidence: code head `65ed259`
+([Rust CI 42082892683](https://github.com/c4us4l1ty/perveance/actions/runs/42082892683),
+job `127440290196`) passed the new CLI lifecycle step and the downloaded-bundle
+verification; the [matrix run 42082892730](https://github.com/c4us4l1ty/perveance/actions/runs/42082892730)
+passed all three jobs, delegated task `127440289133` reporting exact twelve +
+two kernel cases on kernel `7.0.0-1019-azure`, bubblewrap `0.11.1` and AppArmor
+restriction `1`. Four fixture-encoding faults found while wiring this (code/data
+section order, a four-byte data-segment flag, a loop body without its function
+`end`, and a wrong reply kind byte) were fixed in the fixtures; no audit rule,
+limit, `--locked` flag or gate was relaxed.

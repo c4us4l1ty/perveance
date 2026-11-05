@@ -162,7 +162,8 @@ requested diagnostic completed, not that the candidate passed. Storage/slot/
 path/corruption/scope/orphan errors instead return `ok:false` on stderr and a
 nonzero exit, without a module audit. Registry inspection/resolution remains
 unchanged after even a passing audit: `extension_abi_supported=false`,
-`quarantined_unverified`, unavailable, no runtime. Every capability layer still
+`quarantined_unverified`, unavailable, and the document binding still reports
+`quarantined_no_runtime` because a diagnostic call binds and activates nothing. Every capability layer still
 blocks PNG export, including hidden or empty ones.
 
 ## Tests and remaining gates
@@ -212,3 +213,17 @@ production roles, migration/backup/rollback/recovery, and the genuine missing
 creative-capability build/install/edit/render/save/reopen/distinct-reuse test.
 This component does not satisfy original capability-growth acceptance and
 activates no autonomous work or paid provider request.
+
+## Runtime follow-up without relaxing the audit
+
+The static profile is now optionally followed by a metered wasmi call for the
+same frozen bytes (`registry-invoke-capability`, see
+[EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md#metered-interpreter-diagnostic-nonauthorizing)).
+The audit is unchanged and still gates it: a module that fails the profile is
+refused before instantiation, so execution cannot be used to bypass validation.
+The four encoding faults exposed by the runtime fixtures (data section before
+code, a four-byte data flag, a loop body missing the function `end`, and a
+wrong reply kind byte) were corrected in the fixtures themselves. Every limit
+and rejection rule, including import/start/section/signature/data checks, is
+still applied exactly as before, and a passing audit still enables no
+installation, activation or availability.

@@ -344,3 +344,21 @@
   exact twelve + two on kernel `7.0.0-1017-azure`); one unrelated pre-existing
   task-lock test flaked once on intermediate docs `b12a743` and passed unchanged
   on the rerun without weakening any gate.
+- Metered interpreter: the quarantine-only registry now exposes
+  `registry-invoke-capability`, which runs a slot's exact frozen bytes through
+  wasmi 2.0.0 with an empty linker, no start function, eager deterministic
+  translation, declared fuel/memory/output meters and contained panics. Real CLI
+  fixtures produce `allocation_rejected`, `reply_rejected` (wrong request
+  binding), `out_of_fuel`, `trapped` and an allocator-trap `trapped`, are
+  byte-identical on repeat and still execute the frozen slot after the source
+  file is overwritten. A trap inside the allocator is reported as `trapped` with
+  `code_executed` set, because guest instructions ran before the trap. Code head `65ed259` passed
+  [Rust CI 42082892683](https://github.com/c4us4l1ty/perveance/actions/runs/42082892683),
+  job `127440290196`, including the downloaded-bundle lifecycle, and
+  [matrix 42082892730](https://github.com/c4us4l1ty/perveance/actions/runs/42082892730)
+  with exact twelve + two kernel cases on kernel `7.0.0-1019-azure`. Four
+  fixture-encoding faults were fixed in the fixtures, not by relaxing audit
+  rules. Execution remains nonauthorizing: no semantic/behavior/provenance
+  verification, OS confinement, install, activation, availability, document
+  mutation, PNG publication, provider network or autonomy. Local 50 Python tests
+  and compile/diff checks passed; there is no local Rust toolchain.

@@ -69,6 +69,15 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-protocol-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
+      - name: Exercise metered interpreter diagnostics through the real CLI
+        run: |
+          if python3 tools/test_capability_runtime_lifecycle.py target/debug/perveance-cli examples/opaque-document-v2.json > /tmp/perveance-runtime-test.log 2>&1; then
+            cat /tmp/perveance-runtime-test.log
+          else
+            cat /tmp/perveance-runtime-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-runtime-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
       - name: Exercise desktop tools under X11
         run: |
           cargo build --locked --bin perveance --bin perveance-cli
@@ -306,6 +315,13 @@ jobs:
           else
             cat /tmp/perveance-downloaded-protocol-test.log
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-downloaded-protocol-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+          if python3 "$GITHUB_WORKSPACE/tools/test_capability_runtime_lifecycle.py" "$bundle/bin/perveance-cli" "$bundle/examples/opaque-document-v2.json" > /tmp/perveance-downloaded-runtime-test.log 2>&1; then
+            cat /tmp/perveance-downloaded-runtime-test.log
+          else
+            cat /tmp/perveance-downloaded-runtime-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-downloaded-runtime-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
           "$bundle/bin/perveance-cli" new 16 16 base.json

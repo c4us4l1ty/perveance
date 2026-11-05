@@ -317,3 +317,17 @@ No instantiation, loader, runtime execution, install/activation permission,
 availability or autonomy follows. Protected independent verifier/broker/
 supervisor production roles and the full confined typed-edit/render contract
 remain open. Existing capability-layer rendering refusal is unconditional.
+
+Executing quarantined bytes adds engine enforcement but not a confinement proof.
+The interpreter uses wasmi 2.0.0 with an empty linker, no WASI or start
+function, eager deterministic translation, declared fuel/memory/output meters
+and contained panics. It runs inside the normal host process: there is no
+seccomp filter, namespace, cgroup, wall-clock CPU cap, syscall/network denial or
+file descriptor isolation specific to candidate code, and no independent
+behavior, payload-schema or provenance verification. A deterministic fuel
+budget is bookkeeping, not an audit, and a trapped or exhausted candidate is not
+evidence of safety or of useful behavior. No outcome installs, activates, makes
+available, mutates a document, publishes a PNG, contacts a provider or enables
+autonomy; every authority gate remains false. The protected production
+verifier/broker/supervisor roles, authenticated activation records and replay
+protection are still unimplemented.

@@ -51,8 +51,10 @@ nonfunctional; this registry never calls it.
 - `operations`: 1–16 unique ASCII symbols and positive schema versions. These are
   declarations only, not callable registered operations or schema validators.
 - `runtime`: positive requested fuel (≤10,000,000), memory (64-KiB multiples,
-  ≤16 MiB), output (≤1 MiB). These are bounded **requests, NOT runtime quotas**;
-  no runtime exists, no fuel is metered, and nothing is admitted for execution.
+  ≤16 MiB), output (≤1 MiB). The diagnostic interpreter applies them as engine
+  meters for a single call, but they remain candidate declarations: they are not
+  host quotas, CPU/wall-clock limits or confinement, and no install/activation
+  is admitted.
 - `provenance`: lowercase 64-hex source/recipe hashes, both candidate claims.
   No source/recipe is fetched, built, compared, signed or attested.
 
@@ -184,11 +186,16 @@ registry-inspect PRIVATE_ROOT
 registry-quarantine PRIVATE_REGISTRY_ROOT PRIVATE_INPUT_ROOT RELATIVE_MANIFEST RELATIVE_ARTIFACT
 registry-resolve-document PRIVATE_REGISTRY_ROOT PRIVATE_DOCUMENT_ROOT RELATIVE_DOCUMENT
 registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT
+registry-invoke-capability PRIVATE_REGISTRY_ROOT EXACT_SLOT PRIVATE_DOCUMENT_ROOT DOCUMENT PRIVATE_INTENT_ROOT INTENT
 ```
 
 These commands require the existing mandatory Linux `openat2` descriptor backend
 and an unprivileged owner. No registry/source FD is exported to a worker. The
 registry is not wired to GUI, job creation, provider requests or document runtime.
+`registry-invoke-capability` runs the frozen bytes through the bounded wasmi
+interpreter diagnostic only (see [EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md#metered-interpreter-diagnostic-nonauthorizing));
+it is read-only, has no fallback slot, and changes no registry, document or
+authority state.
 `ok` means the storage/diagnostic command completed, **not verified/installed/
 active/available**; also check mutation/publication durability fields.
 For module audits `ok:true` can include `static_profile_passed:false`. A positive
