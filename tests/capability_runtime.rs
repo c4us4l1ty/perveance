@@ -61,7 +61,7 @@ fn module(fixture: Fixture) -> Vec<u8> {
             body.push(0x0b);
             body
         }
-        Fixture::Loop => vec![0x03, 0x40, 0x0c, 0x00, 0x0b],
+        Fixture::Loop => vec![0x03, 0x40, 0x0c, 0x00, 0x0b, 0x00, 0x0b],
         Fixture::Trap => vec![0x00, 0x0b],
         Fixture::ZeroAllocator => vec![0x42, 0x00, 0x0b],
     };
@@ -77,17 +77,6 @@ fn module(fixture: Fixture) -> Vec<u8> {
         exports.extend(uleb(index));
     }
     out.extend(section(7, &exports));
-    if matches!(fixture, Fixture::Reply) {
-        let pixels = reply_bytes();
-        let mut data = uleb(1);
-        data.extend([0u8; 4]);
-        data.push(0x41);
-        data.extend(sleb(64));
-        data.push(0x0b);
-        data.extend(uleb(pixels.len() as u32));
-        data.extend(pixels);
-        out.extend(section(11, &data));
-    }
     let mut code = uleb(4);
     for body in [allocator, entry.clone(), entry.clone(), entry] {
         let mut function = vec![0x00];
@@ -96,6 +85,17 @@ fn module(fixture: Fixture) -> Vec<u8> {
         code.extend(function);
     }
     out.extend(section(10, &code));
+    if matches!(fixture, Fixture::Reply) {
+        let pixels = reply_bytes();
+        let mut data = uleb(1);
+        data.push(0x00);
+        data.push(0x41);
+        data.extend(sleb(64));
+        data.push(0x0b);
+        data.extend(uleb(pixels.len() as u32));
+        data.extend(pixels);
+        out.extend(section(11, &data));
+    }
     out
 }
 fn manifest(bytes: &[u8]) -> Manifest {

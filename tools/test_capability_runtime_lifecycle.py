@@ -53,7 +53,7 @@ def module(fixture):
     if fixture == "reply":
         entry = b"\x42" + sleb((64 << 32) | 48) + b"\x0b"
     elif fixture == "loop":
-        entry = b"\x03\x40\x0c\x00\x0b"
+        entry = b"\x03\x40\x0c\x00\x0b\x00\x0b"
     elif fixture == "trap":
         entry = b"\x00\x0b"
     else:
@@ -68,14 +68,14 @@ def module(fixture):
     out += section(3, bytes([4, 1, 0, 0, 0]))
     out += section(5, bytes([1, 1, 1, 1]))
     out += section(7, exports)
-    if fixture == "reply":
-        data = reply_bytes()
-        out += section(11, uleb(1) + bytes(4) + b"\x41" + sleb(64) + b"\x0b" + uleb(len(data)) + data)
     code = uleb(4)
     for body in (allocator, entry, entry, entry):
         function = b"\x00" + body
         code += uleb(len(function)) + function
     out += section(10, code)
+    if fixture == "reply":
+        data = reply_bytes()
+        out += section(11, uleb(1) + b"\x00" + b"\x41" + sleb(64) + b"\x0b" + uleb(len(data)) + data)
     return out
 
 
