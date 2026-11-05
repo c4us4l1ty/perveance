@@ -180,6 +180,12 @@
   fixture, with CLI init/inspect/call commands and downloaded-binary checks.
   Added 14 unit and eight integration test cases (including a subprocess helper)
   for replay/faults/concurrency/IPC/real SIGKILL and unsafe credential/file input.
-  All 41 local Python tests pass; new Rust/kernel/downloaded-bundle CI is pending.
-  No real credentials, provider calls, task/worker integration or generated code
-  are enabled. See [MODEL_BROKER.md](MODEL_BROKER.md) for exact trust/limits.
+  All 41 local Python tests pass. At `258cc80`, [Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176)
+  passed those cases and full native-GUI/bridge/recovery/downloaded-CLI regression,
+  including reservation/restart/dedup/exhaustion. [Run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)
+  passed all seven existing fixed-worker kernel tests on delegated Ubuntu 26.04,
+  kernel `7.0.0-1019-azure`, bubblewrap `0.11.1`, AppArmor userns restriction `1`.
+  The ordinary runner's optional namespace probe could not start; fixed peer
+  IPC tests are not protected broker-role evidence. No real credentials,
+  provider calls, task/worker integration or generated code are enabled.
+  See [MODEL_BROKER.md](MODEL_BROKER.md) for exact trust/limits.

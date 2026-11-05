@@ -36,7 +36,7 @@ production-sandbox certification, and do not authorize generated-code execution.
 | Durable task orchestration | Implemented and CI-tested Linux raster-proposal CLI/library backend | Integrate the GUI/provider and later verified worker pipeline. Existing offline tasks do not authorize code, make model calls or enforce OS quotas. |
 | Foundation decision | Working composed Rust raster engine; scoped Graphite research/headless-check evidence | Record the reversible foundation decision and remaining Graphite rendering/integration tradeoffs. A successful headless check is not a desktop integration spike. |
 | Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md) with seven passing real-kernel tests and [descriptor I/O](WORKER_IO.md) | Integrate and adversarially verify quotas/descendant cleanup in the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
-| Model broker and coding harness | New [offline broker/ledger component](MODEL_BROKER.md); real harness/route missing | Validate component tests, isolate the actual broker/worker roles and integrate durable calls into tasks. Verify provider billing/token bounds and one real compatible harness; no paid autonomous route is enabled. |
+| Model broker and coding harness | New [offline broker/ledger component](MODEL_BROKER.md); real harness/route missing | Isolate the actual broker/worker roles and integrate durable calls into tasks; retain response recovery and conservative uncertainty behavior. Verify provider billing/token bounds and one real compatible harness; no paid autonomous route is enabled. |
 | Extensible document/render contract | Missing; v1 is a strict raster format | Stable IDs, bounded versioned capability payloads, typed editing/render mediation, preservation of unavailable payloads and explicit failure when rendering cannot be correct. |
 | Capability registry/lifecycle | Missing | Immutable versioned artifacts, compatibility/provenance, independent verification, install/stage/activate, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
 | Autonomous build/reuse | Missing and disabled | Genuine vector-absent baseline, independently verified build/activation, editable saved/reopened vector artwork plus PNG, then a distinct task reusing the same version without another build. |
@@ -88,8 +88,11 @@ production-sandbox certification, and do not authorize generated-code execution.
   credentials, bounded connected-socket requests, immutable route/budget policy,
   exclusive durable reservations before dispatch, no refunds/retries and halted
   uncertain outcomes. Only an offline fixture transport is shipped.
-- [ ] Validate its new Rust/fault/SIGKILL/concurrency/IPC tests and downloaded CLI
-  regression; local Python tests are not Rust or provider evidence.
+- [x] Validate the broker's 14 unit/eight integration cases and downloaded CLI
+  at `258cc80` ([Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176));
+  the seven fixed-worker tests also passed regression
+  ([run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)).
+  Offline fixtures are not paid-provider or protected broker-isolation proof.
 - [ ] Complete protected broker/worker role separation, actual task integration,
   response recovery and verified provider billing/token/deadline controls. No
   keys in worker files/env/args; do not treat a declared bound as billing proof.

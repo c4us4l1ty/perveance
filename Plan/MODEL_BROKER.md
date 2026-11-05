@@ -159,9 +159,18 @@ subprocess is really SIGKILLed after entering its fake adapter: the reservation
 survives and neither an identical retry nor a new call dispatches afterward.
 The downloaded Linux CLI now exercises restart/dedup/exhaustion too.
 
-These new Rust and downloaded-binary checks await CI validation. All 41 local
-Python tests pass; no local Rust toolchain is available. Existing seven real
-cgroup-worker tests still need regression verification at this increment.
+At implementation commit `258cc80`, [Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176)
+passed all 14 new unit tests and the eight-case integration harness (including
+its subprocess helper/SIGKILL paths), the full Rust/native-GUI/bridge/recovery
+regression and the downloaded CLI's reservation/restart/dedup/exhaustion checks.
+[Feasibility run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)
+also passed all seven existing real cgroup-worker tests on the delegated Ubuntu
+26.04 service: kernel `7.0.0-1019-azure`, bubblewrap `0.11.1`, AppArmor userns
+restriction still `1`. This is regression evidence for the fixed worker, not
+proof that the new broker has been integrated into those protected roles. The
+ordinary Rust runner's optional namespace probe still could not start. All 41
+local Python tests pass; Rust/kernel evidence comes from CI because no local
+Rust toolchain is available. None of these tests made a real provider call.
 
 Protected broker/worker role separation, production task/intake/GUI integration,
 provider-specific token/billing enforcement, a real compatible harness/route,

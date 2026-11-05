@@ -146,7 +146,12 @@ not authentication; host-account/filesystem compromise, rollback or copied
 ledgers and guaranteed power-loss durability remain outside the contract.
 
 New tests include real cooperating subprocesses, SIGKILL after fake dispatch,
-strict/fragmented/dripping IPC and injected write/sync failures. They await CI.
+strict/fragmented/dripping IPC and injected write/sync failures. All 14 unit
+and eight integration cases passed at `258cc80` in
+[Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176),
+including full GUI/recovery and downloaded-CLI regression.
+[Run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)
+kept all seven fixed-worker kernel tests green without relaxing AppArmor.
 Neither protocol tests nor a fixed unsandboxed peer prove protected role
 separation. Broker-process hardening, credential stores, actual task/worker
 integration, paid-provider token/pricing/deadline/usage verification, compatible
