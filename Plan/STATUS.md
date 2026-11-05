@@ -248,7 +248,15 @@
   unavailable layer (including hidden). Added descriptor-root CLI operations
   and atomic private single-file no-replace publication with postcommit sync
   uncertainty receipts; legacy GUI/bridge/provider/jobs stay strict v1-only.
-  New Rust/adversarial and actual-CLI/downloaded-binary lifecycle tests are
-  implemented but **Rust/CLI CI is pending**. No registry, extension renderer,
-  vector feature, generated code, provider or autonomy is enabled. See
-  [DOCUMENT.md](DOCUMENT.md); original build-and-reuse acceptance remains open.
+  Fourteen new document plus three publisher Rust cases, real debug/downloaded
+  binary document lifecycles and all native/bridge/recovery/bundle checks passed
+  at `8593268` ([Rust CI 42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898),
+  6m00s). [Matrix 42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888)
+  passed all three jobs and exact twelve + two mandatory kernel cases on delegated
+  Ubuntu 26.04, kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor restriction `1`
+  unchanged. The ordinary optional probe could not start; 50 local Python tests
+  pass. CI first caught and corrected test-only private-PNG/discovery-envelope
+  assumptions. No registry, extension renderer, vector feature, generated code,
+  provider or autonomy is enabled. PR25 is stacked on still-open PR24; main is
+  unchanged. See [DOCUMENT.md](DOCUMENT.md); original build-and-reuse acceptance
+  remains open.

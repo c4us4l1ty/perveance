@@ -37,7 +37,7 @@ production-sandbox certification, and do not authorize generated-code execution.
 | Foundation decision | Working composed Rust raster engine; scoped Graphite research/headless-check evidence | Record the reversible foundation decision and remaining Graphite rendering/integration tradeoffs. A successful headless check is not a desktop integration spike. |
 | Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md) with twelve passing worker integration + two task kernel cases and [descriptor I/O](WORKER_IO.md) | Integrate and adversarially verify quotas/descendant cleanup in the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
 | Model broker and coding harness | New [offline broker/ledger component](MODEL_BROKER.md); real harness/route missing | Isolate the actual broker/worker roles and integrate durable calls into tasks; retain response recovery and conservative uncertainty behavior. Verify provider billing/token bounds and one real compatible harness; no paid autonomous route is enabled. |
-| Extensible document/render contract | [Data-only v2 foundation](DOCUMENT.md) implemented for review; Rust/CLI CI pending; legacy v1 stays strict raster | Complete the protected extension-specific validation, typed editing/render ABI, confined resource-bounded dispatch and migration/rollback contract. Opaque preservation/native edits are not a working extension. |
+| Extensible document/render contract | Verified [data-only v2 foundation](DOCUMENT.md); legacy v1 stays strict raster | Complete the protected extension-specific validation, typed editing/render ABI, confined resource-bounded dispatch and migration/rollback contract. Opaque preservation/native edits are not a working extension. |
 | Capability registry/lifecycle | Missing | Immutable versioned artifacts, compatibility/provenance, independent verification, install/stage/activate, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
 | Autonomous build/reuse | Missing and disabled | Genuine vector-absent baseline, independently verified build/activation, editable saved/reopened vector artwork plus PNG, then a distinct task reusing the same version without another build. |
 | Distribution | Unsigned x86-64 Linux evaluation artifact, tested after download | Runtime/desktop compatibility, full dependency/asset/license review, owner license choice, signing/provenance/update policy and release approval. |
@@ -116,10 +116,12 @@ production-sandbox certification, and do not authorize generated-code execution.
 
 ### 3. Document/capability contract, independent verification and activation
 
-- [ ] Verify the new [data-only v2 document foundation](DOCUMENT.md): stable
+- [x] Verify the [data-only v2 document foundation](DOCUMENT.md): stable
   document/layer/object IDs, bounded opaque byte preservation, revision-bound
   native edits, atomic private file publication and explicit unavailable-content
-  rendering refusal. Implementation/tests exist; Rust/real-CLI CI is pending.
+  rendering refusal. At `8593268`, all-target/debug-CLI/native/downloaded-bundle
+  checks passed ([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898));
+  fourteen mandatory kernel cases also passed ([42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888)).
 - [ ] Complete the generic protected extension validation/typed-edit/render
   contract before attempting the vector experiment. V2 does not yet execute or
   semantically validate any capability. Do not preinstall vectors and call

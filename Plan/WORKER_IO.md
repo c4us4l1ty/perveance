@@ -154,4 +154,8 @@ Concurrent and injected pre/postcommit failure cases supplement existing bundle
 tests. Crash stages may remain private; no automatic repair/sweep is provided.
 This does not authorize plugin code or alter worker/broker/job contracts. V2
 unknown capability bytes are preserved, never semantically approved or rendered.
-New document Rust/actual-CLI CI is pending.
+At `8593268`, all-target Rust and real debug/downloaded-CLI document lifecycle
+passed ([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898)),
+including injected failures/concurrency/held-root cases. All fourteen mandatory
+worker kernel cases separately passed ([42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888));
+this is not production certification or generated-code authority.

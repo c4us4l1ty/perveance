@@ -1,8 +1,8 @@
 # Bounded data-only extensible documents (v2 foundation)
 
-**Status:** implemented for review; new Rust/CLI/packaged-binary results must be
-recorded after CI. This is an offline storage/native-edit increment, not a
-capability registry, executable plugin ABI, vector feature or self-extension demo.
+**Status:** verified data-only foundation at `85932682be318e04536c8b8b4c38e5c9feb08f90`
+(2026-11-05; evidence below). This is an offline storage/native-edit increment,
+not a capability registry, executable plugin ABI, vector feature or self-extension demo.
 No provider/model is invoked and no generated code is loaded or executed.
 
 ## Separation from the existing editor
@@ -202,8 +202,23 @@ preservation/save/reopen, hidden-layer render refusal, malformed/over-limit
 inputs, stale/rollback/no-replace/path denials, and rejection by v1 authoring,
 bridge and both task backends before job/output creation.
 
-**New Rust/CLI CI evidence pending.** Existing fourteen required delegated worker
-kernel cases remain required; these storage tests do not replace them.
+At `8593268`, [Rust CI 42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898)
+passed in **6m00s** (job `127256767740`): all-target Rust tests including fourteen
+new document and three new publisher cases, the real debug CLI document
+lifecycle, native X11/bridge/recovery regressions, packaging, upload/download and
+the actual downloaded CLI document lifecycle. All 50 local Python tests and
+Python/shell syntax/diff checks pass. The first CI rounds caught test-harness
+private-API/discovery-envelope assumptions; corrected tests use the public PNG
+export and preserve the existing discovery schema.
+
+[Matrix 42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888)
+passed all three jobs. Delegated Ubuntu 26.04 job `127256767884` passed the exact
+**twelve worker + two durable-task kernel cases** in 1m29s, kernel
+`7.0.0-1019-azure`, bubblewrap `0.11.1`, AppArmor userns restriction `1` unchanged.
+The ordinary runner's optional namespace probe still could not start. These are
+fixed offline CI results, not portable host approval, production certification,
+real-desktop validation or permission to execute generated code. Storage tests
+do not replace the mandatory worker cases.
 
 Still absent: available capability discovery, immutable registry/install/verify/
 stage/activation, code/dependency fetch/build, protected extension-specific

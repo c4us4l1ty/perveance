@@ -228,6 +228,11 @@ no-replace rename and parent fsync. Postcommit sync uncertainty retains visible
 artwork. Crash stages are private and require operator review, not automatic
 repair/sweep. Input byte/sequence bounds are not hard CPU/memory quotas; host
 parsing/rendering/I/O, malicious same-UID host processes and rollback remain
-outside this protection. The new code/tests await Rust/real-CLI CI. Independent
-capability verification, confined extension validation/edit/render, protected
-registry activation, migrations and the genuine vector experiment remain open.
+outside this protection. At `8593268`, all-target Rust, real debug/downloaded
+CLI document lifecycle and native/bridge/recovery regressions passed
+([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898));
+all fourteen mandatory delegated kernel cases passed with host policy unchanged
+([42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888)).
+The ordinary optional namespace probe remains unavailable. Independent capability
+verification, confined extension validation/edit/render, protected registry
+activation, migrations and the genuine vector experiment remain open.

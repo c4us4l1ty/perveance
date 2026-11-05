@@ -168,4 +168,7 @@ parent-sync receipt means the file is already visible but durability uncertain.
 This is not the legacy v1 `apply-proposal`, bridge, GUI or job protocol. Those
 paths reject v2, even raster-only v2; do not manually strip fields to use them.
 There is no available extension-specific editor/renderer yet and no self-building
-vector feature. New Rust/actual-CLI verification is pending.
+vector feature. At `8593268`, all-target Rust plus real debug/downloaded-CLI
+lifecycle and native/bridge/recovery regressions passed
+([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898));
+see DOCUMENT.md for kernel evidence and explicit remaining gates.
