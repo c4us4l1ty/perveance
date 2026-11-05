@@ -213,7 +213,7 @@ fn registry_command(args: &[String]) -> Result<serde_json::Value, String> {
         [op, root, slot, document_root, document_name, intent_root, intent_name, reply_root, reply_name] if op == "registry-inspect-protocol" => {
             let document = Document::capture(&PrivateDirectory::open(Path::new(document_root))?, document_name)?;
             let intent = perveance::extension_protocol::Intent::capture(&PrivateDirectory::open(Path::new(intent_root))?, intent_name)?;
-            let reply = PrivateDirectory::open(Path::new(reply_root))?.read_private(reply_name, perveance::extension_protocol::MAX_REPLY_BYTES)?;
+            let reply = perveance::extension_protocol::capture_reply(&PrivateDirectory::open(Path::new(reply_root))?, reply_name)?;
             let report = Registry::open(Path::new(root))?.inspect_protocol(slot, &document, &intent, Some(&reply))?;
             Ok(json!({"ok": true, "protocol": report}))
         }

@@ -71,6 +71,11 @@ impl Intent {
         Self::from_bytes(&root.read_private(name,MAX_INTENT_BYTES)?).map_err(|e|e.to_string())
     }
 }
+/// Host-only bounded reply capture; never interprets or authorizes bytes.
+#[cfg(target_os="linux")]
+pub fn capture_reply(root:&crate::worker_io::PrivateDirectory,name:&str)->std::result::Result<Vec<u8>,String>{
+    root.read_private(name,MAX_REPLY_BYTES)
+}
 #[derive(Clone,Default,Debug,Serialize)]
 pub struct Gates {
     pub module_instantiated:bool,pub code_executed:bool,pub behavior_verified:bool,
