@@ -1,4 +1,4 @@
-use super::{Artifact, Publication, MAX_RELATIVE_BYTES, MAX_RELATIVE_COMPONENTS, PNG_FILE, PROJECT_FILE};
+use super::{Artifact, FilePublication, Publication, MAX_RELATIVE_BYTES, MAX_RELATIVE_COMPONENTS, PNG_FILE, PROJECT_FILE};
 use crate::{Project, MAX_PNG_BYTES, MAX_PROJECT_BYTES};
 use sha2::{Digest, Sha256};
 use std::{
@@ -180,6 +180,41 @@ impl PrivateDirectory {
         self.directory.sync_all().map_err(|_| fail("cannot sync private directory"))
     }
 
+    pub(crate) fn publish_bytes(&self, name: &str, bytes: &[u8], limit: u64) -> Result<FilePublication, String> {
+        self.publish_bytes_with_hook(name, bytes, limit, |_| Ok(()))
+    }
+
+    fn publish_bytes_with_hook(&self, name: &str, bytes: &[u8], limit: u64,
+        mut hook: impl FnMut(Phase) -> Result<(), ()>) -> Result<FilePublication, String> {
+        let target = bundle_name(name)?;
+        if !name.as_bytes()[0].is_ascii_alphanumeric() { return Err(fail("private filename must begin with an ASCII letter or digit")); }
+        if bytes.len() as u64 > limit { return Err(fail("private publication exceeds byte limit")); }
+        let mut random = [0u8; 16];
+        if unsafe { libc::getrandom(random.as_mut_ptr().cast(), random.len(), 0) } != random.len() as isize {
+            return Err(fail("cannot allocate private file stage"));
+        }
+        let stage_name = format!(".perveance-file-{}", random.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let file = self.create_private(&stage_name)?;
+        let mut stage = FileStage { parent: self, name: stage_name, file, committed: false };
+        stage.file.write_all(bytes).and_then(|_| stage.file.sync_all()).map_err(|_| fail("cannot sync private file stage"))?;
+        hook(Phase::FileSynced(0)).map_err(|_| fail("single-file publication interrupted before commit"))?;
+        hook(Phase::BeforeCommit).map_err(|_| fail("single-file publication interrupted before commit"))?;
+        let staged = relative(&stage.name)?;
+        let current = open_at(self.directory.as_raw_fd(), &staged, libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0, BENEATH)?;
+        if !same_inode(&stage.file.metadata().map_err(|_| fail("cannot inspect private file stage"))?,
+                       &current.metadata().map_err(|_| fail("cannot inspect private file stage"))?) {
+            return Err(fail("private file stage replaced"));
+        }
+        if unsafe { libc::syscall(libc::SYS_renameat2, self.directory.as_raw_fd(), staged.as_ptr(),
+            self.directory.as_raw_fd(), target.as_ptr(), libc::RENAME_NOREPLACE) } != 0 {
+            return Err(fail("cannot publish new private file; occupied names are never replaced"));
+        }
+        stage.committed = true;
+        let parent_directory_synced = hook(Phase::Committed).is_ok() && self.sync().is_ok();
+        Ok(FilePublication { file: name.into(), bytes: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)),
+            committed: true, parent_directory_synced, autonomous_execution: false })
+    }
+
     fn read_with_hook(&self, name: &str, limit: u64, hook: impl FnOnce()) -> Result<Vec<u8>, String> {
         let name = relative(name)?;
         // O_PATH does not activate a FIFO, socket or device. Reject their type
@@ -359,6 +394,21 @@ impl VerifiedBundle {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase { FileSynced(usize), BeforeCommit, Committed }
+
+struct FileStage<'a> { parent: &'a PrivateDirectory, name: String, file: File, committed: bool }
+impl Drop for FileStage<'_> {
+    fn drop(&mut self) {
+        if self.committed { return; }
+        if let (Ok(name), Ok(ours)) = (relative(&self.name), self.file.metadata()) {
+            if let Ok(current) = open_at(self.parent.directory.as_raw_fd(), &name,
+                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0, BENEATH) {
+                if current.metadata().is_ok_and(|metadata| same_inode(&ours, &metadata)) {
+                    unsafe { libc::unlinkat(self.parent.directory.as_raw_fd(), name.as_ptr(), 0); }
+                }
+            }
+        }
+    }
+}
 
 struct Stage<'a> { parent: &'a PrivateDirectory, directory: PrivateDirectory, name: String, committed: bool }
 impl<'a> Stage<'a> {

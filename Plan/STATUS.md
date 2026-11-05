@@ -237,3 +237,18 @@
   userns restriction `1` unchanged. The ordinary optional probe could not start.
   PR24 continues this work; no production autonomy is approved. See
   [WORKER_TASKS.md](WORKER_TASKS.md).
+
+
+- Continued on the new fixed session branch `arena/019f4bdd-perveance`,
+  fast-forwarding it to PR24's fully verified `90e2a07` head without merging or
+  changing PR24/main. Implemented an offline bounded v2 document foundation:
+  stable document/layer/object IDs, exact immutable-reference metadata and
+  opaque hex bytes, strict bounded typed parsing, revision-bound native pixel/
+  wrapper edits, existing Rust raster rendering and mandatory refusal for any
+  unavailable layer (including hidden). Added descriptor-root CLI operations
+  and atomic private single-file no-replace publication with postcommit sync
+  uncertainty receipts; legacy GUI/bridge/provider/jobs stay strict v1-only.
+  New Rust/adversarial and actual-CLI/downloaded-binary lifecycle tests are
+  implemented but **Rust/CLI CI is pending**. No registry, extension renderer,
+  vector feature, generated code, provider or autonomy is enabled. See
+  [DOCUMENT.md](DOCUMENT.md); original build-and-reuse acceptance remains open.

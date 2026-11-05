@@ -140,3 +140,18 @@ requirement. Dependency acquisition, protected fetch/build/runtime namespaces,
 output transport from an untrusted worker, durable task integration, bounded
 credential/model brokerage, schema migration, independent capability verification
 and crash-safe activation remain required before generated execution can open.
+
+
+## Single-file data-only document publication
+
+The v2 [document foundation](DOCUMENT.md) reuses held-directory capture and adds
+private single-file publication: bounded canonical host bytes, random 0600 stage,
+file sync, stage inode check, mandatory `renameat2(RENAME_NOREPLACE)`, parent sync
+and a basename/length/SHA-256 receipt. Existing names are never replaced; cleanup
+unlinks only our stage inode. A postcommit sync failure reports visible output
+with `parent_directory_synced=false`, not a precommit failure or deletion.
+Concurrent and injected pre/postcommit failure cases supplement existing bundle
+tests. Crash stages may remain private; no automatic repair/sweep is provided.
+This does not authorize plugin code or alter worker/broker/job contracts. V2
+unknown capability bytes are preserved, never semantically approved or rendered.
+New document Rust/actual-CLI CI is pending.

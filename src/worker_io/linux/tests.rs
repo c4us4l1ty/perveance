@@ -231,3 +231,50 @@ fn kernel_mount_crossing_and_magic_link_denials_are_not_pathname_simulations() {
     let held_number = CString::new(slash.as_raw_fd().to_string()).unwrap();
     assert!(open_at(fds.as_raw_fd(), &held_number, libc::O_RDONLY | libc::O_CLOEXEC, 0, RESOLVE_NO_MAGICLINKS).is_err());
 }
+
+#[test]
+fn single_file_precommit_failures_cleanup_and_postcommit_uncertainty_retains_output() {
+    let output=private(); let root=PrivateDirectory::open(output.path()).unwrap();
+    for failure in [Phase::FileSynced(0), Phase::BeforeCommit] {
+        assert!(root.publish_bytes_with_hook("document.json", b"private-doc", 1024, |phase| {
+            assert!(!output.path().join("document.json").exists());
+            if phase == failure { Err(()) } else { Ok(()) }
+        }).is_err());
+        assert_eq!(fs::read_dir(output.path()).unwrap().count(), 0);
+    }
+    let result=root.publish_bytes_with_hook("document.json", b"private-doc", 1024, |phase| {
+        if phase == Phase::Committed { Err(()) } else { Ok(()) }
+    }).unwrap();
+    assert!(result.committed && !result.parent_directory_synced);
+    assert_eq!(fs::read(output.path().join("document.json")).unwrap(), b"private-doc");
+    assert!(root.publish_bytes("document.json", b"replacement", 1024).is_err());
+    assert!(root.publish_bytes("other.json", b"too large", 1).is_err());
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn concurrent_single_file_publication_has_exactly_one_winner() {
+    let output=private(); let root=Arc::new(PrivateDirectory::open(output.path()).unwrap());
+    let threads: Vec<_>=(0..4).map(|i| {
+        let root=Arc::clone(&root); thread::spawn(move || root.publish_bytes("same.json", &[i;16], 16))
+    }).collect();
+    assert_eq!(threads.into_iter().map(|t| t.join().unwrap().is_ok()).filter(|ok| *ok).count(), 1);
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+    let bytes=fs::read(output.path().join("same.json")).unwrap(); assert_eq!(bytes.len(),16);
+    assert!(bytes.iter().all(|b| *b==bytes[0]));
+}
+
+#[test]
+fn replaced_single_file_stage_is_neither_published_nor_deleted_as_our_artwork() {
+    let output=private(); let root=PrivateDirectory::open(output.path()).unwrap();
+    assert!(root.publish_bytes_with_hook("document.json", b"our bytes", 1024, |phase| {
+        if phase == Phase::BeforeCommit {
+            let stage=fs::read_dir(output.path()).unwrap().next().unwrap().unwrap().path();
+            fs::remove_file(&stage).unwrap(); write_private(&stage, b"not ours");
+        }
+        Ok(())
+    }).is_err());
+    assert!(!output.path().join("document.json").exists());
+    let remaining=fs::read_dir(output.path()).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(fs::read(remaining).unwrap(), b"not ours");
+}

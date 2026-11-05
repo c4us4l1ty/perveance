@@ -209,3 +209,25 @@ with host policy unchanged, and all-target/native/downloaded-bundle regression
 passed ([42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445)).
 Fifty Python tests pass. The ordinary runner's optional namespace probe could
 not start; portable production host approval and independent review remain open.
+
+
+## Data-only extensible document continuation
+
+[DOCUMENT.md](DOCUMENT.md) defines a distinct bounded v2 envelope, never a module
+loader. All references are unavailable; their hashes/versions are metadata, not
+trust or execution consent. Arbitrary payload bytes survive canonical save/copy
+and stable-ID native edits without schema parsing, code/path/URL/archive
+interpretation or artifact discovery. Any capability layer blocks rendering,
+even hidden/empty. Strict v1 GUI/bridge/provider/tasks reject v2; no automatic
+migration/downgrade can strip it. Native edit batches clone/check/commit against
+the complete document revision and cannot mutate/delete opaque objects.
+
+Linux CLI uses existing held private directory descriptors and bounded capture;
+single-file output uses a synced 0600 stage, inode check, mandatory atomic
+no-replace rename and parent fsync. Postcommit sync uncertainty retains visible
+artwork. Crash stages are private and require operator review, not automatic
+repair/sweep. Input byte/sequence bounds are not hard CPU/memory quotas; host
+parsing/rendering/I/O, malicious same-UID host processes and rollback remain
+outside this protection. The new code/tests await Rust/real-CLI CI. Independent
+capability verification, confined extension validation/edit/render, protected
+registry activation, migrations and the genuine vector experiment remain open.

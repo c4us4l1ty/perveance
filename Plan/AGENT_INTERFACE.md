@@ -150,3 +150,22 @@ retry of running/terminal work, budget reset or unconfined fallback is available
 See [WORKER_TASKS.md](WORKER_TASKS.md) for five commands and explicit recovery.
 The GUI, legacy task formats, natural-language intake and autonomy gate are not
 silently changed; no provider key or model program is accepted.
+
+
+## Data-only v2 document CLI
+
+The separate Linux `document-import-raster`, `document-inspect`, `document-copy`,
+`document-apply` and `document-export-png` commands take caller-authorized private
+directory roots, bounded relative input names and create-new output basenames.
+See [DOCUMENT.md](DOCUMENT.md) for exact arguments and schema. V2 exposes stable
+IDs/revision and preserves arbitrary unavailable-capability bytes; typed wrapper
+and native-pixel edits are atomic in memory. Inspection omits names/pixels/
+payloads and reports all capabilities unavailable. A hidden capability layer
+still blocks export. No registry search, provider, fetch, activation or code
+execution is performed. Outputs are descriptor-bound, atomic no-replace; a false
+parent-sync receipt means the file is already visible but durability uncertain.
+
+This is not the legacy v1 `apply-proposal`, bridge, GUI or job protocol. Those
+paths reject v2, even raster-only v2; do not manually strip fields to use them.
+There is no available extension-specific editor/renderer yet and no self-building
+vector feature. New Rust/actual-CLI verification is pending.

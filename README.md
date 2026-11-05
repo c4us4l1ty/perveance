@@ -7,7 +7,8 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse, composite-eyedropper and rectangular region-editing tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A Linux-only persistent job backend for revision-bound raster proposals: private snapshots, status, cooperative cancellation, verified project/PNG outputs and explicit interrupted-run recovery. It is not wired to the GUI/provider and does not run generated code.
-- A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
+- An offline [data-only v2 document foundation](Plan/DOCUMENT.md): stable layer/object IDs, bounded byte-preserving unavailable-capability payloads, revision-bound native edits and explicit export refusal instead of missing content. This is CLI/library-only, not working plugins or a vector capability.
+- A headless CLI backed by the shared Rust raster engine. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
 This is **not** the finished product: autonomous development, sandbox enforcement, vector artwork, a full editor, atomic/revision-aware project updates, and broad OS support are not implemented. Do not rely on this prototype for important artwork. It does not execute generated code.
@@ -55,6 +56,20 @@ python3 tools/arena_art.py apply-proposal potion.perveance.json edited.perveance
 The operations file is a JSON array in the Rust CLI's format. The bridge supports the current typed raster batch operations: `add_layer`, `duplicate_layer`, `clear_layer`, `clear_region`, `copy_region`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `rename_layer`, `move_layer`, `remove_layer`, `set_visibility`, `pixel`, `line`, `brush_line`, `rectangle`, `rectangle_outline`, `ellipse`, and `fill`. Its project and file limits remain stricter than Rust's; CLI commands and PNG import are not fully supported. Use `sample ... layer LAYER` or `read-region ... layer LAYER` for raw layer pixels (including hidden pixels). Region results are row-major, retain raw RGB under zero alpha, and report the snapshot revision. A brush is a clipped 1–16 pixel square, and even sizes are biased toward the top left; ellipses follow the Rust pixel-center rasterization. Straight-alpha RGBA compositing follows the Rust model; CI compares batch results, representative translucent composites, and bridge PNGs against the Rust implementation. A native X11 test exercises a file handoff from the bridge to a GUI edit and back to a revision-bound bridge edit; it is not a live connector or real-desktop validation. This is a separately implemented, limited compatibility bridge—not the Rust app running inside Arena, an Arena connector, or full CLI parity. Projects can be opened in Perveance when transferred to an available build, but the project format is experimental.
 
 Bridge limits are 128×128, 16 layers, 1,024 operations, 256 KiB batch input and 8 MiB project input/output; scaled PNGs may be up to 1024×1024. The Rust app has different limits, and scaled PNGs larger than 256×256 cannot be reimported into it. Inputs are loaded snapshots. `inspect`, `sample` and `read-region` report the Rust-compatible content revision, and `apply-proposal` rejects a mismatched v1 base revision; plain `apply` does not check one. Revision checks are not locks or atomic compare-and-swap and cannot see unsaved GUI changes or later disk edits. Output files are create-new and installed through a same-directory temporary file and hard link; existing paths are not overwritten. Directories and inputs must be trusted; symlinks are followed on input, hard-link support is required, and a crash or cleanup error may leave temporary or completed files. There is no precise CPU/memory quota. The bridge runs no generated code and supplies no sandbox, supervisor, model, or automatic self-extension; an Arena agent must itself choose the operations and have access to the checkout and output directory. Do not put secrets in artwork or paths.
+
+### Data-only extensible document foundation
+
+The separate Linux `document-import-raster`, `document-inspect`, `document-copy`,
+`document-apply` and `document-export-png` commands use private descriptor-scoped
+roots and create-new atomic publication. They can import a v1 project into a new
+v2 file, preserve unavailable capability objects exactly, and edit/reorder native
+layers by stable ID. Any unavailable layer blocks PNG export, even hidden;
+unknown payloads are never executed, fetched or silently flattened. See the
+[format, commands, limits and remaining gates](Plan/DOCUMENT.md). The GUI,
+Python bridge, prompt adapter and both job backends remain **v1-only** and reject
+v2. The bundled `opaque-document-v2.json` is a preservation/refusal fixture, not
+an installed plugin. Registry, verified extension editing/rendering, activation
+and the original missing-vector build/reuse acceptance remain unimplemented.
 
 ### Headless batch editing
 

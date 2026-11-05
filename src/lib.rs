@@ -3,6 +3,7 @@
 
 pub mod bounded_worker;
 pub mod broker;
+pub mod document;
 pub mod fixed_worker;
 pub mod file_browser;
 pub mod provider;

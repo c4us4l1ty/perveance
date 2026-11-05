@@ -144,3 +144,22 @@ and inspect task.state for outcome. Worker edits are independently compared to
 trusted Rust edits; host PNG and editable JSON publish atomically. Recovery never
 replays a worker/provider or resets accounting. No real key/model code is accepted.
 See Plan/WORKER_TASKS.md; downloaded offline checks do not attest kernel support.
+
+
+Data-only v2 documents (Linux CLI/library only)
+----------------------------------------------
+document-import-raster/inspect/copy/apply/export-png take private descriptor-root
+arguments; run an operation without arguments for exact usage. Roots must be
+owned mode 0700; use mode 0600 single-link regular input files. New output names
+are non-hidden ASCII basenames; outputs are mode 0600 and never replace existing
+names. A publication with parent_directory_synced=false is already visible but
+crash durability is uncertain; retain it and inspect, do not blindly overwrite.
+
+V2 preserves stable IDs and bounded arbitrary opaque bytes, permits native pixel
+and layer-wrapper edits, and reuses the existing raster renderer. Any unavailable
+capability layer blocks export, even hidden/empty. Nothing is fetched, installed,
+loaded as code or activated on open. examples/opaque-document-v2.json is only an
+UNAVAILABLE-data preservation/refusal fixture; it is not a vector plugin. GUI,
+bridge, provider and both job formats remain v1-only and reject v2. No registry,
+extension execution or autonomy is supplied. See Plan/DOCUMENT.md in the source
+repository for schema/limits and verification status.
