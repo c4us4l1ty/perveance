@@ -215,6 +215,11 @@ intent/snapshot preparation or file capture instead returns `ok:false`/nonzero.
 An accepted non-success candidate status is not a successful edit/render result.
 Partial projections/hashes/statuses are cleared on rejection. No result is cached.
 
+Selecting a native/raster layer or any document ID mismatch is refused before a
+frame is built; the bundled example's hidden capability layer is the only valid
+target, and its opaque bytes deliberately contain misleading private text that no
+report or error may echo.
+
 All `gates` fields remain false: module_instantiated, code_executed,
 behavior_verified, payload_schemas_verified, provenance_verified,
 capability_verified, runtime_limits_enforced, activation_permitted, installed,
