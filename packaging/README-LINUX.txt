@@ -135,3 +135,12 @@ call. Credentials/ledger mounts are absent; stdin is sealed and stdout is scoped
 IPC. Synthetic private probe files may remain after SIGKILL; cgroup recovery
 never resets accounting. See Plan/BROKER_WORKER.md. This is not a production
 broker, coding harness, raster task or autonomy permit.
+
+
+worker-task-create/inspect/run/cancel/recover are separate fixed Pixel-only
+worker jobs, not the old task-* store or an autonomous agent. Capture private
+revision-bound proposals, use an already-provisioned delegated backend at run,
+and inspect task.state for outcome. Worker edits are independently compared to
+trusted Rust edits; host PNG and editable JSON publish atomically. Recovery never
+replays a worker/provider or resets accounting. No real key/model code is accepted.
+See Plan/WORKER_TASKS.md; downloaded offline checks do not attest kernel support.

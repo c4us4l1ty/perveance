@@ -2,13 +2,14 @@
 //! A trusted caller must provision a private, delegated cgroup-v2 root. Nothing
 //! in this module accepts a program, command, model output or executable path.
 use crate::Project;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::{path::Path, sync::atomic::AtomicBool};
 
 #[cfg(target_os = "linux")]
 mod linux;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Limits {
     pub wall_seconds: u64,
     /// Aggregate CPU budget monitored by the independent watchdog, with sampling
@@ -201,4 +202,22 @@ pub fn run_broker_fixture(snapshot: &crate::worker_io::ProjectSnapshot, delegate
                           ledger_root: &Path, mode: BrokerMode, limits: &Limits, cancelled: &AtomicBool,
                           progress: &BrokerProgress) -> Result<BrokerWorkerReport, String> {
     linux::brokered::run(snapshot, delegated_root, ledger_root, mode, limits, cancelled, progress)
+}
+
+
+/// Identity of an already-provisioned backend, not permission to create one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendIdentity { pub device: u64, pub inode: u64 }
+#[cfg(target_os = "linux")]
+pub fn backend_identity(root: &Path) -> Result<BackendIdentity, String> { linux::backend_identity(root) }
+
+/// Host-only pixel proposal plus bounded candidate output. No arbitrary code,
+/// command, provider route or worker-controlled filename is accepted.
+#[cfg(target_os = "linux")]
+pub(crate) fn run_pixel_fixture(snapshot: &crate::worker_io::ProjectSnapshot, proposal: &crate::EditProposal,
+    delegated_root: &Path, ledger: crate::broker::Ledger, ledger_path_hint: &Path,
+    backend: &BackendIdentity, mode: BrokerMode, limits: &Limits, cancelled: &AtomicBool, progress: &BrokerProgress)
+    -> Result<(BrokerWorkerReport, Option<Vec<u8>>), String> {
+    linux::brokered::run_pixels(snapshot, proposal, delegated_root, ledger, ledger_path_hint, backend, mode, limits, cancelled, progress)
 }

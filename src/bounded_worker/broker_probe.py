@@ -72,6 +72,23 @@ def verify_environment(environment):
     assert environment["PWD"] == "/work"
 
 
+def pixel_candidate(payload):
+    # Only the sealed host-captured typed data is used. Model response text is
+    # never parsed as a proposal or executed. Rust independently verifies output.
+    assert set(payload) == {"version", "project", "proposal"} and payload["version"] == 1
+    project, proposal = payload["project"], payload["proposal"]
+    assert set(proposal) == {"version", "base_revision", "operations"} and proposal["version"] == 1
+    assert 1 <= len(proposal["operations"]) <= 1024
+    for operation in proposal["operations"]:
+        assert set(operation) == {"op", "layer", "x", "y", "color"} and operation["op"] == "pixel"
+        layer, x, y, color = (operation[key] for key in ("layer", "x", "y", "color"))
+        assert all(type(value) is int for value in (layer, x, y))
+        assert 0 <= layer < len(project["layers"]) and 0 <= x < project["width"] and 0 <= y < project["height"]
+        assert len(color) == 4 and all(type(value) is int and 0 <= value <= 255 for value in color)
+        project["layers"][layer]["pixels"][y * project["width"] + x] = color
+    return project
+
+
 def run(config):
     global STAGE
     STAGE = "descriptors"
@@ -111,12 +128,13 @@ def run(config):
     denied_socket(socket.AF_UNIX, config["host_socket"])
     denied_socket(socket.AF_INET, ("127.0.0.1", config["host_port"]))
     STAGE = "project"
-    project = json.load(sys.stdin)
+    payload = json.load(sys.stdin)
+    project = payload["project"] if config["mode"] == "pixel-task" else payload
     request = {"version": 1, "id": config["id"], "prompt": "fixed confined offline fixture", "max_output_tokens": 10}
     STAGE = "broker"
     with socket.socket(fileno=1) as peer:
         peer.settimeout(5)
-        if config["mode"] != "inspect":
+        if config["mode"] not in ("inspect", "pixel-task"):
             assert config["mode"] in ("hold-before-dispatch", "hold-in-flight")
             send(peer, request)
             while True:
@@ -129,6 +147,10 @@ def run(config):
         exchange(peer, changed, "conflict")
         other = dict(request, id=("0" * 32 if config["id"] != "0" * 32 else "1" * 32))
         exchange(peer, other, "budget_exhausted")
+        if config["mode"] == "pixel-task":
+            candidate = json.dumps(pixel_candidate(payload), separators=(",", ":"), ensure_ascii=True).encode("ascii")
+            assert 0 < len(candidate) <= 40 * 1024 * 1024
+            peer.sendall(struct.pack("!I", len(candidate)) + candidate)
         summary = {"width": project["width"], "height": project["height"], "layers": len(project["layers"]),
                    "private_files_denied": True, "host_socket_denied": True, "host_tcp_denied": True,
                    "host_proc_denied": True, "descriptors_clean": True, "environment_clean": True,

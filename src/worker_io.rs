@@ -32,4 +32,4 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{PrivateDirectory, ProjectSnapshot, VerifiedBundle};
 #[cfg(target_os = "linux")]
-pub(crate) use linux::anonymous_file;
+pub(crate) use linux::{anonymous_file, sealed_input};

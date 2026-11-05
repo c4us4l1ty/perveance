@@ -505,4 +505,55 @@ mod linux {
         assert!(groups(&root).is_empty());
     }
 
+    #[test]
+    #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
+    fn durable_pixel_job_captures_cli_inputs_verifies_full_output_and_never_replays() {
+        use perveance::{worker_tasks::{self, State}, EditProposal, Operation};
+        let backend = delegated(); let inputs = private_parent(); let tasks = private_parent();
+        let mut project = Project::new(64, 64).unwrap();
+        project.layers[0].visible = false; project.layers[0].name = "private hidden name".into();
+        project.set_pixel(0, 0, 0, [9, 8, 7, 0]).unwrap(); project.add_layer().unwrap();
+        let proposal = EditProposal { version: 1, base_revision: project.revision().unwrap(), operations: vec![
+            Operation::Pixel { layer: 1, x: 4, y: 5, color: [10, 20, 30, 128] },
+            Operation::Pixel { layer: 1, x: 5, y: 5, color: [7, 8, 9, 255] }] };
+        let mut expected = project.clone(); expected.apply_proposal(&proposal).unwrap();
+        project.save_new(&inputs.path().join("source.json")).unwrap();
+        fs::write(inputs.path().join("proposal.json"), serde_json::to_vec(&proposal).unwrap()).unwrap();
+        fs::set_permissions(inputs.path().join("proposal.json"), fs::Permissions::from_mode(0o600)).unwrap();
+        let created = cli().arg("worker-task-create").arg(inputs.path()).arg("source.json")
+            .arg(inputs.path()).arg("proposal.json").arg(tasks.path()).output().unwrap();
+        assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+        let value: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+        let id = value["task"]["id"].as_str().unwrap();
+        fs::remove_file(inputs.path().join("source.json")).unwrap(); fs::remove_file(inputs.path().join("proposal.json")).unwrap();
+        let completed = worker_tasks::run(tasks.path(), id, &backend).unwrap();
+        assert_eq!(completed.state, State::Succeeded); assert_eq!(completed.history.len(), 4);
+        assert!(completed.artifacts_verified && completed.resource_quotas_enforced && completed.synthetic_fixture_only);
+        assert!(!completed.autonomous_execution && !completed.provider_network_used && !completed.production_security_verified);
+        assert_eq!(completed.ledger.as_ref().unwrap().reserved_calls, 1);
+        let bundle = tasks.path().join(id).join("result");
+        assert_eq!(Project::load(&bundle.join("output.perveance.json")).unwrap(), expected);
+        assert_eq!(Project::from_png(&bundle.join("output.png")).unwrap().rgba().unwrap(), expected.rgba().unwrap());
+        let png = fs::read(bundle.join("output.png")).unwrap();
+        for operation in ["worker-task-inspect", "worker-task-run", "worker-task-recover"] {
+            let mut command = cli(); command.arg(operation).arg(tasks.path()).arg(id);
+            if operation != "worker-task-inspect" { command.arg(&backend); }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(report["task"]["state"], "succeeded");
+            assert_eq!(report["task"]["ledger"]["reserved_calls"], 1);
+            assert_eq!(report["task"]["artifacts_verified"], true);
+        }
+        assert_eq!(fs::read(bundle.join("output.png")).unwrap(), png);
+        assert!(worker_tasks::cancel(tasks.path(), id).unwrap().already_terminal);
+        let other = worker_tasks::create(tasks.path(), &project, &proposal, &Limits::default()).unwrap();
+        fs::write(tasks.path().join(&other.id).join("result"), b"preserve occupied output").unwrap();
+        let report = worker_tasks::run(tasks.path(), &other.id, &backend).unwrap();
+        assert_eq!(report.state, State::Failed); assert_eq!(report.ledger.unwrap().reserved_calls, 0);
+        assert_eq!(fs::read(tasks.path().join(&other.id).join("result")).unwrap(), b"preserve occupied output");
+        assert!(groups(&backend).is_empty());
+        println!("durable pixel worker: captured inputs, actual quotas, full independent verification, one offline reservation, no replay");
+    }
+
 }

@@ -97,6 +97,28 @@ class BrokerProbeTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             probe.verify_environment({"PATH": "/usr/bin:/bin"})
 
+    def test_fixed_pixel_candidate_preserves_hidden_data_and_applies_ordered_rgba(self):
+        project = {"version": 1, "width": 2, "height": 1, "layers": [
+            {"name": "private hidden name", "visible": False, "pixels": [[9, 8, 7, 0], [1, 2, 3, 4]]}]}
+        proposal = {"version": 1, "base_revision": "host-checked", "operations": [
+            {"op": "pixel", "layer": 0, "x": 1, "y": 0, "color": [10, 20, 30, 128]},
+            {"op": "pixel", "layer": 0, "x": 1, "y": 0, "color": [7, 8, 9, 255]}]}
+        result = probe.pixel_candidate({"version": 1, "project": project, "proposal": proposal})
+        self.assertEqual(result["layers"][0]["pixels"], [[9, 8, 7, 0], [7, 8, 9, 255]])
+        self.assertEqual(result["layers"][0]["name"], "private hidden name")
+        self.assertFalse(result["layers"][0]["visible"])
+
+    def test_fixed_pixel_candidate_rejects_nonpixel_extra_fields_bad_coordinates_and_booleans(self):
+        import copy
+        operation = {"op": "pixel", "layer": 0, "x": 0, "y": 0, "color": [1, 2, 3, 4]}
+        for bad in [dict(operation, op="shell"), dict(operation, command="ignored-is-not-safe"),
+                    dict(operation, x=-1), dict(operation, y=1), dict(operation, layer=True),
+                    dict(operation, color=[True, 2, 3, 4]), dict(operation, color=[256, 2, 3, 4])]:
+            payload = {"version": 1, "project": {"width": 1, "height": 1, "layers": [{"pixels": [[0, 0, 0, 0]]}]},
+                       "proposal": {"version": 1, "base_revision": "host-checked", "operations": [bad]}}
+            with self.assertRaises(AssertionError):
+                probe.pixel_candidate(copy.deepcopy(payload))
+
     def test_bad_configuration_never_prints_raw_details(self):
         result = subprocess.run(["python3", "-I", "-c", SCRIPT.read_text(), "private-invalid-marker"],
             input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)

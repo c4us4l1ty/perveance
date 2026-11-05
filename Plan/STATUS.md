@@ -212,3 +212,21 @@
   checks. All 48 local Python tests pass. The ordinary runner's optional probe
   still could not start. This is not production role certification, real provider
   integration or durable task/output transport. See [BROKER_WORKER.md](BROKER_WORKER.md).
+
+
+- Merged PR23 to main at `5928ffd64fb640dcd07d7e15e7c6ba61674bbd72` on
+  2026-11-05, explicitly requested by the owner. Removed the inactive, already
+  merged `arena/fda59639-perveance` branch after checking ancestry/open PRs.
+  Retained the fixed active session branch and fast-forwarded it to that merge.
+- Implemented separate fixed pixel worker jobs: private captured inputs,
+  immutable limits/offline budget, bounded append-only journal/flock, active
+  cancellation watcher, recorded/checked backend identity, sealed composite stdin,
+  bounded candidate socket frame + EOF and independent whole-project comparison.
+  The worker actually applies typed pixels; the trusted host renders PNG and
+  atomically publishes only verified canonical artifacts. Prepared publication
+  recovery never reruns a worker/provider or resets its ledger. Legacy tasks,
+  GUI, real providers, arbitrary/generated code and autonomy remain unchanged/off.
+  Added five normal integration tests, transport/pixel negatives, twelve worker
+  plus two task mandatory kernel cases and downloaded-CLI offline lifecycle checks.
+  All 50 local Python tests pass; new Rust/kernel CI is pending. See
+  [WORKER_TASKS.md](WORKER_TASKS.md).

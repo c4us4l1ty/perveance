@@ -12,6 +12,8 @@ pub mod supervisor;
 pub mod tasks;
 pub mod workspace;
 pub mod worker_io;
+#[cfg(target_os = "linux")]
+pub mod worker_tasks;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

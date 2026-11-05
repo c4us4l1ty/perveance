@@ -100,6 +100,12 @@ production-sandbox certification, and do not authorize generated-code execution.
   and CLI integration at `cf1fc2c`: [Rust/full bundle 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)
   and [delegated matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633).
   This verifies fixed offline code only, not the production role/task gates below.
+- [x] Implement a separate [fixed pixel worker-task backend](WORKER_TASKS.md)
+  connecting captured typed proposals, persisted limits, the offline broker,
+  bounded candidate output and independently verified atomic publication. Legacy
+  tasks/GUI/intake are unchanged; this is not generated-code or real AI work.
+- [ ] Validate twelve mandatory worker integration plus two task kernel cases,
+  including active cancellation and owner death before/after publication.
 - [ ] Complete protected broker/worker role separation, actual task integration,
   response recovery and verified provider billing/token/deadline controls. No
   keys in worker files/env/args; do not treat a declared bound as billing proof.

@@ -463,6 +463,12 @@ fn run_inner(snapshot: &ProjectSnapshot, delegated_root: &Path, mode: Mode,
     if cancelled.load(Ordering::SeqCst) { return Ok(Report::cancelled(limits)); }
     let project = snapshot.project();
     let root = Root::open(delegated_root)?;
+    if let Some(expected) = broker.as_ref().and_then(|channel| channel.expected_backend.as_ref()) {
+        let metadata = root.directory.metadata().map_err(|_| fail("cannot inspect execution backend"))?;
+        if (metadata.dev(), metadata.ino()) != (expected.device, expected.inode) {
+            return Err(fail("execution backend changed since durable admission"));
+        }
+    }
     if !root.managed()?.is_empty() { return Err(fail("abandoned worker cgroups exist; explicitly recover before starting another")); }
     verify_tools()?;
     let group = Group::create(&root, limits)?;
@@ -524,6 +530,12 @@ fn run_inner(snapshot: &ProjectSnapshot, delegated_root: &Path, mode: Mode,
         cgroup_removed: true, usage: Some(usage), input_snapshot_sealed: true,
         input_revision: Some(snapshot.revision().to_owned()), source_files_mounted: false, fixed_code_only: true,
         autonomous_execution: false, security_boundary_verified: false })
+}
+
+pub(super) fn backend_identity(path: &Path) -> Result<crate::bounded_worker::BackendIdentity, String> {
+    let root = Root::open(path)?;
+    let metadata = root.directory.metadata().map_err(|_| fail("cannot identify delegated root"))?;
+    Ok(crate::bounded_worker::BackendIdentity { device: metadata.dev(), inode: metadata.ino() })
 }
 
 pub(super) fn recover(delegated_root: &Path) -> Result<RecoveryReport, String> {

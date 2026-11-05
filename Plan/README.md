@@ -21,5 +21,6 @@ Perveance is an AI-first creative studio for pixel artists, game developers, ill
 13. [WORKER_IO.md](WORKER_IO.md) — descriptor-scoped raster inputs, sealed worker snapshots and verified atomic bundle publication.
 14. [MODEL_BROKER.md](MODEL_BROKER.md) — scoped credential/IPC component, durable conservative reservations and offline-only transport.
 15. [BROKER_WORKER.md](BROKER_WORKER.md) — confined fixed-code peer, leased broker admission and interrupted-scope tests; offline only.
+16. [WORKER_TASKS.md](WORKER_TASKS.md) — durable fixed pixel worker, bounded candidate transport and crash-safe verified publication; offline only.
 
 These documents describe a proposed design, not a guarantee that every implementation detail is achievable. If they conflict, the security boundaries in SECURITY.md and the acceptance gates in ROADMAP.md take precedence. Explicit owner instructions supersede proposed defaults, except where a constraint cannot safely be met without stating the limitation.
