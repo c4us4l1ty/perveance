@@ -22,5 +22,9 @@ Perveance is an AI-first creative studio for pixel artists, game developers, ill
 14. [MODEL_BROKER.md](MODEL_BROKER.md) — scoped credential/IPC component, durable conservative reservations and offline-only transport.
 15. [BROKER_WORKER.md](BROKER_WORKER.md) — confined fixed-code peer, leased broker admission and interrupted-scope tests; offline only.
 16. [WORKER_TASKS.md](WORKER_TASKS.md) — durable fixed pixel worker, bounded candidate transport and crash-safe verified publication; offline only.
+17. [DOCUMENT.md](DOCUMENT.md) — bounded data-only v2, stable IDs, opaque-byte preservation, native edits and unavailable-content rendering refusal; no plugin execution.
+18. [REGISTRY.md](REGISTRY.md) — immutable private quarantine storage, captured pins and exact-reference diagnostics; no independent behavioral verifier, install, activation or execution.
+19. [MODULE_AUDIT.md](MODULE_AUDIT.md) — bounded read-only static WASM/ABI-signature diagnostics; a pass is never a behavior/provenance test, execution permit or stored approval.
+20. [EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md) — prospective bounded ABI-1 intent/request/reply framing plus hypothetical typed edit and RGBA reply inspection; no instantiation, semantic verification, mutation or activation.
 
 These documents describe a proposed design, not a guarantee that every implementation detail is achievable. If they conflict, the security boundaries in SECURITY.md and the acceptance gates in ROADMAP.md take precedence. Explicit owner instructions supersede proposed defaults, except where a constraint cannot safely be met without stating the limitation.

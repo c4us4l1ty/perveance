@@ -140,3 +140,50 @@ requirement. Dependency acquisition, protected fetch/build/runtime namespaces,
 output transport from an untrusted worker, durable task integration, bounded
 credential/model brokerage, schema migration, independent capability verification
 and crash-safe activation remain required before generated execution can open.
+
+
+## Single-file data-only document publication
+
+The v2 [document foundation](DOCUMENT.md) reuses held-directory capture and adds
+private single-file publication: bounded canonical host bytes, random 0600 stage,
+file sync, stage inode check, mandatory `renameat2(RENAME_NOREPLACE)`, parent sync
+and a basename/length/SHA-256 receipt. Existing names are never replaced; cleanup
+unlinks only our stage inode. A postcommit sync failure reports visible output
+with `parent_directory_synced=false`, not a precommit failure or deletion.
+Concurrent and injected pre/postcommit failure cases supplement existing bundle
+tests. Crash stages may remain private; no automatic repair/sweep is provided.
+This does not authorize plugin code or alter worker/broker/job contracts. V2
+unknown capability bytes are preserved, never semantically approved or rendered.
+At `8593268`, all-target Rust and real debug/downloaded-CLI document lifecycle
+passed ([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898)),
+including injected failures/concurrency/held-root cases. All fourteen mandatory
+worker kernel cases separately passed ([42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888));
+this is not production certification or generated-code authority.
+
+
+## Fixed-member quarantine publication and bounded enumeration
+
+The [quarantine registry](REGISTRY.md) adds a crate-private bounded fixed-member
+publication helper: up to eight host-selected basenames, bounded total bytes,
+0600 members in a random 0700 stage, member/directory sync, stage identity check,
+atomic no-replace directory rename and parent sync receipt. The existing raster
+bundle still selects exactly its project/PNG members; it does not accept a
+candidate's arbitrary filenames or gain a module runner. Normal failure cleanup
+is confined to the held stage's fixed names; replacement host data is retained.
+
+Directory inventory uses a fresh open-file description of the held directory,
+fixed-size getdents64 buffers and a strict entry-count bound. It follows/activates
+no child entries, checks directory modification metadata and does not share seek
+offsets across repeated/concurrent callers. Callers validate each listed member
+by the existing descriptor API. New tests cover failure boundaries, uncertain
+commit, directory swaps, actual held-root rename and concurrent enumeration.
+At `9955839`, all-target/publisher/registry, real debug/downloaded-CLI and native
+regressions passed ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
+all fourteen mandatory worker kernel cases also passed ([42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)).
+No worker receives a registry FD and no module gains execution authority.
+
+The separate [static module diagnostic](MODULE_AUDIT.md) does not publish or
+modify packages. Its full inventory check can retain the one selected immutable
+captured candidate for parsing; other artifact bytes are discarded per slot,
+not retained as an entire registry image. There is no second unchecked path
+read, source mount, module execution or audit/approval receipt publication.

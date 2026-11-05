@@ -22,6 +22,34 @@ Default worker egress is denied. A separately controlled provider broker permits
 
 Windows/macOS sandbox implementations need their own threat analysis and adversarial tests. Do not claim Linux guarantees transfer automatically. Preview, headless, CI and packaged-app environments each require verification. Running Perveance inside another sandbox, such as Arena, does not prove nested isolation is available.
 
+## Data-only extension wire diagnostics
+
+The version-1 extension frame is a **prospective host-side contract**, not a
+runtime boundary. Preparing one requires the static profile to pass and binds the
+exact frozen manifest/artifact pin, captured document revision/canvas and the
+selected capability layer's ordered opaque object bytes. Other layers' pixels,
+names and paths are excluded, but selecting a layer intentionally shares its
+opaque data; this is not DLP, permission to contact a provider, or protection
+against a provider retaining input. Intent/request/reply lengths, counts, reserved
+bytes, tags and end-of-frame are strictly bounded; unknown fields/statuses and
+duplicate targets are refused. Edit replies only produce a private in-memory
+projection and are never committed; render replies are only shape/length/hash
+checked and never displayed, composited or published. The bundled CLI reveals
+digests/counts rather than request/reply/opaque bytes, yet the library deliberately
+returns private request bytes for future host use.
+
+Every execution/behavior/provenance/install/activation/availability gate remains
+false. Request SHA-256 and registry context scope prevent accidental
+cross-association only; they are **not** MACs, signatures, authentication, nonce/
+freshness, replay protection or protected role separation. A same-UID or
+privileged process can forge or roll back registry files, intents and replies.
+Packed pointer/length helpers validate caller-supplied memory slices and declared
+limits; they do not own stable WASM memory, meter fuel/CPU/wall or implement a
+sandbox. No module is instantiated or called, and there is no deallocation/reuse,
+permit token, provider route or autonomy. Confinement, independent semantic/
+behavioral/provenance verification, trusted activation state, durable replay/
+cancellation semantics and genuine capability growth remain unimplemented.
+
 ## Activation, provenance and recovery
 
 - Validate manifest, ABI/API, integrity, dependency policy and required platform; run supervisor-owned baseline and candidate-specific tests. Schema migrations have pre/post fixtures and backup/restore checks.
@@ -209,3 +237,83 @@ with host policy unchanged, and all-target/native/downloaded-bundle regression
 passed ([42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445)).
 Fifty Python tests pass. The ordinary runner's optional namespace probe could
 not start; portable production host approval and independent review remain open.
+
+
+## Data-only extensible document continuation
+
+[DOCUMENT.md](DOCUMENT.md) defines a distinct bounded v2 envelope, never a module
+loader. All references are unavailable; their hashes/versions are metadata, not
+trust or execution consent. Arbitrary payload bytes survive canonical save/copy
+and stable-ID native edits without schema parsing, code/path/URL/archive
+interpretation or artifact discovery. Any capability layer blocks rendering,
+even hidden/empty. Strict v1 GUI/bridge/provider/tasks reject v2; no automatic
+migration/downgrade can strip it. Native edit batches clone/check/commit against
+the complete document revision and cannot mutate/delete opaque objects.
+
+Linux CLI uses existing held private directory descriptors and bounded capture;
+single-file output uses a synced 0600 stage, inode check, mandatory atomic
+no-replace rename and parent fsync. Postcommit sync uncertainty retains visible
+artwork. Crash stages are private and require operator review, not automatic
+repair/sweep. Input byte/sequence bounds are not hard CPU/memory quotas; host
+parsing/rendering/I/O, malicious same-UID host processes and rollback remain
+outside this protection. At `8593268`, all-target Rust, real debug/downloaded
+CLI document lifecycle and native/bridge/recovery regressions passed
+([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898));
+all fourteen mandatory delegated kernel cases passed with host policy unchanged
+([42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888)).
+The ordinary optional namespace probe remains unavailable. Independent capability
+verification, confined extension validation/edit/render, protected registry
+activation, migrations and the genuine vector experiment remain open.
+
+
+## Quarantine-only capability storage continuation
+
+[REGISTRY.md](REGISTRY.md) adds bounded host-owned immutable storage, not
+activation authority. Manifests request no host permissions/commands/dependencies
+and cannot provide self-verification fields. Captured artifact size/digest and
+wasm-v1 envelope are checked; sections/imports/exports/ABI/behavior/payload schemas
+and candidate provenance are NOT verified. Runtime declarations are bounded data,
+not enforced quotas. Every entry is unverified/uninstalled/inactive/unavailable.
+A host capture receipt is purpose-tagged quarantine storage, never an approval.
+
+Storage uses private held directory FDs, fixed host-selected members, a lifetime
+exclusive flock, immutable ID/version bindings and compiled storage caps. New
+fixed-member directory publication syncs members/stage, checks directory identity,
+commits atomic no-replace and honestly reports parent-sync uncertainty. Orphan
+stages block new admission and are retained, not replayed/deleted or accepted as
+packages. Any corrupt/mismatched record blocks operations rather than falling
+back. Exact diagnostics never dispatch code or change document rendering refusal.
+Same-UID/privileged host tampering, forged/rolled-back storage, filesystem failure,
+whole-host quotas and protected production role separation remain open. At
+`9955839`, all-target Rust, real debug/downloaded-CLI registry/document lifecycles
+and native regressions passed ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
+all fourteen mandatory delegated worker kernel cases passed with policy unchanged
+([42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)).
+The ordinary optional namespace probe remains unavailable. Storage tests are not
+behavior verification or portable host approval; worker authorization and all
+original self-extension acceptance gates remain closed.
+
+## Static WASM diagnostic continuation (nonauthorizing)
+
+[MODULE_AUDIT.md](MODULE_AUDIT.md) adds exact-byte structural/type/index validation
+with pinned wasmparser and a bounded prospective export/memory signature profile.
+Complete storage inventory/scope checks precede audit, using the same frozen
+selected bytes, with no unchecked re-read or persisted approval. Corruption,
+missing exact slots and retained interrupted stages block audit. Raw parser
+errors/module names/source are not echoed. Input/count/depth caps are **not**
+process CPU/RAM/wall enforcement; parsing is still host-side. Exact source
+`3f6639b` passed all-target Rust (20 new cases), real debug/downloaded static/
+document/registry lifecycles and native regressions ([42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)).
+All three matrix jobs and exact twelve + two kernel cases passed
+([42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)), delegated26
+kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor restriction `1` unchanged.
+The ordinary optional namespace probe remained unavailable. This is fixed
+component evidence, not security certification or portable host approval.
+
+A pass cannot prove behavior, schemas, pointer/output/allocator safety,
+termination, deterministic floats, provenance or runtime quota compliance.
+Passing fixtures deliberately include useless stubs and an infinite loop.
+No instantiation, loader, runtime execution, install/activation permission,
+availability or autonomy follows. Protected independent verifier/broker/
+supervisor production roles and the full confined typed-edit/render contract
+remain open. Existing capability-layer rendering refusal is unconditional.

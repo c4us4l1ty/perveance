@@ -15,6 +15,29 @@ pub struct Artifact {
     pub sha256: String,
 }
 
+/// Atomic create-new publication of one private host-validated file. A false
+/// final sync flag means it is already visible: never delete/blindly retry it.
+#[derive(Debug, Serialize)]
+pub struct FilePublication {
+    pub file: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub committed: bool,
+    pub parent_directory_synced: bool,
+    pub autonomous_execution: bool,
+}
+
+/// One atomically committed directory of fixed host-selected private files.
+/// This is storage integrity/publication metadata, never execution authority.
+#[derive(Debug, Serialize)]
+pub struct DirectoryPublication {
+    pub directory: String,
+    pub artifacts: Vec<Artifact>,
+    pub committed: bool,
+    pub parent_directory_synced: bool,
+    pub autonomous_execution: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Publication {
     pub bundle: String,

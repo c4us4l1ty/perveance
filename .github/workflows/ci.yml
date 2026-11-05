@@ -32,6 +32,43 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-rust-test.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
+      - name: Exercise bounded data-only document lifecycle through the real CLI
+        run: |
+          cargo build --locked --bin perveance-cli
+          if python3 tools/test_document_lifecycle.py target/debug/perveance-cli examples/opaque-document-v2.json > /tmp/perveance-document-test.log 2>&1; then
+            cat /tmp/perveance-document-test.log
+          else
+            cat /tmp/perveance-document-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-document-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+      - name: Exercise immutable quarantine registry through the real CLI
+        run: |
+          if python3 tools/test_registry_lifecycle.py target/debug/perveance-cli examples/opaque-document-v2.json > /tmp/perveance-registry-test.log 2>&1; then
+            cat /tmp/perveance-registry-test.log
+          else
+            cat /tmp/perveance-registry-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-registry-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+      - name: Exercise nonauthorizing static WASM diagnostics through the real CLI
+        run: |
+          if python3 tools/test_module_audit_lifecycle.py target/debug/perveance-cli examples/opaque-document-v2.json > /tmp/perveance-module-audit-test.log 2>&1; then
+            cat /tmp/perveance-module-audit-test.log
+          else
+            cat /tmp/perveance-module-audit-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-module-audit-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+      - name: Exercise data-only extension protocol diagnostics through the real CLI
+        run: |
+          if python3 tools/test_extension_protocol_lifecycle.py target/debug/perveance-cli examples/opaque-document-v2.json > /tmp/perveance-protocol-test.log 2>&1; then
+            cat /tmp/perveance-protocol-test.log
+          else
+            cat /tmp/perveance-protocol-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-protocol-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
       - name: Exercise desktop tools under X11
         run: |
           cargo build --locked --bin perveance --bin perveance-cli
@@ -243,6 +280,34 @@ jobs:
           tar -xzf "$RUNNER_TEMP/perveance-downloaded/perveance-linux-x86_64.tar.gz" -C "$work"
           bundle="$work/perveance-linux-x86_64"
           cd "$work"
+          if python3 "$GITHUB_WORKSPACE/tools/test_document_lifecycle.py" "$bundle/bin/perveance-cli" "$bundle/examples/opaque-document-v2.json" > /tmp/perveance-downloaded-document-test.log 2>&1; then
+            cat /tmp/perveance-downloaded-document-test.log
+          else
+            cat /tmp/perveance-downloaded-document-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-downloaded-document-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+          if python3 "$GITHUB_WORKSPACE/tools/test_registry_lifecycle.py" "$bundle/bin/perveance-cli" "$bundle/examples/opaque-document-v2.json" > /tmp/perveance-downloaded-registry-test.log 2>&1; then
+            cat /tmp/perveance-downloaded-registry-test.log
+          else
+            cat /tmp/perveance-downloaded-registry-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-downloaded-registry-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+          if python3 "$GITHUB_WORKSPACE/tools/test_module_audit_lifecycle.py" "$bundle/bin/perveance-cli" "$bundle/examples/opaque-document-v2.json" > /tmp/perveance-downloaded-module-audit-test.log 2>&1; then
+            cat /tmp/perveance-downloaded-module-audit-test.log
+          else
+            cat /tmp/perveance-downloaded-module-audit-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-downloaded-module-audit-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+          if python3 "$GITHUB_WORKSPACE/tools/test_extension_protocol_lifecycle.py" "$bundle/bin/perveance-cli" "$bundle/examples/opaque-document-v2.json" > /tmp/perveance-downloaded-protocol-test.log 2>&1; then
+            cat /tmp/perveance-downloaded-protocol-test.log
+          else
+            cat /tmp/perveance-downloaded-protocol-test.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-downloaded-protocol-test.log").read_text(errors="replace")[-3500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
           "$bundle/bin/perveance-cli" new 16 16 base.json
           "$bundle/bin/perveance-cli" apply base.json potion.json "$bundle/examples/potion-operations.json"
           "$bundle/bin/perveance-cli" inspect potion.json > inspection.json

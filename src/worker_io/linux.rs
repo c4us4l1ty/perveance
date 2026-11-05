@@ -1,4 +1,4 @@
-use super::{Artifact, Publication, MAX_RELATIVE_BYTES, MAX_RELATIVE_COMPONENTS, PNG_FILE, PROJECT_FILE};
+use super::{Artifact, DirectoryPublication, FilePublication, Publication, MAX_RELATIVE_BYTES, MAX_RELATIVE_COMPONENTS, PNG_FILE, PROJECT_FILE};
 use crate::{Project, MAX_PNG_BYTES, MAX_PROJECT_BYTES};
 use sha2::{Digest, Sha256};
 use std::{
@@ -178,6 +178,119 @@ impl PrivateDirectory {
 
     pub(crate) fn sync(&self) -> Result<(), String> {
         self.directory.sync_all().map_err(|_| fail("cannot sync private directory"))
+    }
+
+    pub(crate) fn publish_bytes(&self, name: &str, bytes: &[u8], limit: u64) -> Result<FilePublication, String> {
+        self.publish_bytes_with_hook(name, bytes, limit, |_| Ok(()))
+    }
+
+    fn publish_bytes_with_hook(&self, name: &str, bytes: &[u8], limit: u64,
+        mut hook: impl FnMut(Phase) -> Result<(), ()>) -> Result<FilePublication, String> {
+        let target = bundle_name(name)?;
+        if !name.as_bytes()[0].is_ascii_alphanumeric() { return Err(fail("private filename must begin with an ASCII letter or digit")); }
+        if bytes.len() as u64 > limit { return Err(fail("private publication exceeds byte limit")); }
+        let mut random = [0u8; 16];
+        if unsafe { libc::getrandom(random.as_mut_ptr().cast(), random.len(), 0) } != random.len() as isize {
+            return Err(fail("cannot allocate private file stage"));
+        }
+        let stage_name = format!(".perveance-file-{}", random.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let file = self.create_private(&stage_name)?;
+        let mut stage = FileStage { parent: self, name: stage_name, file, committed: false };
+        stage.file.write_all(bytes).and_then(|_| stage.file.sync_all()).map_err(|_| fail("cannot sync private file stage"))?;
+        hook(Phase::FileSynced(0)).map_err(|_| fail("single-file publication interrupted before commit"))?;
+        hook(Phase::BeforeCommit).map_err(|_| fail("single-file publication interrupted before commit"))?;
+        let staged = relative(&stage.name)?;
+        let current = open_at(self.directory.as_raw_fd(), &staged, libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0, BENEATH)?;
+        if !same_inode(&stage.file.metadata().map_err(|_| fail("cannot inspect private file stage"))?,
+                       &current.metadata().map_err(|_| fail("cannot inspect private file stage"))?) {
+            return Err(fail("private file stage replaced"));
+        }
+        if unsafe { libc::syscall(libc::SYS_renameat2, self.directory.as_raw_fd(), staged.as_ptr(),
+            self.directory.as_raw_fd(), target.as_ptr(), libc::RENAME_NOREPLACE) } != 0 {
+            return Err(fail("cannot publish new private file; occupied names are never replaced"));
+        }
+        stage.committed = true;
+        let parent_directory_synced = hook(Phase::Committed).is_ok() && self.sync().is_ok();
+        Ok(FilePublication { file: name.into(), bytes: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)),
+            committed: true, parent_directory_synced, autonomous_execution: false })
+    }
+
+    /// Enumerate only this held directory, with an independent open-file
+    /// description (try_clone would share a directory seek offset). No entry is
+    /// followed or activated. The caller still validates each member by FD.
+    pub(crate) fn list_names(&self, limit: usize) -> Result<Vec<String>, String> {
+        if limit > 128 { return Err(fail("directory enumeration bound exceeds policy")); }
+        let dot = CString::new(".").map_err(|_| fail("invalid internal directory name"))?;
+        let file = open_at(self.directory.as_raw_fd(), &dot, libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC, 0, BENEATH)?;
+        private_directory(&file)?;
+        let before = file.metadata().map_err(|_| fail("cannot inspect enumerated directory"))?;
+        let mut names = Vec::new(); let mut buffer = [0u8; 4096];
+        loop {
+            let count = unsafe { libc::syscall(libc::SYS_getdents64, file.as_raw_fd(), buffer.as_mut_ptr(), buffer.len()) };
+            if count < 0 || count as usize > buffer.len() { return Err(fail("bounded directory enumeration failed")); }
+            if count == 0 { break; }
+            let mut offset = 0usize;
+            while offset < count as usize {
+                // linux_dirent64: ino64, off64, reclen16, type8, name+NUL.
+                if count as usize - offset < 20 { return Err(fail("invalid directory record")); }
+                let length = u16::from_ne_bytes([buffer[offset+16], buffer[offset+17]]) as usize;
+                if length < 20 || length > count as usize - offset { return Err(fail("invalid directory record")); }
+                let raw = &buffer[offset+19..offset+length];
+                let end = raw.iter().position(|b| *b == 0).ok_or_else(|| fail("invalid directory record"))?;
+                let raw = &raw[..end];
+                if raw != b"." && raw != b".." {
+                    if names.len() == limit { return Err(fail("directory entry limit exceeded")); }
+                    let name = std::str::from_utf8(raw).map_err(|_| fail("unsupported directory entry name"))?;
+                    if name.is_empty() { return Err(fail("invalid directory record")); }
+                    names.push(name.to_owned());
+                }
+                offset += length;
+            }
+        }
+        let after = file.metadata().map_err(|_| fail("cannot inspect enumerated directory"))?;
+        if !same_version(&before, &after) { return Err(fail("directory changed during enumeration")); }
+        names.sort(); Ok(names)
+    }
+
+    pub(crate) fn publish_files(&self, name: &str, files: &[(&'static str, &[u8])], limit: u64) -> Result<DirectoryPublication, String> {
+        self.publish_files_with_hook(name, files, limit, |_| Ok(()))
+    }
+
+    fn publish_files_with_hook(&self, name: &str, files: &[(&'static str, &[u8])], limit: u64,
+        mut hook: impl FnMut(Phase) -> Result<(), ()>) -> Result<DirectoryPublication, String> {
+        let target = bundle_name(name)?;
+        if !name.as_bytes()[0].is_ascii_alphanumeric() || files.is_empty() || files.len() > 8
+            || limit > MAX_PROJECT_BYTES + MAX_PNG_BYTES { return Err(fail("invalid private directory publication bounds")); }
+        let mut total = 0u64; let mut names = std::collections::BTreeSet::new();
+        for (file, bytes) in files {
+            bundle_name(file)?;
+            if !file.as_bytes()[0].is_ascii_alphanumeric() || !names.insert(*file) { return Err(fail("invalid or duplicate private member name")); }
+            total = total.checked_add(bytes.len() as u64).ok_or_else(|| fail("private publication size overflow"))?;
+            if total > limit { return Err(fail("private directory publication exceeds byte limit")); }
+        }
+        let mut stage = Stage::create_for(self, files.iter().map(|(file, _)| *file).collect())?;
+        let mut artifacts = Vec::new();
+        for (index, (file, bytes)) in files.iter().enumerate() {
+            let mut output = stage.directory.create_private(file)?;
+            output.write_all(bytes).and_then(|_| output.sync_all()).map_err(|_| fail("cannot sync private package member"))?;
+            artifacts.push(Artifact { file: *file, bytes: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)) });
+            hook(Phase::FileSynced(index)).map_err(|_| fail("private directory publication interrupted before commit"))?;
+        }
+        stage.directory.sync()?;
+        hook(Phase::BeforeCommit).map_err(|_| fail("private directory publication interrupted before commit"))?;
+        let current = self.child(&stage.name)?;
+        if !same_inode(&stage.directory.directory.metadata().map_err(|_| fail("cannot inspect private package stage"))?,
+                       &current.directory.metadata().map_err(|_| fail("cannot inspect private package stage"))?) {
+            return Err(fail("private package stage replaced"));
+        }
+        let staged = relative(&stage.name)?;
+        if unsafe { libc::syscall(libc::SYS_renameat2, self.directory.as_raw_fd(), staged.as_ptr(),
+            self.directory.as_raw_fd(), target.as_ptr(), libc::RENAME_NOREPLACE) } != 0 {
+            return Err(fail("cannot publish private package; occupied names are never replaced"));
+        }
+        stage.committed = true;
+        let parent_directory_synced = hook(Phase::Committed).is_ok() && self.sync().is_ok();
+        Ok(DirectoryPublication { directory: name.into(), artifacts, committed: true, parent_directory_synced, autonomous_execution: false })
     }
 
     fn read_with_hook(&self, name: &str, limit: u64, hook: impl FnOnce()) -> Result<Vec<u8>, String> {
@@ -360,9 +473,27 @@ impl VerifiedBundle {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase { FileSynced(usize), BeforeCommit, Committed }
 
-struct Stage<'a> { parent: &'a PrivateDirectory, directory: PrivateDirectory, name: String, committed: bool }
+struct FileStage<'a> { parent: &'a PrivateDirectory, name: String, file: File, committed: bool }
+impl Drop for FileStage<'_> {
+    fn drop(&mut self) {
+        if self.committed { return; }
+        if let (Ok(name), Ok(ours)) = (relative(&self.name), self.file.metadata()) {
+            if let Ok(current) = open_at(self.parent.directory.as_raw_fd(), &name,
+                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0, BENEATH) {
+                if current.metadata().is_ok_and(|metadata| same_inode(&ours, &metadata)) {
+                    unsafe { libc::unlinkat(self.parent.directory.as_raw_fd(), name.as_ptr(), 0); }
+                }
+            }
+        }
+    }
+}
+
+struct Stage<'a> { parent: &'a PrivateDirectory, directory: PrivateDirectory, name: String, files: Vec<&'static str>, committed: bool }
 impl<'a> Stage<'a> {
     fn create(parent: &'a PrivateDirectory) -> Result<Self, String> {
+        Self::create_for(parent, vec![PROJECT_FILE, PNG_FILE])
+    }
+    fn create_for(parent: &'a PrivateDirectory, files: Vec<&'static str>) -> Result<Self, String> {
         let mut bytes = [0u8; 16];
         if unsafe { libc::getrandom(bytes.as_mut_ptr().cast(), bytes.len(), 0) } != bytes.len() as isize {
             return Err(fail("cannot allocate unpredictable publication stage"));
@@ -373,7 +504,7 @@ impl<'a> Stage<'a> {
             return Err(fail("cannot create private publication stage"));
         }
         match parent.child(&name) {
-            Ok(directory) => Ok(Self { parent, directory, name, committed: false }),
+            Ok(directory) => Ok(Self { parent, directory, name, files, committed: false }),
             Err(error) => {
                 unsafe { libc::unlinkat(parent.directory.as_raw_fd(), c_name.as_ptr(), libc::AT_REMOVEDIR); }
                 Err(error)
@@ -386,8 +517,8 @@ impl Drop for Stage<'_> {
         if self.committed { return; }
         // Only fixed files in this held private stage; never recurse through a
         // candidate directory or use an original destination pathname again.
-        for name in [PROJECT_FILE, PNG_FILE] {
-            if let Ok(name) = CString::new(name) { unsafe { libc::unlinkat(self.directory.directory.as_raw_fd(), name.as_ptr(), 0); } }
+        for name in &self.files {
+            if let Ok(name) = CString::new(*name) { unsafe { libc::unlinkat(self.directory.directory.as_raw_fd(), name.as_ptr(), 0); } }
         }
         let ours = self.directory.directory.metadata();
         if let (Ok(ours), Ok(current)) = (ours, self.parent.child(&self.name)) {

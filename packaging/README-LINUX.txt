@@ -144,3 +144,65 @@ and inspect task.state for outcome. Worker edits are independently compared to
 trusted Rust edits; host PNG and editable JSON publish atomically. Recovery never
 replays a worker/provider or resets accounting. No real key/model code is accepted.
 See Plan/WORKER_TASKS.md; downloaded offline checks do not attest kernel support.
+
+
+Data-only v2 documents (Linux CLI/library only)
+----------------------------------------------
+document-import-raster/inspect/copy/apply/export-png take private descriptor-root
+arguments; run an operation without arguments for exact usage. Roots must be
+owned mode 0700; use mode 0600 single-link regular input files. New output names
+are non-hidden ASCII basenames; outputs are mode 0600 and never replace existing
+names. A publication with parent_directory_synced=false is already visible but
+crash durability is uncertain; retain it and inspect, do not blindly overwrite.
+
+V2 preserves stable IDs and bounded arbitrary opaque bytes, permits native pixel
+and layer-wrapper edits, and reuses the existing raster renderer. Any unavailable
+capability layer blocks export, even hidden/empty. Nothing is fetched, installed,
+loaded as code or activated on open. examples/opaque-document-v2.json is only an
+UNAVAILABLE-data preservation/refusal fixture; it is not a vector plugin. GUI,
+bridge, provider and both job formats remain v1-only and reject v2. No registry,
+extension execution or autonomy is supplied. See Plan/DOCUMENT.md in the source
+repository for schema/limits and verification status.
+
+
+Quarantine registry (storage only, not a plugin installation)
+------------------------------------------------------------
+registry-init/inspect/quarantine/resolve-document use private Linux descriptor
+roots. Run an operation without arguments for exact usage. Entries have strict
+bounded declarations and captured artifact hashes under immutable ID/version
+slots. A wasm header/hash match is NOT a section/import/export/ABI/behavior or
+provenance test. Every entry stays unverified, uninstalled, inactive, unavailable;
+no verify/install/activate/run command exists. Document export still refuses any
+capability layer. Interrupted stages block admission and require retained-data
+operator review, never automatic reset/sweep. Parent-sync=false means an already
+visible package with uncertain crash durability. See Plan/REGISTRY.md in the
+source repository for limits, failure behavior and verification status. No code,
+provider or autonomy is enabled by quarantine storage.
+
+Data-only protocol inspection (diagnostic only, never an invocation)
+--------------------------------------------------------------------
+registry-inspect-protocol PRIVATE_REGISTRY_ROOT EXACT_SLOT PRIVATE_DOCUMENT_ROOT
+DOCUMENT PRIVATE_INTENT_ROOT INTENT [PRIVATE_REPLY_ROOT REPLY] revalidates the
+complete registry/exact frozen slot, requires a passing static profile, then builds
+a bounded request scoped to the selected capability layer and captured revision.
+Without REPLY it prints only a redacted call summary. With REPLY it inspects a
+strict bounded frame as a candidate claim: edit changes remain an in-memory
+proposal and RGBA success is shape/hashed only. ok=true does not imply
+wire_accepted=true. Nothing is instantiated or executed, no document/registry byte
+is changed, no PNG is produced, and every authority/availability flag is false.
+Hashes/scopes are not authentication or replay protection; hand-authored replies
+prove only host parsing. See Plan/EXTENSION_PROTOCOL.md in the source repository.
+
+Static WASM inspection (diagnostic only, not a runtime)
+------------------------------------------------------
+registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT rechecks the complete
+registry inventory/scope and inspects the exact frozen stored module with a
+bounded structural validator and prospective memory/function signature profile.
+The slot is 64 lowercase hex digits, never latest or a path. Storage corruption
+or interrupted stages block audit. No approval/report is stored in the registry.
+A completed command can return ok=true with static_profile_passed=false. Even a
+static pass is not behavior/schema/provenance verification, fuel enforcement,
+installation, activation, execution or availability. Stubs/infinite loops can
+pass. Capability-layer PNG refusal is unchanged; autonomy remains disabled.
+Host-parser input/count caps are not process CPU/RAM/wall sandbox quotas. See
+Plan/MODULE_AUDIT.md in the source repository for exact policy and CI status.

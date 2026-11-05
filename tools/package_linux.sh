@@ -28,7 +28,7 @@ mkdir -p "$bundle/bin" "$bundle/examples"
 install -m 755 "$bin_dir/perveance" "$bundle/bin/perveance"
 install -m 755 "$bin_dir/perveance-cli" "$bundle/bin/perveance-cli"
 install -m 644 "$root/packaging/README-LINUX.txt" "$bundle/README.txt"
-install -m 644 "$root/examples/potion-operations.json" "$root/examples/rocket-operations.json" "$bundle/examples/"
+install -m 644 "$root/examples/potion-operations.json" "$root/examples/rocket-operations.json" "$root/examples/opaque-document-v2.json" "$bundle/examples/"
 {
     printf 'Perveance experimental evaluation build\n'
     printf 'Source revision: '

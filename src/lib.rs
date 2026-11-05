@@ -3,11 +3,15 @@
 
 pub mod bounded_worker;
 pub mod broker;
+pub mod document;
+pub mod extension_protocol;
 pub mod fixed_worker;
 pub mod file_browser;
+pub mod module_audit;
 pub mod provider;
 pub mod recovery;
 pub mod region;
+pub mod registry;
 pub mod supervisor;
 pub mod tasks;
 pub mod workspace;

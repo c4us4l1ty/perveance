@@ -231,3 +231,100 @@ fn kernel_mount_crossing_and_magic_link_denials_are_not_pathname_simulations() {
     let held_number = CString::new(slash.as_raw_fd().to_string()).unwrap();
     assert!(open_at(fds.as_raw_fd(), &held_number, libc::O_RDONLY | libc::O_CLOEXEC, 0, RESOLVE_NO_MAGICLINKS).is_err());
 }
+
+#[test]
+fn single_file_precommit_failures_cleanup_and_postcommit_uncertainty_retains_output() {
+    let output=private(); let root=PrivateDirectory::open(output.path()).unwrap();
+    for failure in [Phase::FileSynced(0), Phase::BeforeCommit] {
+        assert!(root.publish_bytes_with_hook("document.json", b"private-doc", 1024, |phase| {
+            assert!(!output.path().join("document.json").exists());
+            if phase == failure { Err(()) } else { Ok(()) }
+        }).is_err());
+        assert_eq!(fs::read_dir(output.path()).unwrap().count(), 0);
+    }
+    let result=root.publish_bytes_with_hook("document.json", b"private-doc", 1024, |phase| {
+        if phase == Phase::Committed { Err(()) } else { Ok(()) }
+    }).unwrap();
+    assert!(result.committed && !result.parent_directory_synced);
+    assert_eq!(fs::read(output.path().join("document.json")).unwrap(), b"private-doc");
+    assert!(root.publish_bytes("document.json", b"replacement", 1024).is_err());
+    assert!(root.publish_bytes("other.json", b"too large", 1).is_err());
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn concurrent_single_file_publication_has_exactly_one_winner() {
+    let output=private(); let root=Arc::new(PrivateDirectory::open(output.path()).unwrap());
+    let threads: Vec<_>=(0..4).map(|i| {
+        let root=Arc::clone(&root); thread::spawn(move || root.publish_bytes("same.json", &[i;16], 16))
+    }).collect();
+    assert_eq!(threads.into_iter().map(|t| t.join().unwrap().is_ok()).filter(|ok| *ok).count(), 1);
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+    let bytes=fs::read(output.path().join("same.json")).unwrap(); assert_eq!(bytes.len(),16);
+    assert!(bytes.iter().all(|b| *b==bytes[0]));
+}
+
+#[test]
+fn replaced_single_file_stage_is_neither_published_nor_deleted_as_our_artwork() {
+    let output=private(); let root=PrivateDirectory::open(output.path()).unwrap();
+    assert!(root.publish_bytes_with_hook("document.json", b"our bytes", 1024, |phase| {
+        if phase == Phase::BeforeCommit {
+            let stage=fs::read_dir(output.path()).unwrap().next().unwrap().unwrap().path();
+            fs::remove_file(&stage).unwrap(); write_private(&stage, b"not ours");
+        }
+        Ok(())
+    }).is_err());
+    assert!(!output.path().join("document.json").exists());
+    let remaining=fs::read_dir(output.path()).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(fs::read(remaining).unwrap(), b"not ours");
+}
+
+#[test]
+fn fixed_member_directory_publication_has_atomic_failure_and_uncertainty_semantics() {
+    let output=private(); let root=PrivateDirectory::open(output.path()).unwrap();
+    let files:[(&'static str,&[u8]);3]=[("manifest.json",b"manifest"),("artifact.wasm",b"opaque artifact"),("receipt.json",b"capture only")];
+    for failure in [Phase::FileSynced(0),Phase::FileSynced(1),Phase::FileSynced(2),Phase::BeforeCommit] {
+        assert!(root.publish_files_with_hook("package",&files,1024,|phase| {
+            assert!(!output.path().join("package").exists()); if phase==failure {Err(())} else {Ok(())}
+        }).is_err());
+        assert_eq!(fs::read_dir(output.path()).unwrap().count(),0);
+    }
+    assert!(root.publish_files("package",&[("../escape",b"x")],1024).is_err());
+    assert!(root.publish_files("package",&[("same",b"x"),("same",b"y")],1024).is_err());
+    assert!(root.publish_files("package",&files,1).is_err()); assert_eq!(fs::read_dir(output.path()).unwrap().count(),0);
+    let report=root.publish_files_with_hook("package",&files,1024,|phase| if phase==Phase::Committed {Err(())} else {Ok(())}).unwrap();
+    assert!(report.committed && !report.parent_directory_synced); assert_eq!(report.artifacts.len(),3);
+    assert_eq!(fs::read_dir(output.path().join("package")).unwrap().count(),3);
+    assert!(root.publish_files("package",&files,1024).is_err()); assert_eq!(fs::read_dir(output.path()).unwrap().count(),1);
+}
+
+#[test]
+fn bounded_directory_enumeration_is_independent_descriptor_based_and_never_activates_entries() {
+    let output=private(); let root=Arc::new(PrivateDirectory::open(output.path()).unwrap());
+    write_private(&output.path().join("file"),b"private data"); symlink("/etc/passwd",output.path().join("link")).unwrap();
+    assert_eq!(root.list_names(2).unwrap(),vec!["file","link"]); assert!(root.list_names(1).is_err());
+    let threads:Vec<_>=(0..4).map(|_| {let root=Arc::clone(&root);thread::spawn(move ||root.list_names(2).unwrap())}).collect();
+    for thread in threads {assert_eq!(thread.join().unwrap(),vec!["file","link"]);}
+    let parent=private(); let moved=parent.path().join("held"); fs::rename(output.path(),&moved).unwrap();
+    fs::create_dir(output.path()).unwrap(); fs::set_permissions(output.path(),fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(root.list_names(2).unwrap(),vec!["file","link"]);
+    root.publish_files("new-package",&[("member",b"held directory only")],1024).unwrap();
+    assert!(moved.join("new-package").exists()); assert!(!output.path().join("new-package").exists());
+}
+
+#[test]
+fn replaced_directory_stage_is_not_published_and_other_host_data_is_retained() {
+    let output=private(); let root=PrivateDirectory::open(output.path()).unwrap();
+    assert!(root.publish_files_with_hook("package",&[("member",b"ours")],1024,|phase| {
+        if phase==Phase::BeforeCommit {
+            let stage=fs::read_dir(output.path()).unwrap().next().unwrap().unwrap().path();
+            fs::rename(&stage,output.path().join("host-moved-ours")).unwrap();
+            fs::create_dir(&stage).unwrap(); fs::set_permissions(&stage,fs::Permissions::from_mode(0o700)).unwrap();
+            write_private(&stage.join("member"),b"not ours");
+        }
+        Ok(())
+    }).is_err());
+    assert!(!output.path().join("package").exists());
+    let decoy=fs::read_dir(output.path()).unwrap().map(|entry|entry.unwrap().path()).find(|path|path.file_name().unwrap().to_string_lossy().starts_with(STAGE_PREFIX)).unwrap();
+    assert_eq!(fs::read(decoy.join("member")).unwrap(),b"not ours");
+}

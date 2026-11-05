@@ -237,3 +237,110 @@
   userns restriction `1` unchanged. The ordinary optional probe could not start.
   PR24 continues this work; no production autonomy is approved. See
   [WORKER_TASKS.md](WORKER_TASKS.md).
+
+
+- Continued on the new fixed session branch `arena/019f4bdd-perveance`,
+  fast-forwarding it to PR24's fully verified `90e2a07` head without merging or
+  changing PR24/main. Implemented an offline bounded v2 document foundation:
+  stable document/layer/object IDs, exact immutable-reference metadata and
+  opaque hex bytes, strict bounded typed parsing, revision-bound native pixel/
+  wrapper edits, existing Rust raster rendering and mandatory refusal for any
+  unavailable layer (including hidden). Added descriptor-root CLI operations
+  and atomic private single-file no-replace publication with postcommit sync
+  uncertainty receipts; legacy GUI/bridge/provider/jobs stay strict v1-only.
+  Fourteen new document plus three publisher Rust cases, real debug/downloaded
+  binary document lifecycles and all native/bridge/recovery/bundle checks passed
+  at `8593268` ([Rust CI 42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898),
+  6m00s). [Matrix 42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888)
+  passed all three jobs and exact twelve + two mandatory kernel cases on delegated
+  Ubuntu 26.04, kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor restriction `1`
+  unchanged. The ordinary optional probe could not start; 50 local Python tests
+  pass. CI first caught and corrected test-only private-PNG/discovery-envelope
+  assumptions. No registry, extension renderer, vector feature, generated code,
+  provider or autonomy is enabled. PR25 is stacked on still-open PR24; main is
+  unchanged. See [DOCUMENT.md](DOCUMENT.md); original build-and-reuse acceptance
+  remains open.
+
+
+- On the next continuation, reconciled restored saved files with PR25's exact
+  verified `a0b0e0f` tree before modifying code (no content discarded or branch
+  switch). Continued on `arena/019f4bdd-perveance`; PR24 and PR25 remain open.
+  Added a quarantine-only registry foundation: strict bounded manifest/export/
+  operation/runtime/provenance declarations; captured SHA-256/length/wasm-header
+  binding; one immutable ID/version slot; exact duplicate/conflict handling;
+  private locked 32-entry/32-MiB store; atomic three-member publication; header/
+  receipt/scope/corruption checks and retained interrupted stages. Exact document
+  reference diagnostics cannot make content available or renderable. Fourteen
+  registry and three publisher/enumeration Rust tests plus debug/downloaded-CLI
+  lifecycles passed at `9955839` ([Rust42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060),
+  4m57s), including all-target/native X11/bridge/recovery and downloaded bundle
+  checks. [Matrix42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)
+  passed all three jobs and exact twelve + two required kernel cases on delegated
+  Ubuntu26, kernel `7.0.0-1017-azure`, bwrap `0.11.1`, AppArmor restriction `1`
+  unchanged. The ordinary optional namespace probe remained unavailable. All 50
+  local Python tests and static checks passed. No independent behavior/provenance
+  verification, install, runtime, activation, provider or autonomy is enabled.
+  See [REGISTRY.md](REGISTRY.md); original acceptance remains open.
+
+
+- Continued with a read-only static module/ABI-signature diagnostic on the same
+  fixed branch (PR24/25/main unchanged). Added pinned minimal wasmparser, bounded
+  prepass plus full structural/body validation, a prospective memory/function
+  export profile and exact-slot `registry-audit-module`. The complete registry
+  inventory revalidates binding/scope and retains only the selected frozen bytes;
+  corruption and interrupted stages block audit. Reports are redacted fixed
+  findings, not cached approvals. No code is instantiated/executed and every
+  verification/runtime/install/activation/availability/autonomy flag stays false;
+  capability-layer PNG refusal is unchanged. New Rust byte fixtures and real
+  debug/downloaded CLI lifecycle checks passed at exact source `3f6639b`:
+  [Rust42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542),
+  job `127359693355`, **6m18s**, including all-target/20 new tests, actual debug
+  and downloaded-release static/document/registry lifecycles plus native X11/
+  bridge/recovery/package regressions. Initial weak-indexmap lock resolution and
+  canonical tag-fixture ordering issues were fixed; required `--locked` checks
+  were never relaxed and the temporary resolution diagnostic was removed.
+  [Matrix42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)
+  passed all three jobs; delegated26 job `127359692952` passed exact twelve + two
+  kernel cases in **1m16s**, kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor
+  restriction `1` unchanged. The ordinary optional namespace probe remained
+  unavailable. Local 50 Python tests/compile/shell/diff checks passed; there is
+  no local Rust toolchain. See [MODULE_AUDIT.md](MODULE_AUDIT.md). This is not
+  independent behavior/provenance verification or portable host approval.
+  Protected behavioral verification, runtime/wire ABI and original creative
+  build/reuse remain open. PR24/25 are still open and main is unchanged.
+
+- Continued with the bounded **data-only extension call/reply diagnostic** on the
+  same fixed branch (PR24/25 and main unchanged). A strict version-1 intent and
+  canonical request frame bind the exact static-profile-passing frozen manifest/
+  artifact pin to the captured document revision and canvas; only the selected
+  capability layer's ordered opaque objects/IDs enter the frame, plus declared
+  edit arguments and caller-offered new IDs. Replies are inspected as **hypo-
+  thetical** bounded frames: candidate status claims, transactional edit
+  proposals over a private projection, and exact-canvas RGBA shape/hash only.
+  Packed pointer/length memory helpers check supplied slices, not a runtime.
+  No WASM engine/instantiation/execution exists, no payload/behavior/provenance
+  is verified, no document/registry byte is mutated, and no PNG/activation/
+  provider/autonomy path is enabled; request digests and context scopes are not
+  MACs, authentication or replay protection. Added `registry-inspect-protocol`
+  (read-only, complete-inventory exact-slot) and 21 new Rust cases (20 portable,
+  1 Linux), plus real debug and uploaded-then-downloaded lifecycle checks with
+  hand-authored fixtures. Exact source `b1febc0` passed
+  [Rust42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375),
+  job `127386732699`, **6m12s**, including all-target/21 new cases, both new CLI
+  lifecycles and existing document/registry/static/native/package/downloaded
+  regressions. [Matrix42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)
+  passed all three jobs; delegated26 job `127386702285` passed exact twelve + two
+  kernel cases, kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor restriction
+  `1` unchanged; the optional namespace probe remained unavailable. Earlier
+  attempts `a0bb48a`/`a99dacb` failed on a binary-private capture call and a test
+  type error, fixed without relaxing `--locked` or gates. Local 50 Python tests
+  and compile/shell/diff checks passed; no local Rust exists. See
+  [EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md). This is still **not** the
+  protected verification/runtime/activation contract, editable capability art or
+  original exact-reuse acceptance; those and release/signing remain open.
+  Documentation head `cac6a4c` repeated all gates
+  ([Rust42070179954](https://github.com/c4us4l1ty/perveance/actions/runs/42070179954),
+  job `127395660101`, **7m45s**; [matrix42070180027](https://github.com/c4us4l1ty/perveance/actions/runs/42070180027),
+  exact twelve + two on kernel `7.0.0-1017-azure`); one unrelated pre-existing
+  task-lock test flaked once on intermediate docs `b12a743` and passed unchanged
+  on the rerun without weakening any gate.

@@ -7,7 +7,10 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse, composite-eyedropper and rectangular region-editing tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A Linux-only persistent job backend for revision-bound raster proposals: private snapshots, status, cooperative cancellation, verified project/PNG outputs and explicit interrupted-run recovery. It is not wired to the GUI/provider and does not run generated code.
-- A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
+- An offline [data-only v2 document foundation](Plan/DOCUMENT.md): stable layer/object IDs, bounded byte-preserving unavailable-capability payloads, revision-bound native edits and explicit export refusal instead of missing content. This is CLI/library-only, not working plugins or a vector capability.
+- A new [quarantine-only capability registry](Plan/REGISTRY.md): immutable version/pin bindings, private captured artifact storage and exact document-reference diagnostics. Stored bytes remain unverified, unavailable and non-executable; this does not install a plugin.
+- A [read-only static WASM diagnostic](Plan/MODULE_AUDIT.md): full module validation plus bounded import/export/memory/signature profile checks on exact stored bytes. A pass is not capability verification and never installs, activates, runs or makes a layer renderable; debug/downloaded-release CI passed.
+- A headless CLI backed by the shared Rust raster engine. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
 This is **not** the finished product: autonomous development, sandbox enforcement, vector artwork, a full editor, atomic/revision-aware project updates, and broad OS support are not implemented. Do not rely on this prototype for important artwork. It does not execute generated code.
@@ -55,6 +58,66 @@ python3 tools/arena_art.py apply-proposal potion.perveance.json edited.perveance
 The operations file is a JSON array in the Rust CLI's format. The bridge supports the current typed raster batch operations: `add_layer`, `duplicate_layer`, `clear_layer`, `clear_region`, `copy_region`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `rename_layer`, `move_layer`, `remove_layer`, `set_visibility`, `pixel`, `line`, `brush_line`, `rectangle`, `rectangle_outline`, `ellipse`, and `fill`. Its project and file limits remain stricter than Rust's; CLI commands and PNG import are not fully supported. Use `sample ... layer LAYER` or `read-region ... layer LAYER` for raw layer pixels (including hidden pixels). Region results are row-major, retain raw RGB under zero alpha, and report the snapshot revision. A brush is a clipped 1–16 pixel square, and even sizes are biased toward the top left; ellipses follow the Rust pixel-center rasterization. Straight-alpha RGBA compositing follows the Rust model; CI compares batch results, representative translucent composites, and bridge PNGs against the Rust implementation. A native X11 test exercises a file handoff from the bridge to a GUI edit and back to a revision-bound bridge edit; it is not a live connector or real-desktop validation. This is a separately implemented, limited compatibility bridge—not the Rust app running inside Arena, an Arena connector, or full CLI parity. Projects can be opened in Perveance when transferred to an available build, but the project format is experimental.
 
 Bridge limits are 128×128, 16 layers, 1,024 operations, 256 KiB batch input and 8 MiB project input/output; scaled PNGs may be up to 1024×1024. The Rust app has different limits, and scaled PNGs larger than 256×256 cannot be reimported into it. Inputs are loaded snapshots. `inspect`, `sample` and `read-region` report the Rust-compatible content revision, and `apply-proposal` rejects a mismatched v1 base revision; plain `apply` does not check one. Revision checks are not locks or atomic compare-and-swap and cannot see unsaved GUI changes or later disk edits. Output files are create-new and installed through a same-directory temporary file and hard link; existing paths are not overwritten. Directories and inputs must be trusted; symlinks are followed on input, hard-link support is required, and a crash or cleanup error may leave temporary or completed files. There is no precise CPU/memory quota. The bridge runs no generated code and supplies no sandbox, supervisor, model, or automatic self-extension; an Arena agent must itself choose the operations and have access to the checkout and output directory. Do not put secrets in artwork or paths.
+
+### Data-only extensible document foundation
+
+The separate Linux `document-import-raster`, `document-inspect`, `document-copy`,
+`document-apply` and `document-export-png` commands use private descriptor-scoped
+roots and create-new atomic publication. They can import a v1 project into a new
+v2 file, preserve unavailable capability objects exactly, and edit/reorder native
+layers by stable ID. Any unavailable layer blocks PNG export, even hidden;
+unknown payloads are never executed, fetched or silently flattened. See the
+[format, commands, limits and remaining gates](Plan/DOCUMENT.md). The GUI,
+Python bridge, prompt adapter and both job backends remain **v1-only** and reject
+v2. The bundled `opaque-document-v2.json` is a preservation/refusal fixture, not
+an installed plugin. Runtime dispatch, verified extension editing/rendering, activation
+and the original missing-vector build/reuse acceptance remain unimplemented.
+
+### Quarantine-only capability storage
+
+The separate Linux `registry-init`, `registry-inspect`, `registry-quarantine` and
+`registry-resolve-document` commands store bounded captured wasm-envelope bytes
+under immutable ID/version slots. Exact manifest/artifact duplicates are
+revalidated without rewriting; conflicting version pins are refused. Private
+storage is locked and quota-bounded, with atomic no-overwrite package publication
+and explicit interrupted-stage retention. See [contract and limits](Plan/REGISTRY.md).
+
+This is **not verification, installation or execution**: hashes/header checks do
+not validate wasm behavior, imports, exports, payload semantics or provenance.
+All entries remain unavailable; document export still refuses capability layers.
+There is no activation/run command, real provider call or autonomy. Registry
+Rust/debug/downloaded-binary lifecycle and native regressions passed in
+[Rust CI 42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060);
+see REGISTRY.md for mandatory kernel evidence and remaining gates.
+
+`registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT` separately performs a
+read-only structural and prospective ABI-signature diagnostic, with fixed
+redacted findings and no stored approval. It revalidates the complete registry
+and refuses corruption/interrupted storage. Even matching stubs or an infinite
+loop can pass; all capability/runtime/activation/availability flags stay false.
+See [MODULE_AUDIT.md](Plan/MODULE_AUDIT.md) for the exact policy, limits and evidence.
+At `3f6639b`, [Rust CI 42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)
+passed all-target Rust (20 new cases), debug/downloaded-release static/document/
+registry lifecycles and native regressions; the mandatory twelve + two kernel
+cases also passed ([matrix 42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)).
+No local Rust execution, portable host approval or original capability-growth
+acceptance is claimed.
+
+`registry-inspect-protocol PRIVATE_REGISTRY_ROOT EXACT_SLOT PRIVATE_DOCUMENT_ROOT
+RELATIVE_DOCUMENT PRIVATE_INTENT_ROOT RELATIVE_INTENT [PRIVATE_REPLY_ROOT
+RELATIVE_REPLY]` adds a read-only **data-only wire diagnostic** on the same frozen
+slot. It builds a strict bounded request scoped to the selected layer and inspects
+only a supplied hypothetical reply: edit replies stay an in-memory proposal and
+render replies are only checked for exact canvas/RGBA shape and hashed. No WASM is
+instantiated/called, no payload/behavior is verified, no document or registry byte
+changes, and no PNG/activation/provider/autonomy is enabled. Request hashes and
+scopes are not authentication or replay protection. Exact source `b1febc0` passed
+all-target Rust (21 new cases), real debug/downloaded-release lifecycles
+([42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375)) and
+the mandatory twelve + two kernel cases
+([42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)).
+See [EXTENSION_PROTOCOL.md](Plan/EXTENSION_PROTOCOL.md) for the wire layout and
+remaining verification/runtime gaps; original creative build/reuse remains open.
 
 ### Headless batch editing
 
