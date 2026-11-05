@@ -89,7 +89,7 @@ class BrokerProbeTests(unittest.TestCase):
         result = subprocess.run(["python3", "-I", "-c", SCRIPT.read_text(), "private-invalid-marker"],
             input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, b'{"probe_failed":true}')
+        self.assertEqual(json.loads(result.stderr), {"probe_failed": True, "stage": "configuration"})
         self.assertNotIn(b"private-invalid-marker", result.stdout + result.stderr)
 
 

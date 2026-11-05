@@ -108,6 +108,6 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(); assert "11 passed; 0 failed" in s; print("::notice::Eleven real cgroup-v2 tests passed: confined broker protocol/credential denial, scoped cancellation, broker SIGKILL/SIGSTOP, sealed input, quotas and whole-tree recovery; fixed offline code only, autonomy disabled")'
           else
             cat /tmp/perveance-bounded-kernel.log
-            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(errors="replace")[-10000:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi

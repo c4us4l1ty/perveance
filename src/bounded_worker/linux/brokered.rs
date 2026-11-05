@@ -71,6 +71,24 @@ struct Summary {
     host_proc_denied: bool, descriptors_clean: bool, environment_clean: bool,
     input_sealed: bool, exchanges_verified: bool,
 }
+pub(super) fn failure(output: &mut File) -> String {
+    // Fixed allowlist only. Never propagate peer stderr, paths, text or keys.
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Failure { probe_failed: bool, stage: String }
+    let mut bytes = Vec::new();
+    if output.seek(SeekFrom::Start(0)).is_ok() && output.take(OUTPUT_LIMIT + 1).read_to_end(&mut bytes).is_ok()
+        && bytes.len() as u64 <= OUTPUT_LIMIT {
+        if let Ok(value) = serde_json::from_slice::<Failure>(&bytes) {
+            if value.probe_failed && ["configuration", "descriptors", "channel", "environment", "input", "private-files",
+                "symlink", "proc", "host-listeners", "project", "broker"].contains(&value.stage.as_str()) {
+                return fail(&format!("fixed broker peer failed at {}", value.stage));
+            }
+        }
+    }
+    fail("fixed broker peer failed without a valid stage code")
+}
+
 pub(super) fn verify(output: &mut File, project: &Project) -> Result<Outcome, String> {
     output.seek(SeekFrom::Start(0)).map_err(|_| fail("cannot read broker-worker summary"))?;
     let mut bytes = Vec::new();

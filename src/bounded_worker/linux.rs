@@ -509,7 +509,10 @@ fn run_inner(snapshot: &ProjectSnapshot, delegated_root: &Path, mode: Mode,
         if usage.oom_kills > 0 { return Ok(Outcome::MemoryLimit); }
         if usage.process_limit_hits > 0 { return Ok(Outcome::ProcessLimit); }
         if output_large(&stdout, &stderr)? { return Ok(Outcome::OutputLimit); }
-        if !status.success() { return Ok(Outcome::Failed); }
+        if !status.success() {
+            if broker.is_some() { return Err(brokered::failure(&mut stderr)); }
+            return Ok(Outcome::Failed);
+        }
         if broker.is_some() { brokered::verify(&mut stderr, project) }
         else { verify_output(&mut stdout, project, mode, limits) }
     })();

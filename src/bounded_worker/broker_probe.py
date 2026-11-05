@@ -9,6 +9,8 @@ import struct
 import sys
 import time
 
+STAGE = "configuration"
+
 
 def denied_file(path):
     try:
@@ -64,6 +66,8 @@ def exchange(peer, request, expected):
 
 
 def run(config):
+    global STAGE
+    STAGE = "descriptors"
     # listdir's own descriptor has closed before the readlink check.
     for name in os.listdir("/proc/self/fd"):
         if int(name) > 2:
@@ -72,9 +76,12 @@ def run(config):
             except FileNotFoundError:
                 continue
             raise RuntimeError("unexpected inherited descriptor")
+    STAGE = "channel"
     assert stat.S_ISSOCK(os.fstat(1).st_mode)
+    STAGE = "environment"
     assert set(os.environ) <= {"PATH", "LC_CTYPE"}
     assert os.environ["PATH"] == "/usr/bin:/bin"
+    STAGE = "input"
     assert fcntl.fcntl(0, fcntl.F_GET_SEALS) & 15 == 15
     try:
         os.write(0, b"changed")
@@ -83,18 +90,24 @@ def run(config):
     else:
         raise RuntimeError("input was writable")
     assert os.listdir("/input") == []
+    STAGE = "private-files"
     for path in config["private_files"]:
         denied_file(path)
         denied_file("/proc/1/root" + path)
         denied_file("/proc/" + str(config["host_pid"]) + "/root" + path)
+    STAGE = "symlink"
     os.symlink(config["private_files"][0], "/work/host-secret-link")
     denied_file("/work/host-secret-link")
+    STAGE = "proc"
     denied_file("/proc/" + str(config["host_pid"]) + "/environ")
     denied_file("/proc/" + str(config["host_pid"]) + "/fd/0")
+    STAGE = "host-listeners"
     denied_socket(socket.AF_UNIX, config["host_socket"])
     denied_socket(socket.AF_INET, ("127.0.0.1", config["host_port"]))
+    STAGE = "project"
     project = json.load(sys.stdin)
     request = {"version": 1, "id": config["id"], "prompt": "fixed confined offline fixture", "max_output_tokens": 10}
+    STAGE = "broker"
     with socket.socket(fileno=1) as peer:
         peer.settimeout(5)
         if config["mode"] != "inspect":
@@ -122,5 +135,5 @@ if __name__ == "__main__":
         run(json.loads(sys.argv[1]))
     except Exception:
         # No tracebacks, request text, paths, credential material or raw errors.
-        os.write(2, b'{"probe_failed":true}')
+        os.write(2, json.dumps({"probe_failed": True, "stage": STAGE}, separators=(",", ":")).encode("ascii"))
         sys.exit(7)
