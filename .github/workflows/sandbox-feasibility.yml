@@ -105,7 +105,7 @@ jobs:
             --property=RuntimeMaxSec=180 --property=MemoryMax=768M --property=TasksMax=128 \
             /bin/bash "$GITHUB_WORKSPACE/tools/test_bounded_worker.sh" "$test_bin" > /tmp/perveance-bounded-kernel.log 2>&1; then
             cat /tmp/perveance-bounded-kernel.log
-            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(); assert "6 passed; 0 failed" in s; print("::notice::Six real cgroup-v2 tests passed: quotas, detached-descendant cancellation, supervisor SIGKILL/SIGSTOP, watchdog failure and explicit recovery; fixed code only, autonomy disabled")'
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(); assert "7 passed; 0 failed" in s; print("::notice::Seven real cgroup-v2 tests passed: sealed descriptor-only input, quotas, detached-descendant cancellation, supervisor SIGKILL/SIGSTOP, watchdog failure and explicit recovery; fixed code only, autonomy disabled")'
           else
             cat /tmp/perveance-bounded-kernel.log
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'

@@ -18,5 +18,6 @@ Perveance is an AI-first creative studio for pixel artists, game developers, ill
 10. [PHASE0_FINDINGS.md](PHASE0_FINDINGS.md) — feasibility observations and unresolved gates.
 11. [COMPLETION.md](COMPLETION.md) — remaining work, critical path and completion criteria.
 12. [LINUX_WORKER.md](LINUX_WORKER.md) — fixed-code cgroup-v2 resource/watchdog backend and its open security gates.
+13. [WORKER_IO.md](WORKER_IO.md) — descriptor-scoped raster inputs, sealed worker snapshots and verified atomic bundle publication.
 
 These documents describe a proposed design, not a guarantee that every implementation detail is achievable. If they conflict, the security boundaries in SECURITY.md and the acceptance gates in ROADMAP.md take precedence. Explicit owner instructions supersede proposed defaults, except where a constraint cannot safely be met without stating the limitation.

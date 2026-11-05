@@ -147,3 +147,18 @@
   This is not connected to raster jobs/providers, safe input
   brokerage, generated execution or activation; autonomy remains disabled.
   See [LINUX_WORKER.md](LINUX_WORKER.md) for concrete limits and open gates.
+
+
+- Continued trusted I/O mediation with Linux directory capabilities and required
+  `openat2` resolution, pre-readable-open special-file/link/privacy/size checks,
+  sealed anonymous project snapshots and path-free fixed-worker stdin. Replaced
+  this backend's disk artwork/log staging with anonymous descriptors. Added
+  exact trusted expected-project/PNG candidate validation, canonical metadata
+  normalization, no-replace atomic bundle publication and explicit committed-but-
+  parent-sync-uncertain reporting. Exposed the mediated diagnostic and useful
+  offline raster-bundle CLI, with shared renderer/parser reuse. Added normal
+  Rust adversarial/fault/concurrency tests, a seventh delegated worker input test
+  and downloaded-binary publication verification. All 41 local Python tests
+  pass; new Rust/kernel CI is pending. Provider brokerage, role-separated worker
+  output transport, task integration and generated-code autonomy remain absent.
+  See [WORKER_IO.md](WORKER_IO.md).

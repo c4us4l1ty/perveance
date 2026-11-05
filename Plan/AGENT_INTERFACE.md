@@ -88,3 +88,19 @@ Reports declare disabled autonomy and an unverified full security boundary.
 Expected quota/failure modes can return CLI `ok`; that means only the fixed test
 behaved as requested, not that artwork succeeded. These limits do not apply to
 the existing raster-job/provider paths. See [LINUX_WORKER.md](LINUX_WORKER.md).
+
+
+## Descriptor-mediated fixed input and offline publication
+
+Linux `verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT CGROUP_ROOT`
+uses confined relative reads and sealed stdin for the fixed-code worker; it does
+not mount a source path/directory or grant agent execution. The old
+`verify-bounded-worker` initial source loading still assumes trusted paths.
+
+`publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT
+BUNDLE_NAME` uses the trusted renderer in-process and atomically installs a new
+editable-project/PNG directory without replacing an occupied name. It is not a
+quota-enforced job or a model call. A true `committed` with false
+`parent_directory_synced` means artwork was installed but durability is uncertain:
+inspect that same bundle name instead of blindly retrying/deleting it. See
+[WORKER_IO.md](WORKER_IO.md). Existing task/provider/GUI/bridge paths are separate.

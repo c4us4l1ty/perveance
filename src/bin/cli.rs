@@ -95,12 +95,8 @@ fn inspect_autonomy_request(input: &str, request: &str, policy: Option<&str>) ->
     Ok(json!({"ok": true, "intake": report}))
 }
 
-fn bounded_worker(input: &str, parent: &str, root: &str, mode: &str) -> Result<serde_json::Value, String> {
-    use perveance::bounded_worker::{run, Limits, Mode, Outcome};
-    let mode = Mode::parse(mode)?;
-    let project = Project::load(Path::new(input)).map_err(|_| "invalid bounded worker source project")?;
-    let report = run(&project, Path::new(parent), Path::new(root), mode, &Limits::default(),
-        &std::sync::atomic::AtomicBool::new(false))?;
+fn bounded_result(mode: perveance::bounded_worker::Mode, report: perveance::bounded_worker::Report) -> Result<serde_json::Value, String> {
+    use perveance::bounded_worker::{Mode, Outcome};
     let expected = match mode {
         Mode::Inspect => Outcome::Completed, Mode::Wait | Mode::ForkTree => Outcome::TimedOut,
         Mode::CpuBurn => Outcome::CpuBudget, Mode::MemoryFlood => Outcome::MemoryLimit,
@@ -111,11 +107,50 @@ fn bounded_worker(input: &str, parent: &str, root: &str, mode: &str) -> Result<s
     Ok(json!({"ok": true, "diagnostic": report}))
 }
 
+fn bounded_worker(input: &str, parent: &str, root: &str, mode: &str) -> Result<serde_json::Value, String> {
+    use perveance::bounded_worker::{run, Limits, Mode};
+    let mode = Mode::parse(mode)?;
+    let project = Project::load(Path::new(input)).map_err(|_| "invalid bounded worker source project")?;
+    let report = run(&project, Path::new(parent), Path::new(root), mode, &Limits::default(),
+        &std::sync::atomic::AtomicBool::new(false))?;
+    bounded_result(mode, report)
+}
+
+#[cfg(target_os = "linux")]
+fn mediated_worker(input_root: &str, relative: &str, cgroup: &str, mode: &str) -> Result<serde_json::Value, String> {
+    use perveance::{bounded_worker::{run_snapshot, Limits, Mode}, worker_io::{PrivateDirectory, ProjectSnapshot}};
+    let mode = Mode::parse(mode)?;
+    let root = PrivateDirectory::open(Path::new(input_root))?;
+    let snapshot = ProjectSnapshot::capture(&root, relative)?;
+    let report = run_snapshot(&snapshot, Path::new(cgroup), mode, &Limits::default(), &std::sync::atomic::AtomicBool::new(false))?;
+    bounded_result(mode, report)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn mediated_worker(_input_root: &str, _relative: &str, _cgroup: &str, _mode: &str) -> Result<serde_json::Value, String> {
+    Err("mediated worker diagnostics require Linux".into())
+}
+
+#[cfg(target_os = "linux")]
+fn publish_raster_bundle(input_root: &str, relative: &str, output_root: &str, name: &str) -> Result<serde_json::Value, String> {
+    use perveance::worker_io::{PrivateDirectory, ProjectSnapshot, VerifiedBundle};
+    let source = PrivateDirectory::open(Path::new(input_root))?;
+    let destination = PrivateDirectory::open(Path::new(output_root))?;
+    let snapshot = ProjectSnapshot::capture(&source, relative)?;
+    let report = VerifiedBundle::render(snapshot.project())?.publish(&destination, name)?;
+    Ok(json!({"ok": true, "publication": report}))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn publish_raster_bundle(_input_root: &str, _relative: &str, _output_root: &str, _name: &str) -> Result<serde_json::Value, String> {
+    Err("descriptor-scoped raster publication requires Linux".into())
+}
+
 fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "verify-fixed-worker", "verify-bounded-worker", "recover-bounded-workers", "inspect-autonomy-request", "task-create", "task-inspect", "task-run", "task-cancel", "task-recover", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "verify-fixed-worker", "verify-bounded-worker", "verify-mediated-worker", "recover-bounded-workers", "publish-raster-bundle", "inspect-autonomy-request", "task-create", "task-inspect", "task-run", "task-cancel", "task-recover", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "clear_region", "copy_region", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "png_export_scale": perveance::MAX_EXPORT_SCALE, "brush_size": perveance::MAX_BRUSH_SIZE, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "region_edit_pixels": perveance::MAX_DIMENSION * perveance::MAX_DIMENSION, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
@@ -145,6 +180,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             "autonomy_intake": {"operation": "inspect-autonomy-request", "version": perveance::supervisor::INTAKE_VERSION, "default_maximum": perveance::supervisor::IntakePolicy::default().maximum, "task_created": false, "budgets_enforced": false, "autonomous_execution": false},
             "fixed_worker_diagnostic": {"operation": "verify-fixed-worker", "platform": "linux", "fixed_code_only": true, "autonomous_execution": false, "security_boundary": false, "resource_enforcement": "experimental output cap and best-effort wall timeout only"},
             "bounded_worker_diagnostic": {"operation": "verify-bounded-worker", "recovery": "recover-bounded-workers", "platform": "linux", "backend": "delegated cgroup v2 plus unprivileged bubblewrap", "default_limits": perveance::bounded_worker::Limits::default(), "fixed_code_only": true, "autonomous_execution": false, "security_boundary_verified": false, "cpu_budget": "sampled aggregate usage; kernel rate limit is separate", "scope": "fixed diagnostics only; not wired to raster tasks or provider"},
+            "worker_io": {"platform": "linux", "publish_operation": "publish-raster-bundle", "diagnostic_operation": "verify-mediated-worker", "path_resolution": "required openat2; beneath/no symlinks/no magic links/no mount crossing within private roots", "input": "sealed anonymous snapshot on stdin; no source paths or directories mounted", "candidate_verification": "library only; must match trusted expected project and PNG composite", "publication": "canonical project plus PNG in one renameat2 no-replace bundle", "parent_sync_failure": "bundle already committed; report uncertainty without deleting or blind retry", "autonomous_execution": false, "resource_quotas_enforced_for_offline_publication": false},
             "project_staging": {"operation": "verify-project-staging", "platform": "linux", "contents": "one validated project snapshot", "persistent": false, "autonomous_execution": false, "security_boundary": false},
             "region_editing": {"source": "raw layer RGBA, including hidden pixels", "paste": "replace bytes, not alpha blending", "bounds": "source and destination must fit; no clipping", "overlap": "source snapshot before writing"},
             "palette_format": {"version": perveance::PALETTE_VERSION, "slots": perveance::PALETTE_SLOTS, "max_bytes": perveance::MAX_PALETTE_BYTES, "color": "straight-alpha RGBA bytes"},
@@ -190,6 +226,15 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
         }
         [command, input, request, policy] if command == "inspect-autonomy-request" => {
             inspect_autonomy_request(input, request, Some(policy))
+        }
+        [command, input_root, relative, output_root, name] if command == "publish-raster-bundle" => {
+            publish_raster_bundle(input_root, relative, output_root, name)
+        }
+        [command, input_root, relative, root] if command == "verify-mediated-worker" => {
+            mediated_worker(input_root, relative, root, "inspect")
+        }
+        [command, input_root, relative, root, mode] if command == "verify-mediated-worker" => {
+            mediated_worker(input_root, relative, root, mode)
         }
         [command, input, parent, root] if command == "verify-bounded-worker" => {
             bounded_worker(input, parent, root, "inspect")
@@ -293,7 +338,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | verify-fixed-worker INPUT TRUSTED_PARENT | verify-bounded-worker INPUT PRIVATE_PARENT DELEGATED_CGROUP_ROOT [inspect|wait|fork-tree|cpu|memory|processes|scratch|output|fail] | recover-bounded-workers DELEGATED_CGROUP_ROOT | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | task-create PROJECT PROPOSAL_JSON PRIVATE_TASK_ROOT | task-inspect PRIVATE_TASK_ROOT ID | task-run PRIVATE_TASK_ROOT ID | task-cancel PRIVATE_TASK_ROOT ID | task-recover PRIVATE_TASK_ROOT ID | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | verify-fixed-worker INPUT TRUSTED_PARENT | verify-bounded-worker INPUT PRIVATE_PARENT DELEGATED_CGROUP_ROOT [inspect|wait|fork-tree|cpu|memory|processes|scratch|output|fail] | verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT [FIXED_MODE] | publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT BUNDLE_NAME | recover-bounded-workers DELEGATED_CGROUP_ROOT | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | task-create PROJECT PROPOSAL_JSON PRIVATE_TASK_ROOT | task-inspect PRIVATE_TASK_ROOT ID | task-run PRIVATE_TASK_ROOT ID | task-cancel PRIVATE_TASK_ROOT ID | task-recover PRIVATE_TASK_ROOT ID | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 

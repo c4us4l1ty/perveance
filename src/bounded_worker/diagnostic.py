@@ -1,5 +1,6 @@
 """Embedded fixed workloads for the cgroup backend, not a general code runner."""
 import errno
+import fcntl
 import json
 import os
 import sys
@@ -76,8 +77,17 @@ elif mode == "inspect":
         output.write(b'fixed-only')
     assert open('/tmp/probe', 'rb').read() == b'fixed-only'
     assert open('/dev/shm/probe', 'rb').read() == b'fixed-only'
-    with open('/input/project.perveance.json', 'r', encoding='utf-8') as source:
-        project = json.load(source)
+    # Full input arrives as a kernel-sealed regular stdin, not a host path or
+    # directory descriptor. Helpers never copy it under the 8-KiB file rlimit.
+    assert fcntl.fcntl(0, fcntl.F_GET_SEALS) & 15 == 15
+    try:
+        os.write(0, b'changed')
+    except OSError as exc:
+        assert exc.errno in (errno.EBADF, errno.EPERM)
+    else:
+        raise RuntimeError('input was writable')
+    assert os.listdir('/input') == []
+    project = json.load(sys.stdin)
     print(json.dumps({'width': project['width'], 'height': project['height'], 'layers': len(project['layers'])}))
 else:
     sys.exit(7)

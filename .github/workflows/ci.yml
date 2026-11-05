@@ -258,6 +258,19 @@ jobs:
           "$bundle/bin/perveance-cli" task-inspect task-store "$task_id" > task-inspected.json
           "$bundle/bin/perveance-cli" sample "task-store/$task_id/output.perveance.json" 0 0 layer 0 > task-sample.json
           python3 -c 'import json; a=json.load(open("task-completed.json"))["task"]; b=json.load(open("task-inspected.json"))["task"]; assert a==b and a["state"]=="succeeded" and a["artifacts_verified"] and len(a["history"])==3 and not a["network_used"] and not a["autonomous_execution"]; assert json.load(open("task-sample.json"))["color"]==[11,22,33,44]; print("Downloaded CLI persistent raster-task round trip passed")'
+          # Descriptor-confined input and atomic two-artifact publication using
+          # the downloaded executable, with no worker/cgroup prerequisite.
+          mkdir -m 700 mediated-input mediated-output
+          cp potion.json mediated-input/source.json
+          chmod 600 mediated-input/source.json
+          "$bundle/bin/perveance-cli" publish-raster-bundle "$work/mediated-input" source.json "$work/mediated-output" result > publication.json
+          "$bundle/bin/perveance-cli" inspect mediated-output/result/output.perveance.json > publication-project.json
+          python3 -c 'import hashlib,json,pathlib; r=json.load(open("publication.json"))["publication"]; assert r["committed"] and r["parent_directory_synced"] and not r["autonomous_execution"]; assert r["revision"]==json.load(open("inspection.json"))["revision"]==json.load(open("publication-project.json"))["revision"]; root=pathlib.Path("mediated-output/result"); assert {p.name for p in root.iterdir()}=={"output.perveance.json","output.png"}; assert all(a["bytes"]==(root/a["file"]).stat().st_size and a["sha256"]==hashlib.sha256((root/a["file"]).read_bytes()).hexdigest() for a in r["artifacts"]); print("Downloaded CLI descriptor-mediated project/PNG publication passed")'
+          if "$bundle/bin/perveance-cli" publish-raster-bundle "$work/mediated-input" source.json "$work/mediated-output" result > /dev/null 2> publication-collision.json; then
+            echo "::error::Publication unexpectedly replaced an occupied name"
+            exit 1
+          fi
+          python3 -c 'import json,pathlib; assert json.load(open("publication-collision.json"))["ok"] is False; assert len(list(pathlib.Path("mediated-output").iterdir()))==1'
           PERVEANCE_BIN="$bundle/bin/perveance" CLOSE_HELPER="$GITHUB_WORKSPACE/tools/send_x11_close.py" xvfb-run -a sh -c '
             set -eu
             export LIBGL_ALWAYS_SOFTWARE=1

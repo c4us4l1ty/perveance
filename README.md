@@ -337,7 +337,8 @@ The experimental runner limits each child output file to 8 KiB, treats more than
 
 A separate Linux diagnostic now requires a **real, private delegated cgroup-v2
 root**. It applies and reads back memory/swap, process-count and CPU-rate limits
-before attaching the worker at exec, uses one size-limited scratch tmpfs, and
+before attaching the worker at exec, uses a sealed stdin project and one
+size-limited scratch tmpfs, and
 runs an independent watchdog for sampled aggregate CPU/wall budgets. Whole-cgroup
 kill includes detached descendants; lease EOF covers supervisor exit. Normal
 completion requires verified emptiness and cgroup removal. There is no
@@ -352,13 +353,43 @@ perveance-cli recover-bounded-workers DELEGATED_CGROUP_ROOT
 ```
 
 Recovery explicitly kills/removes only this backend's exactly named cgroups,
-refuses a cooperating live supervisor, and never deletes abandoned artwork
-snapshots. A diagnostic pass is **not** production security certification. CPU
+refuses a cooperating live supervisor, and never deletes artwork. This backend
+now uses anonymous input/logs instead of disk artwork staging. A diagnostic pass is **not** production security certification. CPU
 budget/deadline sampling can overshoot; global disk, staging retention, trusted
 I/O brokerage and simultaneous supervisor/watchdog loss remain limitations.
 The existing raster jobs and OpenRouter adapter are not wired to these limits.
 See [the backend contract and CI requirements](Plan/LINUX_WORKER.md) before use.
 **Arbitrary-code autonomy remains disabled.**
+
+### Descriptor-mediated input and raster bundle publication
+
+On Linux, private directory capabilities now constrain relative reads with
+`openat2`: no traversal, symlinks, magic links or mount crossing beneath the
+chosen root. Regular-file ownership/privacy/link/size checks precede reading.
+Projects become kernel-sealed anonymous snapshots; fixed workers receive stdin,
+not source pathnames or host directories. Use the preferred diagnostic:
+
+```sh
+perveance-cli verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+```
+
+A separate useful offline operation needs no worker, cgroup or provider:
+
+```sh
+perveance-cli publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT BUNDLE_NAME
+```
+
+It renders the validated raster project and installs editable
+`output.perveance.json` plus `output.png` as one new bundle directory. Private
+roots must be absolute, owned, mode 0700 and free of symlink components; source
+files must be owned/private with one link. Publication uses no-replace rename:
+existing names are never overwritten. Check `parent_directory_synced`: false
+means the bundle **is already committed** but final sync failed; inspect that
+same name, do not blindly retry/delete. This is not guaranteed power-loss
+durability or a quota-enforced host operation. Library-only candidate artifact
+validation also requires exact trusted project/composite equality and normalizes
+metadata before publication. See [WORKER_IO.md](Plan/WORKER_IO.md) for limits,
+required syscalls, recovery caveats and remaining gates. Autonomy stays disabled.
 
 ### Isolation feasibility diagnostic
 

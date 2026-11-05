@@ -98,3 +98,16 @@ Cargo metadata, outside this archive. It is an unverified review aid, not a
 complete inventory of linked code, system libraries or assets, nor a license
 or redistribution review. Local packaging does not generate the sidecar.
 This artifact is provided for evaluation, not as a formal release.
+
+
+Linux descriptor I/O adds publish-raster-bundle PRIVATE_INPUT_ROOT
+RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT BUNDLE_NAME for offline editable-project/PNG
+publication in one new directory. Roots must be absolute, owned, 0700 and have no
+symlink components; source files must be private and single-link. This runs the
+trusted renderer in-process, without worker quotas or a provider. If committed
+is true but parent_directory_synced is false, inspect that installed name; do not
+blindly retry or delete it. Existing names are never replaced. The preferred
+fixed-code diagnostic is verify-mediated-worker PRIVATE_INPUT_ROOT
+RELATIVE_PROJECT DELEGATED_CGROUP_ROOT; it supplies sealed stdin, not host source
+paths. Required Linux syscalls have no unsafe fallback. See Plan/WORKER_IO.md in
+the source repository. Autonomy remains disabled.

@@ -74,8 +74,14 @@ production-sandbox certification, and do not authorize generated-code execution.
   `b7be7f2`); see [LINUX_WORKER.md](LINUX_WORKER.md). Protocol mocks are not proof.
 - [ ] Integrate and adversarially verify quotas/descendant cleanup in the actual
   builder/runtime pipeline, including interruption, watchdog loss and retention.
-- [ ] Add race-resistant, minimal input/output mediation and isolated roles for
-  fetch, build, runtime and provider calls. No host sockets or inherited secrets.
+- [x] Implement [descriptor-scoped raster I/O](WORKER_IO.md): confined reads,
+  sealed stdin snapshots, trusted expected-artifact comparison and no-replace
+  project/PNG bundle publication. No worker receives a source directory FD.
+- [ ] Validate this I/O increment in Rust, seven real worker-kernel tests and the
+  downloaded Linux bundle. Existing six-test evidence predates this increment.
+- [ ] Complete role-separated input/output transport and minimal permissions for
+  fetch, build, runtime and provider calls. Existing task/GUI loaders are not
+  retroactively brokered. No host sockets or inherited secrets.
 - [ ] Build the credential broker with durable call/cost reservations, bounded
   requests and conservative billing behavior. No keys in worker files/env/args.
 - [ ] Test a real compatible harness through that broker. If its auth/network

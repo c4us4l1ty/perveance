@@ -92,6 +92,9 @@ pub struct Report {
     pub cgroup_limits_applied: bool,
     pub cgroup_removed: bool,
     pub usage: Option<Usage>,
+    pub input_snapshot_sealed: bool,
+    pub input_revision: Option<String>,
+    pub source_files_mounted: bool,
     pub fixed_code_only: bool,
     pub autonomous_execution: bool,
     /// The mechanisms are real, but the complete product security gate is open.
@@ -102,6 +105,7 @@ impl Report {
     fn cancelled(limits: &Limits) -> Self {
         Self { outcome: Outcome::Cancelled, limits: limits.clone(), worker_started: false,
             cgroup_limits_applied: false, cgroup_removed: false, usage: None,
+            input_snapshot_sealed: false, input_revision: None, source_files_mounted: false,
             fixed_code_only: true, autonomous_execution: false, security_boundary_verified: false }
     }
 }
@@ -122,6 +126,15 @@ pub struct RecoveryReport {
 pub fn run(project: &Project, trusted_parent: &Path, delegated_root: &Path, mode: Mode,
            limits: &Limits, cancelled: &AtomicBool) -> Result<Report, String> {
     linux::run(project, trusted_parent, delegated_root, mode, limits, cancelled)
+}
+
+/// Preferred descriptor-mediated entry: sealed stdin carries the full project;
+/// no source/staging directory or source pathname is visible to the worker.
+/// Still accepts embedded fixed diagnostics only, not generated code.
+#[cfg(target_os = "linux")]
+pub fn run_snapshot(snapshot: &crate::worker_io::ProjectSnapshot, delegated_root: &Path, mode: Mode,
+                    limits: &Limits, cancelled: &AtomicBool) -> Result<Report, String> {
+    linux::run_snapshot(snapshot, delegated_root, mode, limits, cancelled)
 }
 
 /// Explicit recovery kills and removes only this backend's strictly named leaf

@@ -192,6 +192,40 @@ mod linux {
 
     #[test]
     #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
+    fn sealed_input_and_mediated_cli_do_not_mount_or_reread_source_paths() {
+        use perveance::worker_io::{PrivateDirectory, ProjectSnapshot};
+        let root = delegated();
+        let parent = private_parent();
+        let source = parent.path().join("source.json");
+        let mut original = Project::new(64, 64).unwrap();
+        original.rename_layer(0, "private-input-sentinel").unwrap();
+        original.layers[0].visible = false;
+        original.set_pixel(0, 1, 2, [7, 8, 9, 0]).unwrap();
+        original.save_new(&source).unwrap();
+        assert!(fs::metadata(&source).unwrap().len() > 8192, "input must exceed helper file rlimit");
+        let input = PrivateDirectory::open(parent.path()).unwrap();
+        let snapshot = ProjectSnapshot::capture(&input, "source.json").unwrap();
+        fs::write(&source, serde_json::to_vec(&Project::new(1, 1).unwrap()).unwrap()).unwrap();
+        for _ in 0..2 {
+            let report = bounded_worker::run_snapshot(&snapshot, &root, Mode::Inspect, &Limits::default(), &AtomicBool::new(false)).unwrap();
+            assert_eq!(report.outcome, Outcome::Completed);
+            assert!(report.input_snapshot_sealed && report.cgroup_removed);
+            assert!(!report.source_files_mounted && !report.autonomous_execution);
+            assert_eq!(report.input_revision.as_deref(), Some(snapshot.revision()));
+            assert!(!serde_json::to_string(&report).unwrap().contains("private-input-sentinel"));
+        }
+        let output = cli().arg("verify-mediated-worker").arg(parent.path()).arg("source.json").arg(&root).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["diagnostic"]["input_snapshot_sealed"], true);
+        assert_eq!(report["diagnostic"]["source_files_mounted"], false);
+        assert_eq!(report["diagnostic"]["input_revision"], Project::new(1, 1).unwrap().revision().unwrap());
+        assert!(groups(&root).is_empty());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 1, "no disk artwork staging or log files");
+    }
+
+    #[test]
+    #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
     fn cancellation_kills_detached_descendants_and_locks_out_recovery() {
         let root = delegated();
         let parent = private_parent();
@@ -231,9 +265,10 @@ mod linux {
         assert_eq!(bounded_worker::recover(&root).unwrap().removed_cgroups, 1);
         assert_eq!(bounded_worker::recover(&root).unwrap().removed_cgroups, 0);
         assert!(!group.exists());
-        // Original input and abandoned staging are NOT silently deleted by
-        // cgroup recovery; they may contain artwork and need retention policy.
+        // Sealed input/logs are anonymous: no new artwork files survive exit.
+        // Recovery never deletes the user's original source file.
         assert!(parent.path().join("input.json").exists());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 1);
     }
 
     #[test]

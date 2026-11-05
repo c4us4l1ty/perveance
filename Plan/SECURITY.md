@@ -100,3 +100,23 @@ real-time guarantee. No broker, arbitrary build/runtime, safe activation or
 production security approval is introduced. Data-only raster jobs retain their
 existing separate cooperative/non-quota semantics. The complete adversarial
 suite and independent review remain required.
+
+
+## Descriptor-scoped raster I/O component
+
+[WORKER_IO.md](WORKER_IO.md) specifies a new Linux capability-based component.
+Required `openat2` resolution prevents symlink/traversal/magic-link/mount escape
+beneath authorized private roots; inode/type/privacy/link/size checks precede
+readable opens. Captured projects are canonical sealed memfds, supplied to the
+fixed worker through stdin without source mounts, source paths or directory FDs.
+Its logs are anonymous, not disk staging files.
+
+Candidate artifact capture requires full project equality with trusted expected
+artwork and bounded PNG/composite equality, then re-encodes canonical data.
+Publication installs a new private two-file bundle with no-replace rename and
+reports post-commit sync uncertainty without deleting artwork or inviting a
+blind retry. This is not authenticated storage, document CAS, guaranteed crash
+recovery, safe activation or protection against a malicious same-user host.
+The new Rust/seven-worker-test/downloaded-bundle checks are pending validation.
+Protected role separation/output transport, provider/broker integration and the
+complete independent adversarial security gate remain open; autonomy is disabled.

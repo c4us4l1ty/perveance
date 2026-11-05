@@ -1,0 +1,35 @@
+//! Descriptor-scoped Linux raster I/O building blocks, not execution authority.
+//! No worker receives a host-directory capability. Input snapshots are sealed;
+//! candidate artifacts must match trusted expected artwork before publication.
+use serde::Serialize;
+
+pub const PROJECT_FILE: &str = "output.perveance.json";
+pub const PNG_FILE: &str = "output.png";
+pub const MAX_RELATIVE_BYTES: usize = 1024;
+pub const MAX_RELATIVE_COMPONENTS: usize = 8;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Artifact {
+    pub file: &'static str,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Publication {
+    pub bundle: String,
+    pub revision: String,
+    pub artifacts: [Artifact; 2],
+    pub committed: bool,
+    /// False means the bundle is already visible, but parent sync failed.
+    /// Inspect that same name; do not blindly retry or delete the published work.
+    pub parent_directory_synced: bool,
+    pub autonomous_execution: bool,
+}
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::{PrivateDirectory, ProjectSnapshot, VerifiedBundle};
+#[cfg(target_os = "linux")]
+pub(crate) use linux::anonymous_file;

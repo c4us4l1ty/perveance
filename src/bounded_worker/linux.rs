@@ -1,5 +1,5 @@
 use super::{Limits, Mode, Outcome, RecoveryReport, Report, Usage};
-use crate::Project;
+use crate::{Project, worker_io::{PrivateDirectory, ProjectSnapshot, anonymous_file}};
 use std::{
     collections::BTreeMap,
     ffi::CString,
@@ -378,7 +378,7 @@ impl Drop for WorkerChild<'_, '_> {
     }
 }
 
-fn command(stage: &Path, limits: &Limits, mode: Mode, stdout: &File, stderr: &File) -> Result<Command, String> {
+fn command(snapshot: &ProjectSnapshot, limits: &Limits, mode: Mode, stdout: &File, stderr: &File) -> Result<Command, String> {
     let mut command = Command::new("/usr/bin/bwrap");
     command.args(["--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup",
         "--disable-userns", "--new-session", "--die-with-parent", "--cap-drop", "ALL", "--clearenv", "--setenv", "PATH", "/usr/bin:/bin"]);
@@ -393,9 +393,9 @@ fn command(stage: &Path, limits: &Limits, mode: Mode, stdout: &File, stderr: &Fi
         command.args(["--dev-bind", &path, &path]);
     }
     command.args(["--symlink", "/proc/self/fd", "/dev/fd", "--size", &(limits.scratch_mib * 1024 * 1024).to_string(), "--tmpfs", "/work",
-        "--symlink", "/work", "/tmp", "--symlink", "/work", "/dev/shm", "--ro-bind"])
-        .arg(stage).args(["/input", "--remount-ro", "/", "--chdir", "/work", "/usr/bin/python3", "-I", "-c", DIAGNOSTIC, mode.argument()])
-        .env_clear().stdin(Stdio::null())
+        "--symlink", "/work", "/tmp", "--symlink", "/work", "/dev/shm", "--dir", "/input",
+        "--remount-ro", "/", "--chdir", "/work", "/usr/bin/python3", "-I", "-c", DIAGNOSTIC, mode.argument()])
+        .env_clear().stdin(Stdio::from(snapshot.stdin_file()?))
         .stdout(Stdio::from(stdout.try_clone().map_err(|_| fail("cannot duplicate diagnostic output"))?))
         .stderr(Stdio::from(stderr.try_clone().map_err(|_| fail("cannot duplicate diagnostic output"))?));
     Ok(command)
@@ -440,24 +440,28 @@ pub(super) fn run(project: &Project, trusted_parent: &Path, delegated_root: &Pat
                    limits: &Limits, cancelled: &AtomicBool) -> Result<Report, String> {
     limits.validate()?;
     if cancelled.load(Ordering::SeqCst) { return Ok(Report::cancelled(limits)); }
-    project.validate()?;
+    // Compatibility wrapper only: keep validating the legacy parent argument,
+    // but never create artwork/log files there or mount it into a worker.
+    PrivateDirectory::open(trusted_parent)?;
+    let snapshot = ProjectSnapshot::from_project(project)?;
+    run_snapshot(&snapshot, delegated_root, mode, limits, cancelled)
+}
+
+pub(super) fn run_snapshot(snapshot: &ProjectSnapshot, delegated_root: &Path, mode: Mode,
+                          limits: &Limits, cancelled: &AtomicBool) -> Result<Report, String> {
+    limits.validate()?;
+    if cancelled.load(Ordering::SeqCst) { return Ok(Report::cancelled(limits)); }
+    let project = snapshot.project();
     let root = Root::open(delegated_root)?;
     if !root.managed()?.is_empty() { return Err(fail("abandoned worker cgroups exist; explicitly recover before starting another")); }
-    let parent = fs::symlink_metadata(trusted_parent).map_err(|_| fail("trusted private staging parent unavailable"))?;
-    if !trusted_parent.is_absolute() || !parent.file_type().is_dir() || parent.uid() != unsafe { libc::geteuid() }
-        || parent.permissions().mode() & 0o077 != 0 {
-        return Err(fail("staging parent must be an absolute private owned directory"));
-    }
     verify_tools()?;
     let group = Group::create(&root, limits)?;
-    let staged = crate::workspace::stage_project(project, trusted_parent)?;
     let result = (|| -> Result<Outcome, String> {
-        let mut stdout = tempfile::tempfile_in(trusted_parent).map_err(|_| fail("cannot create private diagnostic output"))?;
-        let stderr = tempfile::tempfile_in(trusted_parent).map_err(|_| fail("cannot create private diagnostic output"))?;
+        let mut stdout = anonymous_file()?;
+        let stderr = anonymous_file()?;
         let mut watchdog = Watchdog::start(&group, limits)?;
         let join = open_at(&group.directory, "cgroup.procs", libc::O_WRONLY)?;
-        let stage = staged.project_path().parent().ok_or_else(|| fail("missing staging directory"))?.to_owned();
-        let mut command = command(&stage, limits, mode, &stdout, &stderr)?;
+        let mut command = command(snapshot, limits, mode, &stdout, &stderr)?;
         hygiene(&mut command, Some(join.as_raw_fd()), None);
         let child = command.spawn().map_err(|_| fail("cannot attach/start fixed diagnostic; no unconfined fallback"))?;
         let mut guard = WorkerChild { child, group: &group, reaped: false };
@@ -490,15 +494,13 @@ pub(super) fn run(project: &Project, trusted_parent: &Path, delegated_root: &Pat
         if !status.success() { return Ok(Outcome::Failed); }
         verify_output(&mut stdout, project, mode, limits)
     })();
-    // Attempt both cleanups even after a workload/verification error. No report
-    // of completed work may escape a failed cgroup cleanup.
-    let cleanup = group.finish();
-    let stage_cleanup = staged.close();
-    let usage = cleanup?;
-    stage_cleanup?;
+    // No filesystem staging exists. A failed cgroup cleanup must still prevent
+    // a completed-work report; sealed input/log descriptors close on unwind.
+    let usage = group.finish()?;
     let outcome = result?;
     Ok(Report { outcome, limits: limits.clone(), worker_started: true, cgroup_limits_applied: true,
-        cgroup_removed: true, usage: Some(usage), fixed_code_only: true,
+        cgroup_removed: true, usage: Some(usage), input_snapshot_sealed: true,
+        input_revision: Some(snapshot.revision().to_owned()), source_files_mounted: false, fixed_code_only: true,
         autonomous_execution: false, security_boundary_verified: false })
 }
 
