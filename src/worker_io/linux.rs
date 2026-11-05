@@ -118,6 +118,43 @@ impl PrivateDirectory {
         self.read_with_hook(name, limit, || {})
     }
 
+    // Trusted broker storage only. No directory descriptor or writable journal
+    // is ever exported to an untrusted peer. Reuse the same mandatory resolver
+    // and pre-activation inode checks as raster capture, rather than path checks.
+    pub(crate) fn read_private(&self, name: &str, limit: u64) -> Result<Vec<u8>, String> {
+        self.read(name, limit)
+    }
+
+    pub(crate) fn create_private(&self, name: &str) -> Result<File, String> {
+        let name = relative(name)?;
+        let file = open_at(self.directory.as_raw_fd(), &name,
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600, BENEATH)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| fail("cannot protect private storage file"))?;
+        Ok(file)
+    }
+
+    pub(crate) fn open_private_rw(&self, name: &str, limit: u64) -> Result<File, String> {
+        let name = relative(name)?;
+        let held = open_at(self.directory.as_raw_fd(), &name,
+            libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0, BENEATH)?;
+        let before = held.metadata().map_err(|_| fail("cannot inspect private storage inode"))?;
+        private_regular(&before, limit)?;
+        let file = OpenOptions::new().read(true).write(true)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+            .open(format!("/proc/self/fd/{}", held.as_raw_fd()))
+            .map_err(|_| fail("cannot reopen held private storage inode"))?;
+        let after = file.metadata().map_err(|_| fail("cannot inspect private storage inode"))?;
+        private_regular(&after, limit)?;
+        if !same_inode(&before, &after) { return Err(fail("private storage inode identity changed")); }
+        Ok(file)
+    }
+
+    pub(crate) fn sync(&self) -> Result<(), String> {
+        self.directory.sync_all().map_err(|_| fail("cannot sync private directory"))
+    }
+
     fn read_with_hook(&self, name: &str, limit: u64, hook: impl FnOnce()) -> Result<Vec<u8>, String> {
         let name = relative(name)?;
         // O_PATH does not activate a FIFO, socket or device. Reject their type

@@ -104,3 +104,23 @@ quota-enforced job or a model call. A true `committed` with false
 `parent_directory_synced` means artwork was installed but durability is uncertain:
 inspect that same bundle name instead of blindly retrying/deleting it. See
 [WORKER_IO.md](WORKER_IO.md). Existing task/provider/GUI/bridge paths are separate.
+
+
+## Offline model-broker and budget fixture
+
+On Linux, `broker-ledger-init PRIVATE_ROOT MAX_CALLS MAX_COST_MICROUSD
+PER_CALL_UPPER_MICROUSD` creates a new immutable offline-fixture budget domain.
+`broker-fixture-call PRIVATE_LEDGER_ROOT PRIVATE_REQUEST_ROOT RELATIVE_REQUEST`
+exercises one strict framed exchange using a synthetic key held only by the
+server. `broker-ledger-inspect PRIVATE_ROOT` exposes bounded metadata, never raw
+prompts, credentials, responses or request hashes. It takes the same exclusive
+lock as a live broker and may fail busy.
+
+Check `fixture.reply.status`, not only CLI `ok`: an exchange may be processed
+but denied, already finished or uncertain. Reusing an ID never dispatches again
+or returns cached text; changing its payload is a conflict. Full reservations
+are permanent, even on failure. Uncertain/incomplete calls halt new requests;
+there is no reset/refund/retry command. Root/file and provider trust limitations,
+frame/billing semantics and the exact JSON schema are in
+[MODEL_BROKER.md](MODEL_BROKER.md). These fixtures use no real key or provider and
+are not wired to existing tasks, GUI, manual OpenRouter or autonomous workers.

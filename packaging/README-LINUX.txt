@@ -111,3 +111,17 @@ fixed-code diagnostic is verify-mediated-worker PRIVATE_INPUT_ROOT
 RELATIVE_PROJECT DELEGATED_CGROUP_ROOT; it supplies sealed stdin, not host source
 paths. Required Linux syscalls have no unsafe fallback. See Plan/WORKER_IO.md in
 the source repository. Autonomy remains disabled.
+
+
+Linux offline broker fixtures add broker-ledger-init PRIVATE_ROOT MAX_CALLS
+MAX_COST_MICROUSD PER_CALL_UPPER_MICROUSD, broker-ledger-inspect PRIVATE_ROOT and
+broker-fixture-call PRIVATE_LEDGER_ROOT PRIVATE_REQUEST_ROOT RELATIVE_REQUEST.
+Roots must be owned absolute private 0700 directories, and request files private
+single-link regular JSON files. These use a synthetic server-side key and no
+provider network. Full reservations persist across calls/restarts, never refund,
+and never redispatch the same ID. Check fixture.reply.status, not just CLI ok;
+already_finished has no cached text, and uncertain outcomes halt new calls.
+No real key is accepted by this fixture CLI. This ledger does not cover the
+manual OpenRouter prototype or existing tasks/GUI/workers, and is not a real
+provider spending guarantee. See Plan/MODEL_BROKER.md in the source repository.
+Autonomy remains disabled.

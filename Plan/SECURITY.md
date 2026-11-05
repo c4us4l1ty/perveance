@@ -47,9 +47,9 @@ The prototype can stage one already-validated raster project into a private Linu
 
 ## Experimental task intake (not a gate implementation)
 
-The data-only intake inspection checks a versioned request against budget ceilings provided by the trusted caller and a project snapshot fingerprint. It unconditionally returns blocked for all valid requests: user-provided JSON cannot enable execution or assert that a gate passed. Ceilings are declarations, not resource limits; the standalone OpenRouter prototype is not subject to them. There is no job, supervisor process, enforced isolation, resource meter, broker or verifier. Normal path loading assumes trusted regular files and follows symlinks; this interface is not safe input brokerage.
+The data-only intake inspection checks a versioned request against budget ceilings provided by the trusted caller and a project snapshot fingerprint. It unconditionally returns blocked for all valid requests: user-provided JSON cannot enable execution or assert that a gate passed. Ceilings are declarations, not resource limits; the standalone OpenRouter prototype is not subject to them. This interface creates no job, supervisor process, enforced isolation, resource meter, broker call or verifier result. Normal path loading assumes trusted regular files and follows symlinks; this interface is not safe input brokerage.
 
-An experimental in-memory model-call reservation counter rejects unknown/zero cost bounds, over-budget calls and integer overflow, and does not refund reservations. It is not wired to the provider, survives no restart, depends on a trustworthy bound supplied by trusted code, and cannot guarantee provider charges. It is not an authorization or a credential broker. A future broker must own synchronization, durable accounting, provider-specific billing controls and all other security gates; otherwise calls remain disabled in the autonomous pipeline.
+An experimental in-memory model-call reservation counter rejects unknown/zero cost bounds, over-budget calls and integer overflow, and does not refund reservations. It is not wired to the provider, survives no restart, depends on a trustworthy bound supplied by trusted code, and cannot guarantee provider charges. It is not an authorization or a credential broker. The separate broker increment below owns synchronization and durable accounting, but real provider-specific billing controls and all other security gates remain open; calls stay disabled in the autonomous pipeline.
 
 ## Fixed worker lifecycle experiment
 
@@ -125,3 +125,30 @@ relaxing host AppArmor policy. This evidence is scoped to that fixed workload
 and selected host, not a production or arbitrary-code isolation approval.
 Protected role separation/output transport, provider/broker integration and the
 complete independent adversarial security gate remain open; autonomy is disabled.
+
+
+## Scoped broker and durable budget component (offline only)
+
+[MODEL_BROKER.md](MODEL_BROKER.md) describes host-owned credentials and immutable
+route/call/cost policy behind a connected Unix-socket capability. The bounded
+strict request schema cannot select a key, URL, model, cost or refund. Debug and
+errors redact raw prompts/credentials; literal key echo in responses is withheld.
+Only the constant offline transport is shipped; the old manual OpenRouter
+prototype is unchanged and does not use this ledger.
+
+An exclusively locked, descriptor-rooted append journal syncs the full call/cost
+reservation before invoking the trusted adapter and syncs settlement before
+releasing completion text. Actual usage never refunds a reservation. Stable IDs
+are never redispatched, including after restart or lost replies. Pending or
+unknown outcomes, rejected responses and billing breaches halt new calls;
+partial/corrupt records fail closed without repair, refund or replay. Hashes are
+not authentication; host-account/filesystem compromise, rollback or copied
+ledgers and guaranteed power-loss durability remain outside the contract.
+
+New tests include real cooperating subprocesses, SIGKILL after fake dispatch,
+strict/fragmented/dripping IPC and injected write/sync failures. They await CI.
+Neither protocol tests nor a fixed unsandboxed peer prove protected role
+separation. Broker-process hardening, credential stores, actual task/worker
+integration, paid-provider token/pricing/deadline/usage verification, compatible
+harness validation and independent review remain required. A positive declared
+cost alone cannot establish a real provider charge bound. Autonomy stays off.

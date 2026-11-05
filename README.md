@@ -392,6 +392,41 @@ validation also requires exact trusted project/composite equality and normalizes
 metadata before publication. See [WORKER_IO.md](Plan/WORKER_IO.md) for limits,
 required syscalls, recovery caveats and remaining gates. Autonomy stays disabled.
 
+### Scoped model broker and durable budgets (offline only)
+
+A Linux broker component now holds a private credential and immutable trusted
+route/budget policy behind a connected Unix socket. Requests cannot select a
+key, endpoint, model, price or refund. A lifetime exclusive lock and bounded
+append journal sync each full call/cost reservation **before** dispatch and
+settlement **before** delivering text. Reservations are never refunded; stable
+IDs are never redispatched, including after crashes or lost replies. Unknown
+outcomes or billing breaches halt new calls. No automatic reset or replay exists.
+
+Only a constant offline transport with a synthetic server-side key is shipped:
+
+```sh
+mkdir -m 700 broker-ledger broker-requests
+# Put a private (0600) JSON request in broker-requests/call.json; schema below.
+perveance-cli broker-ledger-init /absolute/broker-ledger 2 20 10
+perveance-cli broker-fixture-call /absolute/broker-ledger /absolute/broker-requests call.json
+perveance-cli broker-ledger-inspect /absolute/broker-ledger
+```
+
+A request is `{"version":1,"id":"00000000000000000000000000000001","prompt":"offline fixture request","max_output_tokens":10}`.
+Use fresh stable opaque IDs for different intended calls. `ok:true` means the
+exchange was processed; inspect `fixture.reply.status` and `ledger.halted`.
+An identical retry returns `already_finished`, without cached completion text
+or another dispatch. Frame/byte/token limits, no-refund/uncertainty semantics,
+credential loading, durability caveats and the test scope are documented in
+[MODEL_BROKER.md](Plan/MODEL_BROKER.md).
+
+This does **not** enable a paid provider, guarantee real billing bounds, isolate
+a production broker, or connect existing tasks/GUI/workers. The manual
+OpenRouter prototype remains separate and has no spend cap. Protected role
+separation, real route/harness/token/pricing verification and independent review
+remain open. Do not put credentials in chat, artwork, requests, env or arguments.
+**Generated-code autonomy stays disabled.**
+
 ### Isolation feasibility diagnostic
 
 The optional bubblewrap diagnostic creates its own temporary sentinel, two workspaces, local TCP listener and Unix socket, and runs only fixed test code. The first workspace contains a fixed input file and no host socket; it checks workspace access, synthetic host sentinel access (including through a symlink and `/proc` root links), the host socket's original path, host IPv4 loopback and removal of a synthetic environment variable. It then runs a negative control with a deliberately exposed host Unix socket in the second workspace and expects the worker to reach it. The clean socket check demonstrates that the fixture omitted the socket, **not** that bubblewrap blocks sockets in arbitrary workspaces. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled. The probe does not copy real project inputs or validate the Rust staging implementation. A separate opt-in fixed-worker integration test exercises an actual staged synthetic project on the selected CI runner; it is not a production worker launcher.

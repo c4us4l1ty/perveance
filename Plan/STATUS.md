@@ -169,3 +169,17 @@
   fixed-code evidence, not general host approval. Provider brokerage,
   role-separated worker output transport, task integration and generated-code
   autonomy remain absent. See [WORKER_IO.md](WORKER_IO.md).
+
+
+- Continued with a Linux scoped broker and durable call/cost ledger: host-owned
+  redacted credential type, connected-socket-only strict bounded requests,
+  immutable trusted route/budget policy, lifetime exclusive lock and synced
+  reservation-before-dispatch/settlement-before-reply journal. Stable IDs are
+  never retried; actual usage never refunds; unknown/rejected/over-bound outcomes
+  halt new calls. The only shipped transport is a constant offline synthetic-key
+  fixture, with CLI init/inspect/call commands and downloaded-binary checks.
+  Added 14 unit and eight integration test cases (including a subprocess helper)
+  for replay/faults/concurrency/IPC/real SIGKILL and unsafe credential/file input.
+  All 41 local Python tests pass; new Rust/kernel/downloaded-bundle CI is pending.
+  No real credentials, provider calls, task/worker integration or generated code
+  are enabled. See [MODEL_BROKER.md](MODEL_BROKER.md) for exact trust/limits.
