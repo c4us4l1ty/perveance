@@ -185,3 +185,27 @@ Protected production roles, actual task/output/response recovery, a real provide
 with verified pricing/token/deadline bounds and independent review remain open.
 Only fixed offline code runs; autonomy stays disabled. Synthetic fixture dirs
 can remain on SIGKILL and have no automatic retention sweep.
+
+
+## Durable fixed pixel-worker task continuation
+
+[WORKER_TASKS.md](WORKER_TASKS.md) connects captured Pixel proposals to the same
+confined offline broker peer and real quota/watchdog backend. A sealed composite
+stdin replaces project-only input; bounded socket output is data, never a path or
+permit. The entire editable candidate must equal independently computed Rust
+edits after normal exit and whole-cgroup cleanup; the host then renders/seals PNG
+and publishes an atomic no-replace pair. Legacy paths, GUI and autonomy intake
+are not upgraded. This is not arbitrary code, provider/harness or capability proof.
+
+A synced prepared journal precedes publication. Explicit recovery either
+finalizes an already present, fully verified fixed result or interrupts the job;
+it never reruns/re-publishes or resets/refunds the separate ledger. Unknown worker
+cleanup leaves running state for explicit recovery. Active cancellation revokes
+the broker and cgroup; late commit can win. Same-user/host rollback, whole-host
+quotas, partial-journal repair, retention and protected production roles remain
+outside this increment. At `61a0f20`, all fourteen required delegated cases
+passed ([42022046128](https://github.com/c4us4l1ty/perveance/actions/runs/42022046128)),
+with host policy unchanged, and all-target/native/downloaded-bundle regression
+passed ([42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445)).
+Fifty Python tests pass. The ordinary runner's optional namespace probe could
+not start; portable production host approval and independent review remain open.

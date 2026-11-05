@@ -2,8 +2,8 @@
 # Run ONLY inside the disposable delegated systemd CI service. Never changes
 # global user-namespace/AppArmor policy or grants application code sudo rights.
 set -euo pipefail
-if [[ $# != 1 || $(id -u) == 0 ]]; then
-    echo 'Run as an unprivileged user inside a delegated CI service, with one compiled test executable.' >&2
+if [[ $# != 2 || $(id -u) == 0 ]]; then
+    echo 'Run as an unprivileged user inside a delegated CI service, with compiled worker integration and library test executables.' >&2
     exit 1
 fi
 root=$(python3 - <<'PY'
@@ -21,6 +21,7 @@ chmod 700 "$root"
 printf '+cpu +memory +pids' > "$root/cgroup.subtree_control"
 export PERVEANCE_TEST_CGROUP_ROOT="$root"
 "$1" --ignored --test-threads=1 --nocapture
+"$2" --ignored worker_tasks::tests:: --test-threads=1 --nocapture
 python3 - "$root" <<'PY'
 from pathlib import Path
 import sys

@@ -106,12 +106,37 @@ impl PrivateDirectory {
         Ok(Self { directory })
     }
 
-    fn child(&self, name: &str) -> Result<Self, String> {
+    pub(crate) fn child(&self, name: &str) -> Result<Self, String> {
         let name = relative(name)?;
         let directory = open_at(self.directory.as_raw_fd(), &name, libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
             0, BENEATH)?;
         private_directory(&directory)?;
         Ok(Self { directory })
+    }
+
+    pub(crate) fn create_child(&self, name: &str) -> Result<Self, String> {
+        let name_c = bundle_name(name)?;
+        if unsafe { libc::mkdirat(self.directory.as_raw_fd(), name_c.as_ptr(), 0o700) } != 0 {
+            return Err(fail("cannot create new private child directory"));
+        }
+        let child = self.child(name)?;
+        self.sync()?;
+        Ok(child)
+    }
+
+    pub(crate) fn try_clone(&self) -> Result<Self, String> {
+        let directory = self.directory.try_clone().map_err(|_| fail("cannot duplicate private directory capability"))?;
+        private_directory(&directory)?;
+        Ok(Self { directory })
+    }
+
+    pub(crate) fn exists(&self, name: &str) -> Result<bool, String> {
+        let name = relative(name)?;
+        let how = OpenHow { flags: (libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) as u64, mode: 0, resolve: BENEATH };
+        let fd = unsafe { libc::syscall(libc::SYS_openat2, self.directory.as_raw_fd(), name.as_ptr(), &how, std::mem::size_of::<OpenHow>()) };
+        if fd >= 0 { drop(unsafe { File::from_raw_fd(fd as RawFd) }); return Ok(true); }
+        if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) { return Ok(false); }
+        Err(fail("cannot inspect confined private entry"))
     }
 
     fn read(&self, name: &str, limit: u64) -> Result<Vec<u8>, String> {
@@ -183,6 +208,11 @@ pub(crate) fn anonymous_file() -> Result<File, String> {
     let file = unsafe { File::from_raw_fd(fd as RawFd) };
     file.set_permissions(std::fs::Permissions::from_mode(0o600)).map_err(|_| fail("cannot protect anonymous file"))?;
     Ok(file)
+}
+
+pub(crate) fn sealed_input(bytes: &[u8], limit: u64) -> Result<File, String> {
+    let frozen = FrozenFile::new(bytes, PROJECT_FILE, limit)?;
+    reopen_readonly(&frozen.file)
 }
 
 fn has_required_seals(file: &File) -> bool {
@@ -280,6 +310,19 @@ impl VerifiedBundle {
         // metadata/text or noncanonical project bytes after validating pixels.
         Self::render(expected)
     }
+
+    /// Bounded socket output is untrusted data, not a pathname or success claim.
+    /// Compare the entire editable project (including hidden data); the host
+    /// renderer creates the PNG only after this independent comparison.
+    pub fn from_candidate_project(bytes: &[u8], expected: &Project) -> Result<Self, String> {
+        if bytes.len() as u64 > MAX_PROJECT_BYTES { return Err(fail("candidate project exceeds byte limit")); }
+        let project: Project = serde_json::from_slice(bytes).map_err(|_| fail("invalid candidate project JSON or schema"))?;
+        project.validate().map_err(|_| fail("invalid candidate project"))?;
+        if &project != expected { return Err(fail("candidate project differs from trusted expected artwork")); }
+        Self::render(expected)
+    }
+
+    pub fn artifacts(&self) -> [Artifact; 2] { [self.project.frozen.artifact.clone(), self.png.artifact.clone()] }
 
     pub fn publish(&self, destination: &PrivateDirectory, name: &str) -> Result<Publication, String> {
         self.publish_with_hook(destination, name, |_| Ok(()))

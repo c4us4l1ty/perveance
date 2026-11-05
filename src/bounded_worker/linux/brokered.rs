@@ -14,11 +14,14 @@ pub(super) struct Channel<'a> {
     pub(super) revoked: &'a AtomicBool,
     endpoint: Option<UnixStream>,
     config: String,
+    input: Option<File>,
+    pub(super) expected_backend: Option<crate::bounded_worker::BackendIdentity>,
 }
 impl Channel<'_> {
     pub(super) fn configure(&mut self, command: &mut Command) -> Result<(), String> {
         let socket = self.endpoint.take().ok_or_else(|| fail("broker endpoint already transferred"))?;
         command.arg(SCRIPT).arg(&self.config).stdout(Stdio::from(OwnedFd::from(socket)));
+        if let Some(input) = self.input.take() { command.stdin(Stdio::from(input)); }
         Ok(())
     }
 }
@@ -106,20 +109,41 @@ pub(super) fn verify(output: &mut File, project: &Project) -> Result<Outcome, St
 pub(in crate::bounded_worker) fn run(snapshot: &ProjectSnapshot, delegated_root: &Path, ledger_root: &Path,
                                      mode: BrokerMode, limits: &Limits, cancelled: &AtomicBool,
                                      progress: &BrokerProgress) -> Result<BrokerWorkerReport, String> {
-    limits.validate()?;
-    progress.state.store(0, Ordering::SeqCst);
     let ledger = Ledger::open(PrivateDirectory::open(ledger_root)?)?;
+    run_captured(snapshot, delegated_root, ledger_root, ledger, mode, limits, cancelled, progress, None)
+        .map(|(report, _)| report)
+}
+
+pub(in crate::bounded_worker) fn run_pixels(snapshot: &ProjectSnapshot, proposal: &crate::EditProposal,
+    delegated_root: &Path, ledger: Ledger, ledger_path_hint: &Path, backend: &crate::bounded_worker::BackendIdentity, mode: BrokerMode, limits: &Limits,
+    cancelled: &AtomicBool, progress: &BrokerProgress) -> Result<(BrokerWorkerReport, Option<Vec<u8>>), String> {
+    crate::worker_tasks::validate_pixels(snapshot.project(), proposal)?;
+    #[derive(serde::Serialize)]
+    struct Input<'a> { version: u32, project: &'a Project, proposal: &'a crate::EditProposal }
+    let bytes = serde_json::to_vec(&Input { version: 1, project: snapshot.project(), proposal })
+        .map_err(|_| fail("cannot capture fixed pixel task input"))?;
+    let input = crate::worker_io::sealed_input(&bytes, crate::MAX_PROJECT_BYTES + crate::MAX_PROPOSAL_BYTES + 128)?;
+    run_captured(snapshot, delegated_root, ledger_path_hint, ledger, mode, limits, cancelled, progress, Some((input, backend.clone())))
+}
+
+fn run_captured(snapshot: &ProjectSnapshot, delegated_root: &Path, ledger_root: &Path, ledger: Ledger,
+    mode: BrokerMode, limits: &Limits, cancelled: &AtomicBool, progress: &BrokerProgress, input: Option<(File, crate::bounded_worker::BackendIdentity)>)
+    -> Result<(BrokerWorkerReport, Option<Vec<u8>>), String> {
+    limits.validate()?;
+    let pixels = input.is_some();
+    let (input, expected_backend) = match input { Some((file, backend)) => (Some(file), Some(backend)), None => (None, None) };
+    progress.state.store(0, Ordering::SeqCst);
     let before = ledger.report();
     if before.policy.route != Route::fixture() || before.policy.max_calls != 1
         || before.policy.max_cost_microusd < before.policy.per_call_upper_cost_microusd
         || before.policy.max_output_tokens < 10 || before.halted
-        || (mode != BrokerMode::Inspect && before.reserved_calls != 0) {
+        || ((mode != BrokerMode::Inspect || pixels) && before.reserved_calls != 0) {
         return Err(fail("fixture requires a healthy one-call offline ledger with a sufficient known bound"));
     }
     if cancelled.load(Ordering::SeqCst) {
-        return Ok(BrokerWorkerReport { worker: Report::cancelled(limits), ledger: before, exchanges: Vec::new(),
+        return Ok((BrokerWorkerReport { worker: Report::cancelled(limits), ledger: before, exchanges: Vec::new(),
             adapter_invocations: 0, channel_error: false, namespace_checks_verified: false,
-            synthetic_fixture_only: true, provider_network_used: false, autonomous_execution: false });
+            synthetic_fixture_only: true, provider_network_used: false, autonomous_execution: false }, None));
     }
     // Only synthetic host secrets/sentinels, never artwork or real credentials.
     // Ordinary exit removes them; SIGKILL can leave this private diagnostic dir.
@@ -145,7 +169,7 @@ pub(in crate::bounded_worker) fn run(snapshot: &ProjectSnapshot, delegated_root:
     // Host-side positive controls: targets exist/really open before worker denial.
     private.read_private("credential.private", 512)?;
     let _control = UnixStream::connect(&socket_path).map_err(|_| fail("synthetic host socket control failed"))?;
-    let config = serde_json::json!({"mode": mode.argument(), "id": before.scope_id,
+    let config = serde_json::json!({"mode": if pixels && mode == BrokerMode::Inspect { "pixel-task" } else { mode.argument() }, "id": before.scope_id,
         "first_status": if before.reserved_calls == 0 { "completed" } else { "already_finished" },
         "private_files": [fixture.path().join("credential.private"), fixture.path().join("sentinel.private"), ledger_root.join(broker::LEDGER_FILE)],
         "host_socket": socket_path, "host_port": tcp.local_addr().map_err(|_| fail("missing host listener address"))?.port(),
@@ -157,7 +181,7 @@ pub(in crate::bounded_worker) fn run(snapshot: &ProjectSnapshot, delegated_root:
     let invocations = AtomicU64::new(0);
     let scope = Scope { cancelled, revoked: &revoked, deadline: Instant::now() + Duration::from_secs(limits.wall_seconds), peer: &peer };
     let mut broker = Broker::new(ledger, key, Offline { scope: &scope, mode, progress, invocations: &invocations })?;
-    let (worker, exchanges, channel_error) = thread::scope(|threads| {
+    let (worker, exchanges, channel_error, candidate) = thread::scope(|threads| {
         let lease = Revoke(&revoked); // drop on all returns/unwinds BEFORE joining
         let service = threads.spawn(|| {
             while !ready.load(Ordering::SeqCst) && scope.live() { thread::sleep(Duration::from_millis(5)); }
@@ -177,14 +201,19 @@ pub(in crate::bounded_worker) fn run(snapshot: &ProjectSnapshot, delegated_root:
                 });
                 match result { Ok(report) => exchanges.push(report), Err(_) => { error = true; break; } }
             }
+            let candidate = if pixels && mode == BrokerMode::Inspect && !error && exchanges.len() == EXCHANGES {
+                match read_candidate(&mut server, &scope) {
+                    Ok(bytes) => Some(bytes), Err(_) => { error = true; None }
+                }
+            } else { None };
             let _ = server.shutdown(Shutdown::Both);
-            (exchanges, error)
+            (exchanges, error, candidate)
         });
-        let channel = Channel { ready: &ready, revoked: &revoked, endpoint: Some(endpoint), config: config.to_string() };
+        let channel = Channel { ready: &ready, revoked: &revoked, endpoint: Some(endpoint), config: config.to_string(), input, expected_backend };
         let worker = run_inner(snapshot, delegated_root, Mode::Inspect, limits, cancelled, Some(channel));
         drop(lease);
-        let (exchanges, error) = service.join().map_err(|_| fail("trusted offline broker service lost"))?;
-        Ok::<_, String>((worker?, exchanges, error))
+        let (exchanges, error, candidate) = service.join().map_err(|_| fail("trusted offline broker service lost"))?;
+        Ok::<_, String>((worker?, exchanges, error, candidate))
     })?;
     let calls = invocations.load(Ordering::SeqCst);
     let verified = worker.outcome == Outcome::Completed;
@@ -193,13 +222,48 @@ pub(in crate::bounded_worker) fn run(snapshot: &ProjectSnapshot, delegated_root:
             if before.reserved_calls == 0 { ReplyStatus::Completed } else { ReplyStatus::AlreadyFinished },
             ReplyStatus::AlreadyFinished, ReplyStatus::Conflict, ReplyStatus::BudgetExhausted];
         if channel_error || exchanges.len() != EXCHANGES || exchanges.iter().map(|r| r.status).ne(expected)
-            || calls != u64::from(before.reserved_calls == 0) {
+            || calls != u64::from(before.reserved_calls == 0) || (pixels && candidate.is_none()) {
             return Err(fail("broker service evidence differs from fixed worker exchange claims"));
         }
     }
-    Ok(BrokerWorkerReport { worker, ledger: broker.report(), exchanges, adapter_invocations: calls,
+    Ok((BrokerWorkerReport { worker, ledger: broker.report(), exchanges, adapter_invocations: calls,
         channel_error, namespace_checks_verified: verified, synthetic_fixture_only: true,
-        provider_network_used: false, autonomous_execution: false })
+        provider_network_used: false, autonomous_execution: false }, candidate))
+}
+
+fn read_candidate(peer: &mut UnixStream, scope: &Scope<'_>) -> Result<Vec<u8>, String> {
+    // Data after peer exit is permitted only here, not in admission: a full
+    // bounded frame + EOF is verified after normal completion/whole-tree cleanup.
+    fn read(peer: &mut UnixStream, out: &mut [u8], scope: &Scope<'_>) -> Result<(), String> {
+        let mut offset = 0;
+        while offset < out.len() {
+            if scope.cancelled.load(Ordering::SeqCst) { return Err(fail("candidate transport cancelled")); }
+            let remaining = scope.deadline.checked_duration_since(Instant::now()).ok_or_else(|| fail("candidate deadline expired"))?;
+            let mut fd = libc::pollfd { fd: peer.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            if unsafe { libc::poll(&mut fd, 1, remaining.as_millis().saturating_add(1).min(100) as i32) } < 0 {
+                return Err(fail("candidate channel poll failed"));
+            }
+            match peer.read(&mut out[offset..]) {
+                Ok(0) => return Err(fail("incomplete candidate frame")), Ok(n) => offset += n,
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {},
+                Err(_) => return Err(fail("candidate channel unavailable")),
+            }
+        }
+        Ok(())
+    }
+    let mut size = [0u8; 4]; read(peer, &mut size, scope)?;
+    let size = u32::from_be_bytes(size) as usize;
+    if size == 0 || size as u64 > crate::MAX_PROJECT_BYTES { return Err(fail("candidate size rejected before allocation")); }
+    let mut bytes = vec![0; size]; read(peer, &mut bytes, scope)?;
+    loop {
+        if scope.cancelled.load(Ordering::SeqCst) || Instant::now() >= scope.deadline { return Err(fail("candidate closing deadline expired")); }
+        let mut tail = [0u8; 1];
+        match peer.read(&mut tail) {
+            Ok(0) => return Ok(bytes), Ok(_) => return Err(fail("trailing candidate bytes rejected")),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => thread::sleep(Duration::from_millis(5)),
+            Err(_) => return Err(fail("candidate closing failed")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -216,6 +280,29 @@ mod tests {
             assert!(!peer_live(&server));
         }
     }
+    #[test]
+    fn candidate_frame_requires_one_bounded_complete_frame_and_eof() {
+        for case in 0..5 {
+            let (mut server, mut client) = UnixStream::pair().unwrap();
+            server.set_nonblocking(true).unwrap();
+            let observer = server.try_clone().unwrap();
+            let cancelled = AtomicBool::new(false); let revoked = AtomicBool::new(false);
+            let scope = Scope { cancelled: &cancelled, revoked: &revoked, peer: &observer,
+                deadline: Instant::now() + Duration::from_millis(150) };
+            let bytes = match case {
+                0 => [3u32.to_be_bytes().as_slice(), b"abc"].concat(),
+                1 => ((crate::MAX_PROJECT_BYTES + 1) as u32).to_be_bytes().to_vec(),
+                2 => [3u32.to_be_bytes().as_slice(), b"ab"].concat(),
+                3 => [3u32.to_be_bytes().as_slice(), b"abcX"].concat(),
+                _ => 0u32.to_be_bytes().to_vec(),
+            };
+            for byte in bytes { client.write_all(&[byte]).unwrap(); }
+            drop(client);
+            let result = read_candidate(&mut server, &scope);
+            if case == 0 { assert_eq!(result.unwrap(), b"abc"); } else { assert!(result.is_err()); }
+        }
+    }
+
     #[test]
     fn cancellation_revocation_and_expired_deadlines_cannot_be_renewed_by_data() {
         let (server, mut client) = UnixStream::pair().unwrap();

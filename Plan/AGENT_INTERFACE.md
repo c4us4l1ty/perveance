@@ -138,3 +138,15 @@ hold modes test interruption, not arbitrary agents/commands. Missing prerequisit
 fail without an unconfined fallback. Synthetic host probe files may remain on
 SIGKILL; never clear the ledger to retry an uncertain call. See
 [BROKER_WORKER.md](BROKER_WORKER.md) for scope and retention caveats.
+
+
+## Durable fixed pixel worker jobs
+
+The separate `worker-task-*` CLI captures private projects/proposals and runs
+only 1–1024 existing Pixel operations through the offline broker and real Linux
+worker backend. The host independently verifies full candidate data and renders/
+publishes canonical project/PNG. Use task.state, not `ok`, as job outcome. No
+retry of running/terminal work, budget reset or unconfined fallback is available.
+See [WORKER_TASKS.md](WORKER_TASKS.md) for five commands and explicit recovery.
+The GUI, legacy task formats, natural-language intake and autonomy gate are not
+silently changed; no provider key or model program is accepted.

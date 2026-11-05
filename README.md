@@ -427,6 +427,17 @@ separation, real route/harness/token/pricing verification and independent review
 remain open. Do not put credentials in chat, artwork, requests, env or arguments.
 **Generated-code autonomy stays disabled.**
 
+### Durable fixed pixel-worker jobs
+
+New `worker-task-create`, `worker-task-inspect`, `worker-task-run`,
+`worker-task-cancel` and `worker-task-recover` operations connect captured,
+revision-bound **Pixel-only** proposals to the confined quota/watchdog backend
+and offline broker. The worker actually edits the project; Rust independently
+compares all data, renders PNG and publishes a verified atomic pair. Interrupted
+jobs never automatically retry or clear accounting. The GUI/legacy tasks are
+unchanged. No real provider, generated code or autonomy is enabled. See
+[WORKER_TASKS.md](Plan/WORKER_TASKS.md) for exact CLI, recovery and proof limits.
+
 ### Confined offline broker-worker diagnostic
 
 `verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT

@@ -175,3 +175,16 @@ passed all eleven mandatory kernel cases, and full Rust/native/downloaded-bundle
 regression passed [42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949).
 Earlier seven-test passes certify only their recorded implementation. This is
 not production provider/task/role-separation approval.
+
+
+## Durable fixed-pixel job continuation
+
+[WORKER_TASKS.md](WORKER_TASKS.md) adds actual fixed pixel editing, bounded
+candidate transport and independently verified atomic publication. At `61a0f20`,
+[matrix 42022046128](https://github.com/c4us4l1ty/perveance/actions/runs/42022046128)
+passed **twelve integration worker cases plus two library task cases** on the
+same delegated service, including active cancellation and owner SIGKILL around
+publication. The CI runner accepts both compiled test executables and requires
+both exact summaries. Full Rust/native/downloaded-bundle regression passed
+[42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445).
+This remains fixed offline code, not generated-code or production host approval.

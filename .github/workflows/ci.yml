@@ -283,6 +283,21 @@ jobs:
           "$bundle/bin/perveance-cli" broker-fixture-call "$work/broker-ledger" "$work/broker-requests" call.json > broker-exhausted.json
           "$bundle/bin/perveance-cli" broker-ledger-inspect "$work/broker-ledger" > broker-inspected.json
           python3 -c 'import json,pathlib; a=json.load(open("broker-first.json"))["fixture"]; b=json.load(open("broker-duplicate.json"))["fixture"]; c=json.load(open("broker-exhausted.json"))["fixture"]; d=json.load(open("broker-inspected.json"))["ledger"]; assert a["reply"]["status"]=="completed" and a["service"]["provider_called"] and a["service"]["outcome_recorded"]; assert b["reply"]["status"]=="already_finished" and b["reply"]["text"] is None and not b["service"]["provider_called"]; assert c["reply"]["status"]=="budget_exhausted" and not c["service"]["provider_called"]; assert all(x["fixture_only"] and not x["network_used"] and not x["autonomous_execution"] for x in (a,b,c)); assert d["reserved_calls"]==1 and d["reserved_cost_microusd"]==10 and d["calls"][0]["actual_cost_microusd"]==5 and not d["halted"]; data=pathlib.Path("broker-ledger/model-budget.v1").read_bytes(); assert b"offline downloaded-broker fixture" not in data and b"synthetic-offline-broker-credential" not in data; print("Downloaded CLI offline broker reservation/restart/deduplication/exhaustion passed")'
+          # Fixed worker-task persistence using the downloaded binary. This
+          # ordinary host does not attest cgroup support; refusal must not spend.
+          mkdir -m 700 worker-jobs
+          cp task-proposal.json mediated-input/pixels.json
+          chmod 600 mediated-input/pixels.json
+          "$bundle/bin/perveance-cli" worker-task-create "$work/mediated-input" source.json "$work/mediated-input" pixels.json "$work/worker-jobs" > worker-queued.json
+          worker_id=$(python3 -c 'import json; r=json.load(open("worker-queued.json"))["task"]; assert r["state"]=="queued" and r["ledger"]["reserved_calls"]==0 and r["synthetic_fixture_only"] and not r["autonomous_execution"]; print(r["id"])')
+          if "$bundle/bin/perveance-cli" worker-task-run "$work/worker-jobs" "$worker_id" "$work/worker-jobs" > /dev/null 2> worker-unsupported.json; then
+            echo "::error::Fixed pixel task accepted an ordinary filesystem as its backend"
+            exit 1
+          fi
+          "$bundle/bin/perveance-cli" worker-task-inspect "$work/worker-jobs" "$worker_id" > worker-inspected.json
+          "$bundle/bin/perveance-cli" worker-task-cancel "$work/worker-jobs" "$worker_id" > worker-cancel.json
+          "$bundle/bin/perveance-cli" worker-task-inspect "$work/worker-jobs" "$worker_id" > worker-cancelled.json
+          python3 -c 'import json,pathlib; a=json.load(open("worker-inspected.json"))["task"]; b=json.load(open("worker-cancelled.json"))["task"]; assert a["state"]=="queued" and a["ledger"]["reserved_calls"]==0 and not a["resource_quotas_enforced"]; assert b["state"]=="cancelled" and b["cancel_requested"] and b["ledger"]["reserved_calls"]==0 and b["outputs"] is None and not b["autonomous_execution"] and not b["provider_network_used"]; assert not any(pathlib.Path("worker-jobs").glob("*/result")); print("Downloaded CLI fixed pixel task capture/inspect/backend refusal/cancel passed; no execution authorized")'
           PERVEANCE_BIN="$bundle/bin/perveance" CLOSE_HELPER="$GITHUB_WORKSPACE/tools/send_x11_close.py" xvfb-run -a sh -c '
             set -eu
             export LIBGL_ALWAYS_SOFTWARE=1
