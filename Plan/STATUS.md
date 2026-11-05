@@ -201,7 +201,14 @@
   after sync before dispatch and before text; aborts preserve full reservations.
   Added before/inflight cancellation, broker SIGKILL and SIGSTOP/resume kernel
   cases (eleven mandatory worker tests total), five Rust unit and three normal
-  integration/helper cases, plus six Python negative/protocol tests. All 47 local
-  Python tests pass; new Rust/kernel CI is pending. This is not production role
-  certification, real provider integration or durable task/output transport.
-  See [BROKER_WORKER.md](BROKER_WORKER.md).
+  integration/helper cases, plus seven Python negative/protocol/environment tests.
+  Initial CI caught the probe incorrectly rejecting bubblewrap's own PWD; it now
+  requires exactly `/work` and still rejects host variables. At `cf1fc2c`,
+  [matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633)
+  passed all eleven real kernel cases on delegated Ubuntu 26.04, kernel
+  `7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor restriction `1` (unchanged).
+  [Rust CI 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)
+  passed in 6m16s including native desktop/bridge/recovery and downloaded-bundle
+  checks. All 48 local Python tests pass. The ordinary runner's optional probe
+  still could not start. This is not production role certification, real provider
+  integration or durable task/output transport. See [BROKER_WORKER.md](BROKER_WORKER.md).

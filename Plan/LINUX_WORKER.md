@@ -170,5 +170,8 @@ duplex stdout broker capability, sealed stdin and bounded stderr summary. The
 parent broker/supervisor stays outside the worker boundary; credentials and
 ledger descriptors are not inherited/mounted. Its scoped admission, cancellation,
 SIGKILL and SIGSTOP/resume cases bring the required delegated suite to eleven.
-These new checks await CI; earlier seven-test passes certify only their recorded
-implementation. This is not production provider/task/role-separation approval.
+At `cf1fc2c`, [matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633)
+passed all eleven mandatory kernel cases, and full Rust/native/downloaded-bundle
+regression passed [42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949).
+Earlier seven-test passes certify only their recorded implementation. This is
+not production provider/task/role-separation approval.

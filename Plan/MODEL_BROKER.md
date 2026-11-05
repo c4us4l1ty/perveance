@@ -190,5 +190,7 @@ before reserve, after synced reserve before dispatch, and after settlement befor
 text. `revoked` is a new response status, not a refund. The standalone
 `serve_once` remains an unleased host-library/fixture entry; use the guarded entry
 for scope-aware supervision. The integration bounds a session to five exchanges,
-uses only fresh synthetic credentials and awaits its own eleven-test kernel CI.
-It is not the missing production task/provider/hardened broker gate.
+uses only fresh synthetic credentials. At `cf1fc2c`, [matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633)
+passed all eleven kernel cases and [Rust CI 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)
+passed all-target, native desktop and downloaded-bundle regression. This is not
+the missing production task/provider/hardened broker gate.

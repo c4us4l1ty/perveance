@@ -174,7 +174,13 @@ half-close before reservation, after its sync before dispatch, and before text
 release. Revocation never refunds or retries. Pending owner death keeps the
 ledger halted; cgroup recovery never clears accounting. SIGSTOP/resume tests
 require the independent watchdog to kill the peer and deny stale dispatch.
-New Rust/kernel verification is pending; 47 local Python tests pass.
+At `cf1fc2c`, all eleven delegated kernel tests passed ([matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633));
+all-target Rust/native GUI/downloaded-bundle regression also passed
+([42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)).
+48 local Python tests pass. The supported host kept its AppArmor userns
+restriction at 1; the separate ordinary runner's optional namespace probe still
+could not start. These are implementation-specific fixed-code results, not a
+portable production sandbox attestation.
 Protected production roles, actual task/output/response recovery, a real provider
 with verified pricing/token/deadline bounds and independent review remain open.
 Only fixed offline code runs; autonomy stays disabled. Synthetic fixture dirs

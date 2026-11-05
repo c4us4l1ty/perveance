@@ -96,8 +96,10 @@ production-sandbox certification, and do not authorize generated-code execution.
 - [x] Connect the host offline broker to a confined fixed-code peer through
   sealed stdin/duplex stdout only, with leased admission and no secret/ledger
   mounts. See [BROKER_WORKER.md](BROKER_WORKER.md); no real provider is enabled.
-- [ ] Validate the four new broker/kernel cases (eleven total), revocation tests
-  and CLI integration; existing seven-test evidence predates this connection.
+- [x] Validate the four new broker/kernel cases (eleven total), revocation tests
+  and CLI integration at `cf1fc2c`: [Rust/full bundle 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)
+  and [delegated matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633).
+  This verifies fixed offline code only, not the production role/task gates below.
 - [ ] Complete protected broker/worker role separation, actual task integration,
   response recovery and verified provider billing/token/deadline controls. No
   keys in worker files/env/args; do not treat a declared bound as billing proof.

@@ -125,9 +125,28 @@ exchanges plus CLI/reuse, cancellation before/in dispatch, owner SIGKILL and own
 SIGSTOP → independent watchdog kill → SIGCONT with **zero stale dispatches**.
 The mandatory CI suite now requires eleven real kernel tests, not seven.
 
-These new Rust/kernel checks are pending CI. All 47 local Python tests pass;
-there is no local Rust toolchain. Historical seven-test passes do not validate
-this new integration.
+Verified implementation **`cf1fc2ceafa4a7b06232836bb945cdb89d4864de`**:
+
+- [Rust CI 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949),
+  job `127212534529`: **PASS**, 6m16s. All-target tests, native desktop/bridge/
+  crash-recovery regression, CLI and downloaded-bundle checks succeeded.
+- [Matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633):
+  Ubuntu 22.04/24.04/26.04 jobs `127212001792`/`127212002416`/`127212002283`
+  **PASS** in 14s/12s/1m14s. The delegated 26.04 job required and passed all
+  **eleven** worker kernel tests, including the four new broker cases.
+- Supported CI host: kernel `7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor
+  unprivileged-userns restriction `1`. No sysctl/AppArmor policy was loosened.
+  The separate ordinary Rust runner's optional namespace probe still failed
+  `RTM_NEWADDR`; that is not a production execution permit.
+- **48 local Python tests pass** (no local Rust toolchain); CI also runs this
+  suite. Shell syntax, probe compilation and `git diff --check` pass.
+
+Initial integration runs `5553deb`/`6a2c797` correctly failed closed at the
+peer's environment check: bubblewrap creates `PWD` after `--clearenv`. The fixed
+probe now requires exactly `PWD=/work`, still rejects extra host variables and
+has a dedicated positive/negative regression. It exposes only an allowlisted
+failure-stage code, never raw stderr, paths or exception text. Those earlier
+seven-pass/four-failure runs are not accepted evidence for the integration.
 
 Actual task/output transport, durable call-response recovery, protected fetch/
 build/runtime roles, hardened broker lifecycle/credential stores, one verified
