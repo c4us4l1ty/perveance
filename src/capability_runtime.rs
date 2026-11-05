@@ -122,9 +122,7 @@ fn engine() -> wasmi::Engine {
     // avoids lazy code generation during a candidate call.
     config.compilation_mode(wasmi::CompilationMode::Eager);
     config.allow_start_fn(false);
-    config.wasm_memory64(false);
-    config.wasm_simd(false);
-    config.wasm_relaxed_simd(false);
+    // memory64/simd/relaxed-simd are not compiled in, so they cannot be enabled.
     config.wasm_reference_types(false);
     config.wasm_tail_call(false);
     config.wasm_extended_const(false);
