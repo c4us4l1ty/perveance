@@ -44,7 +44,7 @@ fn text(name: &str) -> Vec<u8> {
 enum Fixture { ZeroAllocator, Reply, Loop, Trap }
 fn reply_bytes() -> Vec<u8> {
     let mut out = b"PVEXRP01".to_vec();
-    out.extend([1, 0, 0, 0]);
+    out.extend([0, 0, 0, 0]);
     out.extend([0u8; 32]);
     out.extend([0u8; 4]);
     out
