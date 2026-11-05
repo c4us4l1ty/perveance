@@ -6,6 +6,11 @@ fixed session branch and open PR25. PR24/main are not merged or modified by this
 increment. It is a host-owned offline storage/diagnostic component, not a plugin
 loader, independent verifier, installer, execution permit or vector capability.
 
+The next [static WASM diagnostic increment](MODULE_AUDIT.md) adds a separate
+read-only optional audit, not an admission/runtime change or persisted blessing.
+Its exact-head execution evidence is pending; the storage evidence below covers
+the prior verified foundation, not that new inspector.
+
 ## Explicitly closed execution gates
 
 Every entry is `quarantined_unverified`, `installed=false`, `active=false`,
@@ -39,8 +44,8 @@ nonfunctional; this registry never calls it.
 - `document_version`: positive declared root version. Version 2 is the known
   document envelope; other positive values are stored as incompatible declarations.
 - `entrypoints`: distinct bounded ASCII export symbols `validate_payload`,
-  `apply_edits`, `render_layer`. These are **claimed names**, not discovered or
-  checked exports. No executable command or entrypoint path is accepted.
+  `apply_edits`, `render_layer`. These are **claimed names**, not exports checked at admission.
+  The separate static diagnostic can inspect them without granting authority. No executable command or entrypoint path is accepted.
 - `operations`: 1–16 unique ASCII symbols and positive schema versions. These are
   declarations only, not callable registered operations or schema validators.
 - `runtime`: positive requested fuel (≤10,000,000), memory (64-KiB multiples,
@@ -62,9 +67,11 @@ owned bytes, canonicalizes the manifest, independently computes SHA-256 over the
 **actual captured artifact**, and checks declared byte length, pinned digest and
 the eight-byte wasm-v1 header `00 61 73 6d 01 00 00 00`.
 
-**Only the envelope header and storage digest/size are checked.** No wasm section,
-import, export, function body, ABI, permission, determinism, payload validity or
-malicious behavior is validated. Native executables, scripts, archives and other
+**At capture/admission, only the envelope header and storage digest/size are
+checked.** No wasm section, import, export, function body, ABI, permission,
+determinism, payload validity or malicious behavior is validated by admission.
+The separate [static audit](MODULE_AUDIT.md) has its own diagnostic-only findings,
+never changes this receipt/state and never verifies behavior/payload/provenance. Native executables, scripts, archives and other
 headers are rejected, but a wasm header followed by arbitrary invalid data can
 still be quarantined. Tests deliberately include such data and require every
 availability/verification flag to remain false. This is not a working plugin.
@@ -174,6 +181,7 @@ registry-init PRIVATE_EMPTY_ROOT
 registry-inspect PRIVATE_ROOT
 registry-quarantine PRIVATE_REGISTRY_ROOT PRIVATE_INPUT_ROOT RELATIVE_MANIFEST RELATIVE_ARTIFACT
 registry-resolve-document PRIVATE_REGISTRY_ROOT PRIVATE_DOCUMENT_ROOT RELATIVE_DOCUMENT
+registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT
 ```
 
 These commands require the existing mandatory Linux `openat2` descriptor backend
@@ -181,6 +189,9 @@ and an unprivileged owner. No registry/source FD is exported to a worker. The
 registry is not wired to GUI, job creation, provider requests or document runtime.
 `ok` means the storage/diagnostic command completed, **not verified/installed/
 active/available**; also check mutation/publication durability fields.
+For module audits `ok:true` can include `static_profile_passed:false`. A positive
+static result also leaves every registry state/authority flag unchanged. See
+[static report semantics and failure policy](MODULE_AUDIT.md).
 
 Coverage: fourteen new core/registry tests in `tests/registry.rs`, three real
 fixed-member publisher/enumeration tests, and `tools/test_registry_lifecycle.py`

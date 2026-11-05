@@ -81,7 +81,7 @@ impl Registry {
         }
         Ok(Self { root, _lock: held, header })
     }
-    fn stored(&self, slot: &str) -> Result<Stored, String> {
+    fn stored(&self, slot: &str) -> Result<(Stored, CapturedCandidate), String> {
         let directory = self.root.child(slot)?;
         let names = directory.list_names(FILES.len())?;
         if names.iter().map(String::as_str).ne(FILES) { return Err(fail("package members are incomplete or unrecognized")); }
@@ -98,29 +98,35 @@ impl Registry {
             || receipt.artifact_bytes != artifact.len() as u64 || encode(&receipt)? != bytes {
             return Err(fail("stored package binding or host capture receipt mismatch"));
         }
-        let manifest = candidate.manifest;
+        let manifest = candidate.manifest.clone();
         let report = entry_report(slot, &manifest, manifest_hash.clone());
         let artifacts = vec![Artifact { file: MANIFEST_FILE, bytes: manifest_bytes.len() as u64, sha256: manifest_hash },
             Artifact { file: ARTIFACT_FILE, bytes: artifact.len() as u64, sha256: hash(&artifact) },
             Artifact { file: RECEIPT_FILE, bytes: bytes.len() as u64, sha256: hash(&bytes) }];
-        Ok(Stored { manifest, report, artifacts })
+        Ok((Stored { manifest, report, artifacts }, candidate))
     }
     fn inventory(&self) -> Result<Inventory, String> {
+        self.inventory_for(None).map(|(inventory,_)|inventory)
+    }
+    // Retain ONLY the selected frozen candidate from the same full integrity
+    // walk. Never re-read unchecked bytes, or hold every artifact in memory.
+    fn inventory_for(&self, selected: Option<&str>) -> Result<(Inventory, Option<CapturedCandidate>), String> {
         let names = self.root.list_names(MAX_ENTRIES+10)?;
         if !names.iter().any(|n| n==HEADER_FILE) || !names.iter().any(|n| n==LOCK_FILE) { return Err(fail("registry storage incomplete")); }
-        let mut entries = Vec::new(); let mut total=0u64; let mut interrupted=0;
+        let mut entries = Vec::new(); let mut total=0u64; let mut interrupted=0; let mut selected_candidate=None;
         for name in names {
             if name==HEADER_FILE || name==LOCK_FILE { continue; }
             if [".perveance-publish-", ".perveance-file-"].iter().any(|prefix| name.strip_prefix(prefix).is_some_and(|suffix| hex(suffix,32))) {
                 interrupted+=1; continue;
             }
             if !hex(&name,64) || entries.len()==MAX_ENTRIES { return Err(fail("unrecognized registry entry or entry limit exceeded")); }
-            let stored = self.stored(&name)?;
+            let (stored,candidate) = self.stored(&name)?;
+            if selected==Some(name.as_str()) {selected_candidate=Some(candidate);}
             total=total.checked_add(stored.report.artifact_bytes).ok_or_else(|| fail("storage counter overflow"))?;
             if total>MAX_TOTAL_ARTIFACT_BYTES { return Err(fail("registry artifact storage limit exceeded")); }
             entries.push(stored);
         }
-        Ok(Inventory { entries, total, interrupted })
+        Ok((Inventory { entries, total, interrupted }, selected_candidate))
     }
     fn report(&self, inventory: Inventory) -> Report {
         Report { version: VERSION, scope: self.header.scope.clone(), policy: policy(), entries: inventory.entries.into_iter().map(|e| e.report).collect(),
@@ -128,6 +134,14 @@ impl Registry {
             mode: "quarantine_only_no_execution", code_loaded: false, provider_network_used: false, autonomous_execution: false }
     }
     pub fn inspect(&self) -> Result<Report, String> { Ok(self.report(self.inventory()?)) }
+    /// Read-only, exact frozen bytes; no receipt, approval, runtime or fallback.
+    pub fn audit_module(&self, slot: &str) -> Result<ModuleAudit, String> {
+        if !hex(slot,64) {return Err(fail("invalid exact quarantine slot"));}
+        let (inventory,candidate)=self.inventory_for(Some(slot))?;
+        if inventory.interrupted!=0 {return Err(fail("interrupted private stages block module audit; retain storage for operator review"));}
+        let candidate=candidate.ok_or_else(||fail("exact quarantine slot missing; no version fallback"))?;
+        Ok(ModuleAudit { registry_scope:self.header.scope.clone(),slot:slot.into(),storage_integrity_checked:true,audit:candidate.audit_static() })
+    }
     pub fn quarantine(&mut self, candidate: &CapturedCandidate) -> Result<Quarantine, String> {
         let mut inventory = self.inventory()?;
         if inventory.interrupted!=0 { return Err(fail("interrupted private stages block admission; retain data for operator review, never auto-clean or replay")); }

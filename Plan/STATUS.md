@@ -281,3 +281,18 @@
   local Python tests and static checks passed. No independent behavior/provenance
   verification, install, runtime, activation, provider or autonomy is enabled.
   See [REGISTRY.md](REGISTRY.md); original acceptance remains open.
+
+
+- Continued with a read-only static module/ABI-signature diagnostic on the same
+  fixed branch (PR24/25/main unchanged). Added pinned minimal wasmparser, bounded
+  prepass plus full structural/body validation, a prospective memory/function
+  export profile and exact-slot `registry-audit-module`. The complete registry
+  inventory revalidates binding/scope and retains only the selected frozen bytes;
+  corruption and interrupted stages block audit. Reports are redacted fixed
+  findings, not cached approvals. No code is instantiated/executed and every
+  verification/runtime/install/activation/availability/autonomy flag stays false;
+  capability-layer PNG refusal is unchanged. New Rust byte fixtures and real
+  debug/downloaded CLI lifecycle checks are implemented. Exact-head execution CI
+  is pending, with no local Rust toolchain; prior storage evidence is not new
+  inspector evidence. See [MODULE_AUDIT.md](MODULE_AUDIT.md). Protected behavioral
+  verification, runtime/wire ABI and original creative build/reuse remain open.

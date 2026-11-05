@@ -264,3 +264,22 @@ all fourteen mandatory delegated worker kernel cases passed with policy unchange
 The ordinary optional namespace probe remains unavailable. Storage tests are not
 behavior verification or portable host approval; worker authorization and all
 original self-extension acceptance gates remain closed.
+
+## Static WASM diagnostic continuation (nonauthorizing)
+
+[MODULE_AUDIT.md](MODULE_AUDIT.md) adds exact-byte structural/type/index validation
+with pinned wasmparser and a bounded prospective export/memory signature profile.
+Complete storage inventory/scope checks precede audit, using the same frozen
+selected bytes, with no unchecked re-read or persisted approval. Corruption,
+missing exact slots and retained interrupted stages block audit. Raw parser
+errors/module names/source are not echoed. Input/count/depth caps are **not**
+process CPU/RAM/wall enforcement; parsing is still host-side. Exact-head CI for
+this increment is pending, separate from prior storage evidence above.
+
+A pass cannot prove behavior, schemas, pointer/output/allocator safety,
+termination, deterministic floats, provenance or runtime quota compliance.
+Passing fixtures deliberately include useless stubs and an infinite loop.
+No instantiation, loader, runtime execution, install/activation permission,
+availability or autonomy follows. Protected independent verifier/broker/
+supervisor production roles and the full confined typed-edit/render contract
+remain open. Existing capability-layer rendering refusal is unconditional.

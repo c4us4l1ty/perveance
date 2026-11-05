@@ -183,6 +183,7 @@ registry-init PRIVATE_EMPTY_ROOT
 registry-inspect PRIVATE_ROOT
 registry-quarantine PRIVATE_REGISTRY_ROOT PRIVATE_INPUT_ROOT RELATIVE_MANIFEST RELATIVE_ARTIFACT
 registry-resolve-document PRIVATE_REGISTRY_ROOT PRIVATE_DOCUMENT_ROOT RELATIVE_DOCUMENT
+registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT
 ```
 
 These use caller-authorized private FD roots, strict bounded declarations and
@@ -198,3 +199,13 @@ are unverified declarations. Document render/edit behavior is unchanged. See
 uploaded-then-downloaded CLI lifecycles and native regressions passed
 ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
 mandatory kernel evidence and all remaining execution gates are in REGISTRY.md.
+
+`registry-audit-module` is read-only and nonauthorizing: a complete inventory
+check binds the exact frozen stored bytes, then a bounded static WASM validator
+and prospective memory/function signature profile produce fixed findings.
+`ok:true` means audit completion, not necessarily `static_profile_passed:true`.
+A static pass still has every verification/runtime/install/activation/availability
+flag false; it never changes capture receipts or document render/edit dispatch.
+No `latest` fallback, execution, persisted approval or interrupted-store recovery
+is available. See [MODULE_AUDIT.md](MODULE_AUDIT.md) for the versioned profile,
+report semantics, host-parser resource limitations and pending exact-head CI.

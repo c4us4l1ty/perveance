@@ -178,3 +178,17 @@ operator review, never automatic reset/sweep. Parent-sync=false means an already
 visible package with uncertain crash durability. See Plan/REGISTRY.md in the
 source repository for limits, failure behavior and verification status. No code,
 provider or autonomy is enabled by quarantine storage.
+
+Static WASM inspection (diagnostic only, not a runtime)
+------------------------------------------------------
+registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT rechecks the complete
+registry inventory/scope and inspects the exact frozen stored module with a
+bounded structural validator and prospective memory/function signature profile.
+The slot is 64 lowercase hex digits, never latest or a path. Storage corruption
+or interrupted stages block audit. No approval/report is stored in the registry.
+A completed command can return ok=true with static_profile_passed=false. Even a
+static pass is not behavior/schema/provenance verification, fuel enforcement,
+installation, activation, execution or availability. Stubs/infinite loops can
+pass. Capability-layer PNG refusal is unchanged; autonomy remains disabled.
+Host-parser input/count caps are not process CPU/RAM/wall sandbox quotas. See
+Plan/MODULE_AUDIT.md in the source repository for exact policy and CI status.

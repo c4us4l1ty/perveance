@@ -181,3 +181,9 @@ At `9955839`, all-target/publisher/registry, real debug/downloaded-CLI and nativ
 regressions passed ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
 all fourteen mandatory worker kernel cases also passed ([42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)).
 No worker receives a registry FD and no module gains execution authority.
+
+The separate [static module diagnostic](MODULE_AUDIT.md) does not publish or
+modify packages. Its full inventory check can retain the one selected immutable
+captured candidate for parsing; other artifact bytes are discarded per slot,
+not retained as an entire registry image. There is no second unchecked path
+read, source mount, module execution or audit/approval receipt publication.

@@ -103,8 +103,8 @@ pub fn slot_key(reference: &CapabilityRef) -> Result<String, String> {
 }
 
 /// Frozen host-owned bytes after bounded capture/hash binding. The name is
-/// deliberately NOT VerifiedCapability: this code does not validate a module's
-/// sections, imports, exports, ABI, payload semantics, behavior or provenance.
+/// deliberately NOT VerifiedCapability: capture checks only the envelope/hash.
+/// The separate static diagnostic grants no behavior/payload/provenance trust.
 pub struct CapturedCandidate { manifest: Manifest, manifest_bytes: Vec<u8>, artifact: Vec<u8> }
 impl CapturedCandidate {
     pub fn from_bytes(manifest: &[u8], artifact: &[u8]) -> Result<Self, String> {
@@ -117,6 +117,10 @@ impl CapturedCandidate {
         Ok(Self { manifest, manifest_bytes, artifact: artifact.to_vec() })
     }
     pub fn manifest(&self) -> &Manifest { &self.manifest }
+    /// Uncached diagnostic only; never creates an execution/activation permit.
+    pub fn audit_static(&self) -> crate::module_audit::Report {
+        crate::module_audit::inspect(&self.manifest, &self.manifest_bytes, &self.artifact)
+    }
     #[cfg(target_os = "linux")]
     pub fn capture(root: &crate::worker_io::PrivateDirectory, manifest_name: &str, artifact_name: &str) -> Result<Self, String> {
         let manifest = root.read_private(manifest_name, MAX_MANIFEST_BYTES)?;
@@ -145,6 +149,11 @@ pub struct Report {
     pub version: u32, pub scope: String, pub policy: Policy, pub entries: Vec<EntryReport>,
     pub total_artifact_bytes: u64, pub interrupted_stages: usize, pub mutations_blocked: bool,
     pub mode: &'static str, pub code_loaded: bool, pub provider_network_used: bool, pub autonomous_execution: bool,
+}
+#[derive(Debug, Serialize)]
+pub struct ModuleAudit {
+    pub registry_scope: String, pub slot: String, pub storage_integrity_checked: bool,
+    pub audit: crate::module_audit::Report,
 }
 #[derive(Debug, Serialize)]
 pub struct DocumentBinding {
