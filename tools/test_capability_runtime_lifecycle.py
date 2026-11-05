@@ -155,7 +155,10 @@ def main():
             registry_before = tree(registry)
             args = ["registry-invoke-capability", registry, slot, source, f"document-{index}.json",
                     source, f"intent-{index}.json"]
-            runtime = cli(*args)["runtime"]
+            inspection = cli(*args)["runtime"]
+            assert inspection["slot"] == slot and inspection["storage_integrity_checked"] is True, name
+            assert inspection["registry_scope"] and inspection["registry_scope"] == cli("registry-inspect", registry)["registry"]["scope"], name
+            runtime = inspection["report"]
             assert runtime["outcome"] == outcome, (name, runtime["outcome"])
             gates = runtime["gates"]
             assert all(gates[flag] is False for flag in no_authority), (name, gates)
@@ -175,9 +178,9 @@ def main():
             assert tree(registry) == registry_before, name
             assert (source / f"document-{index}.json").read_bytes() == document_before, name
             repeated = cli(*args)["runtime"]
-            assert repeated == runtime, f"{name} invocation was not deterministic"
+            assert repeated == inspection, f"{name} invocation was not deterministic"
             write(f"module-{index}.wasm", b"modified source bytes")
-            assert cli(*args)["runtime"] == runtime, f"{name} reread the source instead of the frozen slot"
+            assert cli(*args)["runtime"] == inspection, f"{name} reread the source instead of the frozen slot"
             results[name] = runtime["outcome"]
 
         document = copy.deepcopy(fixture)
