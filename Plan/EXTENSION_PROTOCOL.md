@@ -262,6 +262,17 @@ authority gate. There is no local Rust toolchain; local 50 Python tests,
 compile/shell/diff checks and fixture encoding checks passed. This evidence does
 not extend to any future runtime, semantic or activation work.
 
+The documentation head `cac6a4c` repeated the same gates:
+[Rust CI 42070179954](https://github.com/c4us4l1ty/perveance/actions/runs/42070179954),
+job `127395660101` succeeded in **7m45s**, and
+[matrix 42070180027](https://github.com/c4us4l1ty/perveance/actions/runs/42070180027)
+passed all three jobs with delegated job `127395660274` reporting exact **twelve +
+two** kernel cases on kernel `7.0.0-1017-azure`, bwrap `0.11.1`, AppArmor
+restriction `1`. One unrelated pre-existing `tests/tasks.rs` recovery case failed
+once on intermediate docs commit `b12a743` (busy lock during a failed-write test)
+and passed unchanged on the following run; no test, gate or `--locked` check was
+weakened or skipped.
+
 Still required: confined engine/worker integration under protected production
 roles, independent semantic/behavior/provenance verification, authenticated
 trusted install/activation state, durable replay/cancellation/recovery semantics,

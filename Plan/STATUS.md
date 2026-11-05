@@ -338,3 +338,9 @@
   [EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md). This is still **not** the
   protected verification/runtime/activation contract, editable capability art or
   original exact-reuse acceptance; those and release/signing remain open.
+  Documentation head `cac6a4c` repeated all gates
+  ([Rust42070179954](https://github.com/c4us4l1ty/perveance/actions/runs/42070179954),
+  job `127395660101`, **7m45s**; [matrix42070180027](https://github.com/c4us4l1ty/perveance/actions/runs/42070180027),
+  exact twelve + two on kernel `7.0.0-1017-azure`); one unrelated pre-existing
+  task-lock test flaked once on intermediate docs `b12a743` and passed unchanged
+  on the rerun without weakening any gate.
