@@ -200,14 +200,14 @@ pub fn create(root: &Path, project: &Project, proposal: &EditProposal) -> Result
     project.save_new(&directory.path().join(INPUT_PROJECT)).map_err(|_| "cannot snapshot task project")?;
     crate::write_new(&directory.path().join(INPUT_PROPOSAL), &proposal_bytes).map_err(|_| "cannot snapshot task proposal")?;
     crate::write_new(&directory.path().join(LOCK), b"").map_err(|_| "cannot create task lock")?;
-    write_json(directory.path(), MANIFEST, &manifest)?
+    write_json(directory.path(), MANIFEST, &manifest)?;
     let queued = TaskEvent { version: TASK_VERSION, sequence: 0, state: TaskState::Queued, reason: None, outputs: None };
     write_json(directory.path(), &event_name(0), &queued)?;
     let _ = directory.keep();
     // Each file and the task directory are synced before the parent's new entry.
     // Hardware/filesystem behavior can still defeat durability; this is not a
     // general power-loss guarantee or a global storage quota.
-    sync_directory(root)?;
+    sync_directory(root).map_err(|_| format!("task {id} was written but its parent could not be synced; inspect it before retrying"))?;
     inspect(root, &id)
 }
 
