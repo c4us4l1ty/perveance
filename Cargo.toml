@@ -17,6 +17,9 @@ tempfile = "3"
 ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
 # Parse/validate bytes only: no runtime, JIT, WASI, component or SIMD backend.
 wasmparser = { version = "=0.240.0", default-features = false, features = ["std", "validate", "features"] }
+# Experimental interpreter for the bounded data-only ABI diagnostic: no host
+# imports, no WASI, eager translation, fuel and memory metering, deterministic.
+wasmi = { version = "=2.0.0", default-features = false, features = ["std", "validate", "deterministic", "auto-dispatch"] }
 
 [[bin]]
 name = "perveance"
