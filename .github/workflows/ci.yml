@@ -32,14 +32,6 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-rust-test.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
-      # Temporary dependency-resolution diagnostic. The mandatory --locked test
-      # above still fails; this never converts a failed build into a pass.
-      - name: Diagnose Cargo lock resolution after a failed locked build
-        if: failure()
-        run: |
-          cargo metadata --format-version 1 --filter-platform x86_64-unknown-linux-gnu > "$RUNNER_TEMP/perveance-lock-diagnostic.json"
-          git diff -- Cargo.lock
-          python3 -c 'import json,os,subprocess; d=subprocess.check_output(["git","diff","--","Cargo.lock"],text=True); print("::notice::Lock diagnostic only (locked test remains failed): "+d.replace("%","%25").replace("\r","%0D").replace("\n","%0A")); m=json.load(open(os.environ["RUNNER_TEMP"]+"/perveance-lock-diagnostic.json")); p=next(p for p in m["packages"] if p["name"]=="wasmparser"); n=next(n for n in m["resolve"]["nodes"] if n["id"]==p["id"]); print("::notice::Resolved wasmparser features: "+repr(n["features"]))'
       - name: Exercise bounded data-only document lifecycle through the real CLI
         run: |
           cargo build --locked --bin perveance-cli

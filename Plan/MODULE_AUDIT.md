@@ -36,8 +36,13 @@ This is **not** protected independent verifier/supervisor role separation.
 `src/module_audit.rs` uses the established `wasmparser =0.240.0`, with default
 crate features disabled and only `std`, `validate`, `features`. No interpreter,
 JIT, WASI, component-model backend or extension executor is added. Its sole new
-required normal dependency is the already-locked bitflags 2.x. `Cargo.lock`
-records the official crates.io-index checksum:
+required normal dependency is the already-locked bitflags 2.x. Cargo resolution
+also requires a lockfile edge to the already-locked indexmap for the weak
+`std` feature relationship. No other package/version is added or upgraded.
+The diagnostic resolution confirmed enabled wasmparser features exactly
+`features`, `std`, `validate`; it did not relax or pass the mandatory locked test.
+That temporary diagnostic step has been removed. `Cargo.lock` records the
+official crates.io-index checksum:
 
 ```text
 b722dcf61e0ea47440b53ff83ccb5df8efec57a69d150e4f24882e4eba7e24a4
