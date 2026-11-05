@@ -73,7 +73,7 @@ fn proposed_new_ids_are_bounded_unique_and_cannot_collide_with_any_document_scop
 }
 #[test]
 fn intent_json_rejects_unknown_self_approval_duplicate_fields_and_oversize_arrays(){
-    let(_,doc)=prepared(Kind::ApplyEdits);let i=intent(&doc,Kind::ApplyEdits);let mut value=serde_json::to_value(&i).unwrap();value["verified"]=true;assert!(Intent::from_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+    let(_,doc)=prepared(Kind::ApplyEdits);let i=intent(&doc,Kind::ApplyEdits);let mut value=serde_json::to_value(&i).unwrap();value["verified"]=serde_json::Value::Bool(true);assert!(Intent::from_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
     value=serde_json::to_value(&i).unwrap();value["edit"]["new_object_ids"]=serde_json::json!((0..33).map(id).collect::<Vec<_>>());assert!(Intent::from_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
     let mut bytes=serde_json::to_vec(&i).unwrap();bytes.pop();bytes.extend(b",\"version\":1}");assert!(Intent::from_bytes(&bytes).is_err());assert_eq!(Intent::from_bytes(&vec![b' ';wire::MAX_INTENT_BYTES as usize+1]).err(),Some(Error::FrameLimit));
 }
