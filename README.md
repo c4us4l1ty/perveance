@@ -338,14 +338,14 @@ The experimental runner limits each child output file to 8 KiB, treats more than
 A separate Linux diagnostic now requires a **real, private delegated cgroup-v2
 root**. It applies and reads back memory/swap, process-count and CPU-rate limits
 before attaching the worker at exec, uses a sealed stdin project and one
-size-limited scratch tmpfs, and
-runs an independent watchdog for sampled aggregate CPU/wall budgets. Whole-cgroup
+size-limited scratch tmpfs, and runs an independent watchdog for sampled aggregate CPU/wall budgets. Whole-cgroup
 kill includes detached descendants; lease EOF covers supervisor exit. Normal
 completion requires verified emptiness and cgroup removal. There is no
 unconfined fallback and no generated-code/command input.
 
-With an already provisioned delegated root and a separate private staging
-parent, run **without sudo**:
+With an already provisioned delegated root and a separate private parent
+(the legacy argument, no longer used for staging), run **without sudo** using a
+trusted source path:
 
 ```sh
 perveance-cli verify-bounded-worker PROJECT PRIVATE_PARENT DELEGATED_CGROUP_ROOT
@@ -354,9 +354,10 @@ perveance-cli recover-bounded-workers DELEGATED_CGROUP_ROOT
 
 Recovery explicitly kills/removes only this backend's exactly named cgroups,
 refuses a cooperating live supervisor, and never deletes artwork. This backend
-now uses anonymous input/logs instead of disk artwork staging. A diagnostic pass is **not** production security certification. CPU
-budget/deadline sampling can overshoot; global disk, staging retention, trusted
-I/O brokerage and simultaneous supervisor/watchdog loss remain limitations.
+now uses anonymous input/logs instead of disk artwork staging. A diagnostic
+pass is **not** production security certification. CPU budget/deadline sampling
+can overshoot; global disk, legacy retention, complete role-separated I/O
+mediation and simultaneous supervisor/watchdog loss remain limitations.
 The existing raster jobs and OpenRouter adapter are not wired to these limits.
 See [the backend contract and CI requirements](Plan/LINUX_WORKER.md) before use.
 **Arbitrary-code autonomy remains disabled.**

@@ -94,7 +94,7 @@ AppArmor policy. Local protocol tests against ordinary files are not themselves
 kernel-isolation evidence; this fixed-workload pass is not a production gate.
 
 This accepts embedded diagnostics only and cannot open any autonomy gate. It
-retains trusted staging/ancestor/system-tool assumptions, sampled-budget
+retains trusted root-object/filesystem/system-tool assumptions, sampled-budget
 overshoot, limited recovery (cgroups only), and no simultaneous-watchdog-loss or
 real-time guarantee. No broker, arbitrary build/runtime, safe activation or
 production security approval is introduced. Data-only raster jobs retain their
@@ -117,6 +117,11 @@ Publication installs a new private two-file bundle with no-replace rename and
 reports post-commit sync uncertainty without deleting artwork or inviting a
 blind retry. This is not authenticated storage, document CAS, guaranteed crash
 recovery, safe activation or protection against a malicious same-user host.
-The new Rust/seven-worker-test/downloaded-bundle checks are pending validation.
+At `36963cc`, [Rust run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225)
+passed all 18 new I/O tests plus full regression/downloaded-bundle checks;
+[run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)
+passed all seven real workers on the delegated Ubuntu 26.04 service without
+relaxing host AppArmor policy. This evidence is scoped to that fixed workload
+and selected host, not a production or arbitrary-code isolation approval.
 Protected role separation/output transport, provider/broker integration and the
 complete independent adversarial security gate remain open; autonomy is disabled.

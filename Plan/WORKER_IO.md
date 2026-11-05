@@ -123,8 +123,17 @@ malformed/mismatching candidate files, PNG metadata stripping, concurrent
 no-clobber publication and failures before/after commit. The delegated CI suite
 adds repeated sealed input larger than the write rlimit and the mediated CLI;
 the downloaded Linux executable also performs an offline publication round trip.
-These new Rust/kernel checks are pending CI validation at implementation time;
-41 existing local Python tests still pass.
+At implementation commit `36963cc`, [Rust run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225)
+passed all 12 new unit and six new integration tests, the existing full Rust,
+native-GUI/bridge/recovery regression and downloaded-binary publication,
+revision/hash and occupied-name checks. [Feasibility run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)
+passed all seven real cgroup-worker tests on the delegated Ubuntu 26.04 service:
+kernel `7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor user-namespace restriction
+still enabled. This includes repeated sealed input larger than 8 KiB, source
+mutation after capture, mediated CLI and absence of disk artwork/log staging.
+All 41 local Python tests also pass. No local Rust toolchain was available;
+Rust/kernel evidence comes from CI, not an untested local claim. These selected
+runner results are not approval of another host or of arbitrary generated code.
 
 This is a scoped raster component, not the entire trusted I/O/role separation
 requirement. Dependency acquisition, protected fetch/build/runtime namespaces,

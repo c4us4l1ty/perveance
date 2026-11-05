@@ -159,6 +159,13 @@
   offline raster-bundle CLI, with shared renderer/parser reuse. Added normal
   Rust adversarial/fault/concurrency tests, a seventh delegated worker input test
   and downloaded-binary publication verification. All 41 local Python tests
-  pass; new Rust/kernel CI is pending. Provider brokerage, role-separated worker
-  output transport, task integration and generated-code autonomy remain absent.
-  See [WORKER_IO.md](WORKER_IO.md).
+  pass. At `36963cc`, [Rust run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225)
+  passed all 18 new I/O tests and full native-GUI/bridge/recovery/downloaded-binary
+  regression, including publication/revision/hash/collision checks. All seven
+  real worker tests passed in [run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)
+  on the delegated Ubuntu 26.04 service, kernel `7.0.0-1017-azure`, bubblewrap
+  `0.11.1`, AppArmor user-namespace restriction still enabled. The ordinary Rust
+  runner's optional namespace probe could not start; this is selected-host
+  fixed-code evidence, not general host approval. Provider brokerage,
+  role-separated worker output transport, task integration and generated-code
+  autonomy remain absent. See [WORKER_IO.md](WORKER_IO.md).

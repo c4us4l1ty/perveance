@@ -77,8 +77,10 @@ production-sandbox certification, and do not authorize generated-code execution.
 - [x] Implement [descriptor-scoped raster I/O](WORKER_IO.md): confined reads,
   sealed stdin snapshots, trusted expected-artifact comparison and no-replace
   project/PNG bundle publication. No worker receives a source directory FD.
-- [ ] Validate this I/O increment in Rust, seven real worker-kernel tests and the
-  downloaded Linux bundle. Existing six-test evidence predates this increment.
+- [x] Validate this I/O increment at `36963cc`: 18 new Rust I/O tests/full
+  regression/downloaded Linux bundle ([run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225))
+  and seven real worker-kernel tests on the delegated service
+  ([run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)).
 - [ ] Complete role-separated input/output transport and minimal permissions for
   fetch, build, runtime and provider calls. Existing task/GUI loaders are not
   retroactively brokered. No host sockets or inherited secrets.

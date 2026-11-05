@@ -50,8 +50,9 @@ Limits are deliberately small for diagnostics: wall and sampled CPU budgets
 1–30 s, CPU rate 1–100%, memory 32–512 MiB, scratch 1–64 MiB, and 8–32 processes.
 Defaults are 10 s wall, 2 s CPU, 50% CPU, 64 MiB RAM, 4 MiB scratch and 12 tasks.
 The supervisor/watchdog and its sealed input snapshot are outside these worker
-quotas. This backend no longer creates artwork/log staging files on disk. The data-only raster task backend is still separate and
-has **not** acquired these limits.
+quotas. This backend no longer creates artwork/log staging files on disk. The
+data-only raster task backend is still separate and has **not** acquired these
+limits.
 
 ## Launch, cleanup and recovery protocol
 
@@ -124,12 +125,13 @@ they explicitly report `autonomous_execution:false` and
   fixture files. **Mock files are not evidence of kernel enforcement.**
 - Normal Rust/CLI tests reject forged ordinary-file cgroup attestations, bad
   limits, unknown modes and unsupported roots without staging/launch fallback.
-- Six opt-in Rust integration tests on the delegated CI service require actual
+- Seven opt-in Rust integration tests on the delegated CI service require actual
   memory, process, scratch and CPU-budget limits; read back kernel rate/other
   limits and require actual CPU throttling counters; verify descriptor hygiene,
-  read-only input and project preservation;
-  cancel detached descendants; kill/freeze the supervisor; kill the watchdog;
-  and recover only owned managed groups. Missing prerequisites fail the selected
+  read-only sealed input, repeated reads larger than the write rlimit, source
+  mutation independence, mediated CLI and project preservation; cancel detached
+  descendants; kill/freeze the supervisor; kill the watchdog; and recover only
+  owned managed groups. Missing prerequisites fail the selected
   CI job instead of passing/skipping the requirement.
 
 [Feasibility run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272)
@@ -144,10 +146,18 @@ downloaded Linux-bundle verification for the same implementation commit.
 Subsequent documentation-only checks are visible in
 [PR #23](https://github.com/c4us4l1ty/perveance/pull/23/checks).
 
-A subsequent [descriptor I/O increment](WORKER_IO.md) adds sealed input and
-canonical bundle publication; its seven-test worker suite and full regression
-checks are pending validation. The historical six-test pass does not certify
-this new increment. Neither increment closes complete role-separated I/O mediation,
-broader malicious-code/syscall/secret/network threats, durable task integration,
+The [descriptor I/O increment](WORKER_IO.md) at `36963cc` subsequently passed all
+seven real worker tests in [run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)
+on Ubuntu 26.04, kernel `7.0.0-1017-azure`, bubblewrap `0.11.1`, still with
+`apparmor_restrict_unprivileged_userns=1`. [Rust run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225)
+passed the 18 new I/O unit/integration tests, full native-GUI/bridge/recovery
+regression and downloaded-binary project/PNG bundle publication/hash/collision
+checks. The ordinary Rust runner's optional namespace diagnostic could not
+start; only the explicitly delegated Ubuntu 26.04 service supplies the mandatory
+real-worker evidence. Matrix success does not establish worker support on every
+matrix host or end-user machine.
+
+Neither increment closes complete role-separated I/O mediation, broader
+malicious-code/syscall/secret/network threats, durable task integration,
 credential brokerage, real harness compatibility, independent verification,
 activation/rollback or production security review. Arbitrary code stays disabled.
