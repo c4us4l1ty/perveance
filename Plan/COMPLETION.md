@@ -33,9 +33,9 @@ production-sandbox certification, and do not authorize generated-code execution.
 | Headless/Arena handoff | Rust CLI plus separate limited Python bridge; file handoff tested | Keep compatibility and limits explicit. A live Arena/local-GUI connector is not a prerequisite and is not available. |
 | Work protection | No-clobber version copies and opt-in recovery snapshots | Stable project compatibility/migration policy, meaningful conflict/recovery tests, backup/retention UX and documented durability limits. No current atomic cross-process CAS. |
 | Prompt-to-pixels | Opt-in typed OpenRouter prototype | Real model-route compatibility, cancellation/progress, secure credential handling and explicit billing controls. It is not a coding harness. |
-| Durable task orchestration | Implemented and CI-tested Linux raster-proposal CLI/library backend | Integrate the GUI/provider and later verified worker pipeline. Existing offline tasks do not authorize code, make model calls or enforce OS quotas. |
+| Durable task orchestration | Legacy data-only jobs plus [fixed offline pixel-worker jobs](WORKER_TASKS.md), independently verified publication and crash recovery | Integrate GUI/provider/harness tasks and general output contracts. Legacy tasks still have no quotas; fixed worker jobs do not authorize generated code or real providers. |
 | Foundation decision | Working composed Rust raster engine; scoped Graphite research/headless-check evidence | Record the reversible foundation decision and remaining Graphite rendering/integration tradeoffs. A successful headless check is not a desktop integration spike. |
-| Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md) with seven passing real-kernel tests and [descriptor I/O](WORKER_IO.md) | Integrate and adversarially verify quotas/descendant cleanup in the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
+| Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md) with twelve passing worker integration + two task kernel cases and [descriptor I/O](WORKER_IO.md) | Integrate and adversarially verify quotas/descendant cleanup in the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
 | Model broker and coding harness | New [offline broker/ledger component](MODEL_BROKER.md); real harness/route missing | Isolate the actual broker/worker roles and integrate durable calls into tasks; retain response recovery and conservative uncertainty behavior. Verify provider billing/token bounds and one real compatible harness; no paid autonomous route is enabled. |
 | Extensible document/render contract | Missing; v1 is a strict raster format | Stable IDs, bounded versioned capability payloads, typed editing/render mediation, preservation of unavailable payloads and explicit failure when rendering cannot be correct. |
 | Capability registry/lifecycle | Missing | Immutable versioned artifacts, compatibility/provenance, independent verification, install/stage/activate, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
@@ -44,7 +44,7 @@ production-sandbox certification, and do not authorize generated-code execution.
 
 ## Critical path, in build order
 
-### 1. Durable data-only job lifecycle — current implementation increment
+### 1. Durable data-only job lifecycle — legacy backend
 
 - [x] Capture a validated project and revision-bound typed proposal into a new
   private Linux job directory; never reread the original source paths at run.
@@ -104,10 +104,12 @@ production-sandbox certification, and do not authorize generated-code execution.
   connecting captured typed proposals, persisted limits, the offline broker,
   bounded candidate output and independently verified atomic publication. Legacy
   tasks/GUI/intake are unchanged; this is not generated-code or real AI work.
-- [ ] Validate twelve mandatory worker integration plus two task kernel cases,
-  including active cancellation and owner death before/after publication.
-- [ ] Complete protected broker/worker role separation, actual task integration,
-  response recovery and verified provider billing/token/deadline controls. No
+- [x] Validate twelve mandatory worker integration plus two task kernel cases,
+  including active cancellation and owner death before/after publication at
+  `61a0f20`: [matrix 42022046128](https://github.com/c4us4l1ty/perveance/actions/runs/42022046128)
+  and [Rust/native/downloaded bundle 42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445).
+- [ ] Complete protected production broker/worker roles, natural-language/provider/
+  harness task integration, response recovery and verified billing/token/deadline controls. No
   keys in worker files/env/args; do not treat a declared bound as billing proof.
 - [ ] Test a real compatible harness through that broker. If its auth/network
   needs cannot meet the contract, reject it rather than weakening isolation.

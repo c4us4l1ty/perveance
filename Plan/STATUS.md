@@ -228,5 +228,12 @@
   GUI, real providers, arbitrary/generated code and autonomy remain unchanged/off.
   Added five normal integration tests, transport/pixel negatives, twelve worker
   plus two task mandatory kernel cases and downloaded-CLI offline lifecycle checks.
-  All 50 local Python tests pass; new Rust/kernel CI is pending. See
+  All 50 local Python tests pass. At `61a0f20`,
+  [Rust CI 42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445)
+  passed all-target/native desktop/bridge/recovery and downloaded-bundle checks
+  in 5m18s; [matrix 42022046128](https://github.com/c4us4l1ty/perveance/actions/runs/42022046128)
+  passed all three jobs and the exact twelve + two mandatory kernel cases on
+  delegated Ubuntu 26.04, kernel `7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor
+  userns restriction `1` unchanged. The ordinary optional probe could not start.
+  PR24 continues this work; no production autonomy is approved. See
   [WORKER_TASKS.md](WORKER_TASKS.md).

@@ -203,4 +203,9 @@ it never reruns/re-publishes or resets/refunds the separate ledger. Unknown work
 cleanup leaves running state for explicit recovery. Active cancellation revokes
 the broker and cgroup; late commit can win. Same-user/host rollback, whole-host
 quotas, partial-journal repair, retention and protected production roles remain
-outside this increment. Fifty Python tests pass; new Rust/kernel CI is pending.
+outside this increment. At `61a0f20`, all fourteen required delegated cases
+passed ([42022046128](https://github.com/c4us4l1ty/perveance/actions/runs/42022046128)),
+with host policy unchanged, and all-target/native/downloaded-bundle regression
+passed ([42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445)).
+Fifty Python tests pass. The ordinary runner's optional namespace probe could
+not start; portable production host approval and independent review remain open.

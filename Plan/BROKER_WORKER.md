@@ -152,3 +152,13 @@ Actual task/output transport, durable call-response recovery, protected fetch/
 build/runtime roles, hardened broker lifecycle/credential stores, one verified
 real route/harness/billing contract and independent adversarial review remain
 open. Fixed code passing here is not authority to run an untrusted extension.
+
+
+## Durable task continuation
+
+[WORKER_TASKS.md](WORKER_TASKS.md) now uses this host-owned offline broker in a
+persistent fixed-pixel job, with a sealed composite input and one bounded
+candidate-output frame after the five fixed exchanges. It does not parse model
+text as edits or execute it. Its `61a0f20` delegated/full regression evidence
+requires twelve worker plus two task kernel cases. This still does not implement
+real provider response recovery or protected production roles.

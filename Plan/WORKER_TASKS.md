@@ -120,10 +120,25 @@ cleanup. Never sweep original projects, active work or accounting ledgers.
 ## Verification status and remaining gates
 
 Local: **50 Python tests pass**, probe compilation, shell syntax and diff checks
-pass. No local Rust toolchain is installed. New Rust/kernel validation is pending.
-CI now requires **12 worker integration kernel tests and two library kernel
-cases**, including full >8-KiB input/output, hidden-data preservation, downloaded
-source capture/CLI reuse, occupied-output preservation, active broker cancellation,
+pass. No local Rust toolchain is installed.
+
+Implementation **`61a0f2082ad821d117068f94aff8fad77dbd4ce2`** passed:
+
+- [Rust CI 42022046445](https://github.com/c4us4l1ty/perveance/actions/runs/42022046445),
+  job `127226940487`, **5m18s**: all-target tests, native desktop/bridge/recovery,
+  CLI round trips, and actual downloaded-binary worker-task lifecycle checks.
+- [Matrix 42022046128](https://github.com/c4us4l1ty/perveance/actions/runs/42022046128):
+  Ubuntu 22.04/24.04/26.04 jobs `127226939593`/`127226939364`/`127226939639`
+  **PASS** in 17s/36s/1m22s. The delegated 26.04 service passed both exact
+  **12 + 2** required test summaries (not zero tests or substring matching).
+- Supported service host: kernel `7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor
+  unprivileged-userns restriction **1**, unchanged. The separate ordinary Rust
+  runner's optional namespace probe still failed `RTM_NEWADDR`; it neither
+  substitutes for delegated evidence nor grants production execution authority.
+
+CI requires **12 worker integration kernel tests and two library kernel
+cases**, including full >8-KiB input/output, hidden-data preservation, captured
+source/CLI reuse, occupied-output preservation, active broker cancellation,
 flock exclusion, and real owner SIGKILL before/after atomic publication. Protocol
 units also cover oversized/partial/trailing candidate frames and independent
 rejection of changed hidden data. Downloaded binaries exercise create/inspect/
