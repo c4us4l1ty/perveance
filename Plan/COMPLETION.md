@@ -16,10 +16,14 @@ claim of completion. The owner has authorized development. Read this alongside
    that exact capability on another request. This is **not implemented**. More
    pixel tools alone will not complete it.
 
-The [region-editor CI run](https://github.com/c4us4l1ty/perveance/actions/runs/41900776563)
-passed the Rust suite, native X11 workflows, bridge parity and downloaded Linux
-bundle verification for commit `0cb581f`. Those results do not certify a real
-user desktop, a sandbox or the later task-orchestration changes.
+[Rust CI run 41986111833](https://github.com/c4us4l1ty/perveance/actions/runs/41986111833)
+passed the complete Rust suite, native X11 workflows, bridge parity and downloaded
+Linux bundle verification for task-backend commit `3dd9ae0`. This includes
+cooperative cancellation, simulated stage interruptions, forced CLI termination
+and a persistent task round trip using the downloaded executable. The
+[feasibility matrix](https://github.com/c4us4l1ty/perveance/actions/runs/41986111831)
+also passed its configured checks. These results are not real-desktop or
+production-sandbox certification, and do not authorize generated-code execution.
 
 ## Inventory and remaining acceptance
 
@@ -29,7 +33,7 @@ user desktop, a sandbox or the later task-orchestration changes.
 | Headless/Arena handoff | Rust CLI plus separate limited Python bridge; file handoff tested | Keep compatibility and limits explicit. A live Arena/local-GUI connector is not a prerequisite and is not available. |
 | Work protection | No-clobber version copies and opt-in recovery snapshots | Stable project compatibility/migration policy, meaningful conflict/recovery tests, backup/retention UX and documented durability limits. No current atomic cross-process CAS. |
 | Prompt-to-pixels | Opt-in typed OpenRouter prototype | Real model-route compatibility, cancellation/progress, secure credential handling and explicit billing controls. It is not a coding harness. |
-| Durable task orchestration | New Linux raster-proposal task backend, pending the associated CI result | Integrate the GUI/provider and later verified worker pipeline. Existing offline tasks do not authorize code, make model calls or enforce OS quotas. |
+| Durable task orchestration | Implemented and CI-tested Linux raster-proposal CLI/library backend | Integrate the GUI/provider and later verified worker pipeline. Existing offline tasks do not authorize code, make model calls or enforce OS quotas. |
 | Foundation decision | Working composed Rust raster engine; scoped Graphite research/headless-check evidence | Record the reversible foundation decision and remaining Graphite rendering/integration tradeoffs. A successful headless check is not a desktop integration spike. |
 | Linux isolation | Fixed-code bubblewrap/staging/FD/lifecycle diagnostics | Enforce and adversarially verify CPU, memory, processes, total disk, wall time, descendant cleanup, trusted input brokerage and denial of secret/network/registry access on the actual supported backend. |
 | Model broker and coding harness | Missing | Broker owns credentials and durable reservations; worker has scoped calls but no provider key or general network. Prove one real harness/provider pair. |
@@ -53,7 +57,8 @@ user desktop, a sandbox or the later task-orchestration changes.
 - [x] Provide explicit interrupted-run recovery and test simulated interruptions,
   forced CLI termination, concurrent runners, malformed records, occupied
   outputs and tampered files.
-- [ ] Verify the current changes in GitHub CI, including the downloaded binary.
+- [x] Verify the task backend in GitHub CI, including the downloaded binary
+  ([run 41986111833](https://github.com/c4us4l1ty/perveance/actions/runs/41986111833)).
 - [ ] Connect task status/cancellation to the GUI and provider adapter. This
   increment is CLI/library-only and accepts proposals, not natural-language
   creative tasks. The old autonomy intake inspection remains always blocked.
