@@ -45,7 +45,7 @@ def text(value):
 
 
 def reply_bytes():
-    return b"PVEXRP01" + bytes([0, 0, 0, 0]) + bytes(32) + struct.pack("<I", 0)
+    return b"PVEXRP01" + bytes([1, 0, 0, 0]) + bytes(32) + struct.pack("<I", 0)
 
 
 def module(fixture):

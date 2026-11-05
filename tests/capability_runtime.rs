@@ -44,7 +44,7 @@ fn text(name: &str) -> Vec<u8> {
 enum Fixture { ZeroAllocator, Reply, Loop, Trap }
 fn reply_bytes() -> Vec<u8> {
     let mut out = b"PVEXRP01".to_vec();
-    out.extend([0, 0, 0, 0]);
+    out.extend([1, 0, 0, 0]);
     out.extend([0u8; 32]);
     out.extend([0u8; 4]);
     out
@@ -158,7 +158,6 @@ fn zero_allocator_is_refused_after_real_instantiation_and_execution() {
 #[test]
 fn executed_reply_is_still_rejected_because_the_request_binding_is_wrong() {
     let (report, _) = invoke(Fixture::Reply);
-    eprintln!("report={}", serde_json::to_string(&report).unwrap());
     assert_eq!(report.outcome, Outcome::ReplyRejected);
     assert!(report.gates.code_executed);
     let reply = report.reply.as_ref().expect("engine produced a reply");
