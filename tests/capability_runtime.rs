@@ -161,7 +161,7 @@ fn executed_reply_is_still_rejected_because_the_request_binding_is_wrong() {
     assert_eq!(report.outcome, Outcome::ReplyRejected);
     assert!(report.gates.code_executed);
     let reply = report.reply.as_ref().expect("engine produced a reply");
-    assert!(!reply.wire_accepted && !reply.memory_window_checked);
+    assert!(!reply.wire_accepted && reply.memory_window_checked);
     assert_eq!(reply.issue, Some(Error::RequestMismatch));
     no_authority(&report);
 }
