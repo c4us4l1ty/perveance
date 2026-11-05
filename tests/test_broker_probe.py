@@ -85,6 +85,18 @@ class BrokerProbeTests(unittest.TestCase):
         worker.join(2)
         self.assertFalse(worker.is_alive())
 
+    def test_runtime_pwd_is_fixed_but_host_environment_is_still_rejected(self):
+        clean = {"PATH": "/usr/bin:/bin", "PWD": "/work"}
+        probe.verify_environment(clean)
+        probe.verify_environment(dict(clean, LC_CTYPE="C.UTF-8"))
+        for bad in [dict(clean, PERVEANCE_SYNTHETIC_HOST_SECRET="never-inherit"),
+                    dict(clean, OPENROUTER_API_KEY="synthetic-not-real"),
+                    dict(clean, PWD="/home/host"), dict(clean, PATH="/host/bin")]:
+            with self.assertRaises(AssertionError):
+                probe.verify_environment(bad)
+        with self.assertRaises(KeyError):
+            probe.verify_environment({"PATH": "/usr/bin:/bin"})
+
     def test_bad_configuration_never_prints_raw_details(self):
         result = subprocess.run(["python3", "-I", "-c", SCRIPT.read_text(), "private-invalid-marker"],
             input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)

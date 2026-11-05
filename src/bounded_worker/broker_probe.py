@@ -65,6 +65,13 @@ def exchange(peer, request, expected):
         assert reply["text"] is None
 
 
+def verify_environment(environment):
+    # bubblewrap creates PWD after --clearenv/--chdir; it is not host input.
+    assert set(environment) <= {"PATH", "PWD", "LC_CTYPE"}
+    assert environment["PATH"] == "/usr/bin:/bin"
+    assert environment["PWD"] == "/work"
+
+
 def run(config):
     global STAGE
     STAGE = "descriptors"
@@ -79,8 +86,7 @@ def run(config):
     STAGE = "channel"
     assert stat.S_ISSOCK(os.fstat(1).st_mode)
     STAGE = "environment"
-    assert set(os.environ) <= {"PATH", "LC_CTYPE"}
-    assert os.environ["PATH"] == "/usr/bin:/bin"
+    verify_environment(os.environ)
     STAGE = "input"
     assert fcntl.fcntl(0, fcntl.F_GET_SEALS) & 15 == 15
     try:
