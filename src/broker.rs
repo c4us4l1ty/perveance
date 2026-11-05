@@ -165,7 +165,7 @@ impl Transport for FixtureTransport {
 #[serde(rename_all = "snake_case")]
 pub enum ReplyStatus {
     Completed, AlreadyFinished, OutcomeUnknown, Conflict, BudgetExhausted,
-    Halted, InvalidRequest, ProviderRejected, BillingBoundViolated, AccountingUncertain,
+    Halted, InvalidRequest, ProviderRejected, BillingBoundViolated, AccountingUncertain, Revoked,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,6 +186,11 @@ impl fmt::Debug for Reply {
             .field("text", &"REDACTED").finish()
     }
 }
+
+/// Host-side admission checkpoints. A worker cannot supply or bypass this
+/// callback. False revokes dispatch/text, never a reservation or possible bill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdmissionPhase { BeforeReservation, BeforeDispatch, BeforeReply }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

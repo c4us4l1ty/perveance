@@ -132,6 +132,20 @@ fn mediated_worker(_input_root: &str, _relative: &str, _cgroup: &str, _mode: &st
 }
 
 #[cfg(target_os = "linux")]
+fn broker_worker(input_root: &str, relative: &str, cgroup: &str, ledger: &str) -> Result<serde_json::Value, String> {
+    use perveance::{bounded_worker::{self, BrokerMode, BrokerProgress, Limits, Outcome}, worker_io::{PrivateDirectory, ProjectSnapshot}};
+    let snapshot = ProjectSnapshot::capture(&PrivateDirectory::open(Path::new(input_root))?, relative)?;
+    let report = bounded_worker::run_broker_fixture(&snapshot, Path::new(cgroup), Path::new(ledger), BrokerMode::Inspect,
+        &Limits::default(), &std::sync::atomic::AtomicBool::new(false), &BrokerProgress::default())?;
+    if report.worker.outcome != Outcome::Completed { return Err("fixed broker-worker diagnostic failed; no execution authorized".into()); }
+    Ok(json!({"ok": true, "diagnostic": report}))
+}
+#[cfg(not(target_os = "linux"))]
+fn broker_worker(_input_root: &str, _relative: &str, _cgroup: &str, _ledger: &str) -> Result<serde_json::Value, String> {
+    Err("confined broker-worker fixtures require Linux".into())
+}
+
+#[cfg(target_os = "linux")]
 fn publish_raster_bundle(input_root: &str, relative: &str, output_root: &str, name: &str) -> Result<serde_json::Value, String> {
     use perveance::worker_io::{PrivateDirectory, ProjectSnapshot, VerifiedBundle};
     let source = PrivateDirectory::open(Path::new(input_root))?;
@@ -181,7 +195,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "verify-fixed-worker", "verify-bounded-worker", "verify-mediated-worker", "recover-bounded-workers", "publish-raster-bundle", "broker-ledger-init", "broker-ledger-inspect", "broker-fixture-call", "inspect-autonomy-request", "task-create", "task-inspect", "task-run", "task-cancel", "task-recover", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "verify-fixed-worker", "verify-bounded-worker", "verify-mediated-worker", "verify-broker-worker", "recover-bounded-workers", "publish-raster-bundle", "broker-ledger-init", "broker-ledger-inspect", "broker-fixture-call", "inspect-autonomy-request", "task-create", "task-inspect", "task-run", "task-cancel", "task-recover", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "clear_region", "copy_region", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "png_export_scale": perveance::MAX_EXPORT_SCALE, "brush_size": perveance::MAX_BRUSH_SIZE, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "region_edit_pixels": perveance::MAX_DIMENSION * perveance::MAX_DIMENSION, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
@@ -211,6 +225,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             "autonomy_intake": {"operation": "inspect-autonomy-request", "version": perveance::supervisor::INTAKE_VERSION, "default_maximum": perveance::supervisor::IntakePolicy::default().maximum, "task_created": false, "budgets_enforced": false, "autonomous_execution": false},
             "fixed_worker_diagnostic": {"operation": "verify-fixed-worker", "platform": "linux", "fixed_code_only": true, "autonomous_execution": false, "security_boundary": false, "resource_enforcement": "experimental output cap and best-effort wall timeout only"},
             "bounded_worker_diagnostic": {"operation": "verify-bounded-worker", "recovery": "recover-bounded-workers", "platform": "linux", "backend": "delegated cgroup v2 plus unprivileged bubblewrap", "default_limits": perveance::bounded_worker::Limits::default(), "fixed_code_only": true, "autonomous_execution": false, "security_boundary_verified": false, "cpu_budget": "sampled aggregate usage; kernel rate limit is separate", "scope": "fixed diagnostics only; not wired to raster tasks or provider"},
+            "broker_worker_diagnostic": {"operation": "verify-broker-worker", "platform": "linux", "backend": "existing cgroup/bubblewrap worker with scoped host broker", "transport": "offline fixed synthetic only", "credential": "fresh random synthetic host-only credential; no real key input", "channel": "sealed stdin plus connected duplex stdout; stderr is bounded fixed summary", "exchanges": 5, "leased_admission": "cancel/deadline/peer checked before reservation, after sync before dispatch, and before text", "autonomous_execution": false, "production_role_separation_verified": false},
             "worker_io": {"platform": "linux", "publish_operation": "publish-raster-bundle", "diagnostic_operation": "verify-mediated-worker", "path_resolution": "required openat2; beneath/no symlinks/no magic links/no mount crossing within private roots", "input": "sealed anonymous snapshot on stdin; no source paths or directories mounted", "candidate_verification": "library only; must match trusted expected project and PNG composite", "publication": "canonical project plus PNG in one renameat2 no-replace bundle", "parent_sync_failure": "bundle already committed; report uncertainty without deleting or blind retry", "autonomous_execution": false, "resource_quotas_enforced_for_offline_publication": false},
             "model_broker": {"platform": "linux", "version": perveance::broker::VERSION, "operations": ["broker-ledger-init", "broker-ledger-inspect", "broker-fixture-call"], "max_calls_per_ledger": perveance::broker::MAX_CALLS, "max_prompt_bytes": perveance::broker::MAX_PROMPT_BYTES, "max_response_bytes": perveance::broker::MAX_COMPLETION_BYTES, "durable_reservations": true, "refunds": false, "credential_input": "host library only; no real key accepted by fixture CLI", "worker_channel": "one bounded framed exchange on a connected Unix socket; no pathname listener", "duplicate_calls": "never redispatched; completed text not cached", "unknown_outcomes": "full reservation retained; ledger halted for new calls", "shipped_transport": "offline fixture only; no paid provider route", "task_worker_provider_integration": false, "autonomous_execution": false},
             "project_staging": {"operation": "verify-project-staging", "platform": "linux", "contents": "one validated project snapshot", "persistent": false, "autonomous_execution": false, "security_boundary": false},
@@ -264,6 +279,9 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
         }
         [command, input_root, relative, output_root, name] if command == "publish-raster-bundle" => {
             publish_raster_bundle(input_root, relative, output_root, name)
+        }
+        [command, input_root, relative, root, ledger] if command == "verify-broker-worker" => {
+            broker_worker(input_root, relative, root, ledger)
         }
         [command, input_root, relative, root] if command == "verify-mediated-worker" => {
             mediated_worker(input_root, relative, root, "inspect")
@@ -373,7 +391,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | verify-fixed-worker INPUT TRUSTED_PARENT | verify-bounded-worker INPUT PRIVATE_PARENT DELEGATED_CGROUP_ROOT [inspect|wait|fork-tree|cpu|memory|processes|scratch|output|fail] | verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT [FIXED_MODE] | publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT BUNDLE_NAME | recover-bounded-workers DELEGATED_CGROUP_ROOT | broker-ledger-init PRIVATE_ROOT MAX_CALLS MAX_COST_MICROUSD PER_CALL_UPPER_MICROUSD | broker-ledger-inspect PRIVATE_ROOT | broker-fixture-call PRIVATE_LEDGER_ROOT PRIVATE_REQUEST_ROOT RELATIVE_REQUEST_JSON | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | task-create PROJECT PROPOSAL_JSON PRIVATE_TASK_ROOT | task-inspect PRIVATE_TASK_ROOT ID | task-run PRIVATE_TASK_ROOT ID | task-cancel PRIVATE_TASK_ROOT ID | task-recover PRIVATE_TASK_ROOT ID | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | verify-fixed-worker INPUT TRUSTED_PARENT | verify-bounded-worker INPUT PRIVATE_PARENT DELEGATED_CGROUP_ROOT [inspect|wait|fork-tree|cpu|memory|processes|scratch|output|fail] | verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT [FIXED_MODE] | verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT PRIVATE_ONE_CALL_LEDGER_ROOT | publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT BUNDLE_NAME | recover-bounded-workers DELEGATED_CGROUP_ROOT | broker-ledger-init PRIVATE_ROOT MAX_CALLS MAX_COST_MICROUSD PER_CALL_UPPER_MICROUSD | broker-ledger-inspect PRIVATE_ROOT | broker-fixture-call PRIVATE_LEDGER_ROOT PRIVATE_REQUEST_ROOT RELATIVE_REQUEST_JSON | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | task-create PROJECT PROPOSAL_JSON PRIVATE_TASK_ROOT | task-inspect PRIVATE_TASK_ROOT ID | task-run PRIVATE_TASK_ROOT ID | task-cancel PRIVATE_TASK_ROOT ID | task-recover PRIVATE_TASK_ROOT ID | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 

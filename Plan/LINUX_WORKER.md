@@ -161,3 +161,14 @@ Neither increment closes complete role-separated I/O mediation, broader
 malicious-code/syscall/secret/network threats, durable task integration,
 credential brokerage, real harness compatibility, independent verification,
 activation/rollback or production security review. Arbitrary code stays disabled.
+
+
+## Confined broker continuation
+
+[BROKER_WORKER.md](BROKER_WORKER.md) adds a fixed offline peer that uses one
+duplex stdout broker capability, sealed stdin and bounded stderr summary. The
+parent broker/supervisor stays outside the worker boundary; credentials and
+ledger descriptors are not inherited/mounted. Its scoped admission, cancellation,
+SIGKILL and SIGSTOP/resume cases bring the required delegated suite to eleven.
+These new checks await CI; earlier seven-test passes certify only their recorded
+implementation. This is not production provider/task/role-separation approval.

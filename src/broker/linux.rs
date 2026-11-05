@@ -294,7 +294,8 @@ impl<T: Transport> Broker<T> {
     }
     pub fn report(&self) -> LedgerReport { self.ledger.report() }
 
-    fn process(&mut self, request: &CallRequest) -> (Reply, ServeReport) {
+    fn process_guarded(&mut self, request: &CallRequest,
+                       mut admitted: impl FnMut(AdmissionPhase) -> bool) -> (Reply, ServeReport) {
         let status_report = |reply: Reply, provider_called, outcome_recorded| {
             let report = ServeReport { status: reply.status, provider_called, outcome_recorded };
             (reply, report)
@@ -303,10 +304,18 @@ impl<T: Transport> Broker<T> {
             || self.credential.appears_in(request.prompt.as_bytes()) || self.credential.appears_in(request.id.as_bytes()) {
             return status_report(Reply::new(None, ReplyStatus::InvalidRequest), false, false);
         }
+        if !admitted(AdmissionPhase::BeforeReservation) {
+            return status_report(Reply::new(Some(&request.id), ReplyStatus::Revoked), false, false);
+        }
         match self.ledger.reserve(request) {
             Ok(Some(status)) => return status_report(Reply::new(Some(&request.id), status), false, false),
             Err(_) => return status_report(Reply::new(Some(&request.id), ReplyStatus::AccountingUncertain), false, false),
             Ok(None) => {}
+        }
+        if !admitted(AdmissionPhase::BeforeDispatch) {
+            let recorded = self.ledger.finish(&request.id, CallState::OutcomeUnknown, None, 0).is_ok();
+            return status_report(Reply::new(Some(&request.id), if recorded { ReplyStatus::Revoked }
+                else { ReplyStatus::AccountingUncertain }), false, recorded);
         }
         // The private journal is durable BEFORE invoking trusted adapter code.
         // Never retry, including timeouts, lost replies or unknown billing.
@@ -328,6 +337,9 @@ impl<T: Transport> Broker<T> {
         if self.ledger.finish(&request.id, state, actual, text.as_ref().map_or(0, String::len)).is_err() {
             return status_report(Reply::new(Some(&request.id), ReplyStatus::AccountingUncertain), true, false);
         }
+        if !admitted(AdmissionPhase::BeforeReply) {
+            return status_report(Reply::new(Some(&request.id), ReplyStatus::Revoked), true, true);
+        }
         let status = match state {
             CallState::Completed => ReplyStatus::Completed,
             CallState::ProviderRejected => ReplyStatus::ProviderRejected,
@@ -344,18 +356,28 @@ impl<T: Transport> Broker<T> {
     /// or file tool. Read/write have absolute deadlines, not reset-per-byte
     /// timeouts. A trusted provider adapter's own duration is NOT bounded here.
     pub fn serve_once(&mut self, mut stream: UnixStream) -> Result<ServeReport, String> {
+        self.serve_guarded(&mut stream, |_| true)
+    }
+
+    /// Leased entry for a trusted supervisor. Check cancellation/deadline/peer
+    /// liveness before reservation, AFTER durable reservation before dispatch,
+    /// and after settlement before text release. Revocation never refunds.
+    /// The caller owns/closes this endpoint and bounds the number of exchanges.
+    pub fn serve_guarded(&mut self, stream: &mut UnixStream,
+                         mut admitted: impl FnMut(AdmissionPhase) -> bool) -> Result<ServeReport, String> {
         stream.set_nonblocking(true).map_err(|_| fail("cannot configure broker channel"))?;
-        let request = read_frame(&mut stream, MAX_REQUEST_FRAME, Instant::now() + IO_DEADLINE)
+        let request = read_frame(stream, MAX_REQUEST_FRAME, Instant::now() + IO_DEADLINE)
             .and_then(|bytes| serde_json::from_slice::<CallRequest>(&bytes).map_err(|_| fail("invalid scoped request JSON")));
         let (reply, report) = match request {
-            Ok(request) => self.process(&request),
+            Ok(request) => self.process_guarded(&request, &mut admitted),
             Err(_) => (Reply::new(None, ReplyStatus::InvalidRequest), ServeReport {
                 status: ReplyStatus::InvalidRequest, provider_called: false, outcome_recorded: false }),
         };
         let bytes = serde_json::to_vec(&reply).map_err(|_| fail("cannot encode bounded reply"))?;
-        write_frame(&mut stream, &bytes, MAX_REPLY_FRAME, Instant::now() + IO_DEADLINE)?;
+        write_frame(stream, &bytes, MAX_REPLY_FRAME, Instant::now() + IO_DEADLINE)?;
         Ok(report)
     }
+
 }
 
 fn wait(stream: &UnixStream, event: libc::c_short, deadline: Instant) -> Result<(), String> {

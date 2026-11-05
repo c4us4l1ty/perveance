@@ -189,3 +189,19 @@
   IPC tests are not protected broker-role evidence. No real credentials,
   provider calls, task/worker integration or generated code are enabled.
   See [MODEL_BROKER.md](MODEL_BROKER.md) for exact trust/limits.
+
+
+- Connected the host broker to the confined fixed-code cgroup/bubblewrap worker:
+  sealed project stdin, connected duplex stdout and bounded summary stderr;
+  no extra descriptors, secret/ledger/source mounts or real provider route.
+  Added fresh synthetic host credentials/listeners and direct/proc/symlink denial
+  checks, five bounded policy/dedup/conflict/exhaustion exchanges, and host-side
+  corroboration of the peer summary. Dropped retained Command Stdio handles so
+  peer EOF is meaningful. Guarded admission now checks scope before reserve,
+  after sync before dispatch and before text; aborts preserve full reservations.
+  Added before/inflight cancellation, broker SIGKILL and SIGSTOP/resume kernel
+  cases (eleven mandatory worker tests total), five Rust unit and three normal
+  integration/helper cases, plus six Python negative/protocol tests. All 47 local
+  Python tests pass; new Rust/kernel CI is pending. This is not production role
+  certification, real provider integration or durable task/output transport.
+  See [BROKER_WORKER.md](BROKER_WORKER.md).

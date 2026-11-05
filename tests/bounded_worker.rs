@@ -325,4 +325,184 @@ mod linux {
         assert!(groups(&root).is_empty());
         assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 1, "only original input remains");
     }
+
+    fn one_call_ledger(path: &Path) {
+        use perveance::{broker::{Ledger, Policy}, worker_io::PrivateDirectory};
+        drop(Ledger::create(PrivateDirectory::open(path).unwrap(), Policy::fixture(1, 10, 10)).unwrap());
+    }
+    fn ledger_report(path: &Path) -> perveance::broker::LedgerReport {
+        use perveance::{broker::Ledger, worker_io::PrivateDirectory};
+        Ledger::open(PrivateDirectory::open(path).unwrap()).unwrap().report()
+    }
+
+    #[test]
+    fn broker_modes_and_precancellation_do_not_authorize_calls_or_kernel_groups() {
+        use perveance::{bounded_worker::{BrokerMode, BrokerProgress}, worker_io::ProjectSnapshot};
+        for mode in ["inspect", "hold-before-dispatch", "hold-in-flight"] { BrokerMode::parse(mode).unwrap(); }
+        for mode in ["shell", "../inspect", "model-code", "inspect\n"] { assert!(BrokerMode::parse(mode).is_err()); }
+        let ledger = private_parent(); one_call_ledger(ledger.path());
+        let snapshot = ProjectSnapshot::from_project(&Project::new(1, 1).unwrap()).unwrap();
+        let progress = BrokerProgress::default();
+        let report = bounded_worker::run_broker_fixture(&snapshot, ledger.path(), ledger.path(), BrokerMode::Inspect,
+            &Limits::default(), &AtomicBool::new(true), &progress).unwrap();
+        assert_eq!(report.worker.outcome, Outcome::Cancelled);
+        assert!(!report.worker.worker_started && !report.namespace_checks_verified);
+        assert_eq!((report.adapter_invocations, report.ledger.reserved_calls, progress.phase()), (0, 0, 0));
+        assert!(!report.autonomous_execution && !report.provider_network_used);
+    }
+
+    #[test]
+    fn broker_boundary_prerequisite_failure_never_dispatches_or_changes_the_ledger() {
+        use perveance::{bounded_worker::{BrokerMode, BrokerProgress}, worker_io::ProjectSnapshot};
+        let ledger = private_parent(); one_call_ledger(ledger.path());
+        let root = private_parent();
+        let before = fs::read(ledger.path().join(perveance::broker::LEDGER_FILE)).unwrap();
+        let snapshot = ProjectSnapshot::from_project(&Project::new(1, 1).unwrap()).unwrap();
+        assert!(bounded_worker::run_broker_fixture(&snapshot, root.path(), ledger.path(), BrokerMode::Inspect,
+            &Limits::default(), &AtomicBool::new(false), &BrokerProgress::default()).is_err());
+        assert_eq!(ledger_report(ledger.path()).reserved_calls, 0);
+        assert_eq!(fs::read(ledger.path().join(perveance::broker::LEDGER_FILE)).unwrap(), before);
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+        let discovery = cli().arg("capabilities").output().unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&discovery.stdout).unwrap();
+        assert_eq!(value["broker_worker_diagnostic"]["production_role_separation_verified"], false);
+        assert_eq!(value["broker_worker_diagnostic"]["autonomous_execution"], false);
+    }
+
+    #[test]
+    #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
+    fn confined_broker_protocol_denies_host_authority_and_enforces_durable_budget() {
+        use perveance::{bounded_worker::{BrokerMode, BrokerProgress}, worker_io::ProjectSnapshot};
+        use std::{fs::File, os::fd::AsRawFd};
+        let root = delegated(); let ledger = private_parent(); one_call_ledger(ledger.path());
+        let project = Project::new(64, 64).unwrap();
+        let snapshot = ProjectSnapshot::from_project(&project).unwrap();
+        let file = File::open("/dev/null").unwrap();
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+        assert_eq!(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFD, flags & !libc::FD_CLOEXEC) }, 0);
+        for expected_calls in [1, 0] {
+            let report = bounded_worker::run_broker_fixture(&snapshot, &root, ledger.path(), BrokerMode::Inspect,
+                &Limits::default(), &AtomicBool::new(false), &BrokerProgress::default()).unwrap();
+            assert_eq!(report.worker.outcome, Outcome::Completed);
+            assert!(report.worker.cgroup_removed && report.worker.input_snapshot_sealed && report.namespace_checks_verified);
+            assert_eq!((report.adapter_invocations, report.ledger.reserved_calls, report.ledger.reserved_cost_microusd), (expected_calls, 1, 10));
+            assert_eq!(report.exchanges.len(), 5);
+            assert!(!report.channel_error && !report.autonomous_execution && !report.provider_network_used && !report.ledger.halted);
+            assert!(groups(&root).is_empty());
+        }
+        assert_eq!(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFD, flags) }, 0);
+        let input = private_parent(); project.save_new(&input.path().join("source.json")).unwrap();
+        let output = cli().arg("verify-broker-worker").arg(input.path()).arg("source.json").arg(&root).arg(ledger.path())
+            .env("PERVEANCE_SYNTHETIC_HOST_SECRET", "synthetic-environment-not-a-provider-key").output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["diagnostic"]["namespace_checks_verified"], true);
+        assert_eq!(report["diagnostic"]["adapter_invocations"], 0);
+        assert_eq!(report["diagnostic"]["synthetic_fixture_only"], true);
+        assert_eq!(fs::read_dir(input.path()).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(ledger.path()).unwrap().count(), 1);
+        println!("confined broker: five scoped exchanges, host authority denied, repeated request never redispatched");
+    }
+
+    #[test]
+    #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
+    fn broker_cancellation_before_dispatch_and_inflight_keeps_full_reservations() {
+        use perveance::{bounded_worker::{BrokerMode, BrokerProgress}, broker::CallState, worker_io::ProjectSnapshot};
+        let root = delegated();
+        for (mode, phase, calls) in [(BrokerMode::HoldBeforeDispatch, 1, 0), (BrokerMode::HoldInFlight, 2, 1)] {
+            let ledger = private_parent(); one_call_ledger(ledger.path());
+            let snapshot = ProjectSnapshot::from_project(&Project::new(1, 1).unwrap()).unwrap();
+            let cancel = AtomicBool::new(false); let progress = BrokerProgress::default();
+            thread::scope(|scope| {
+                let worker = scope.spawn(|| bounded_worker::run_broker_fixture(&snapshot, &root, ledger.path(), mode,
+                    &Limits::default(), &cancel, &progress));
+                wait_for(5, || (progress.phase() >= phase).then_some(()));
+                cancel.store(true, Ordering::SeqCst);
+                let report = worker.join().unwrap().unwrap();
+                assert_eq!(report.worker.outcome, Outcome::Cancelled);
+                assert!(report.worker.cgroup_removed && report.ledger.halted);
+                assert_eq!(report.adapter_invocations, calls);
+                assert_eq!((report.ledger.reserved_calls, report.ledger.reserved_cost_microusd), (1, 10));
+                assert_eq!(report.ledger.calls[0].state, CallState::OutcomeUnknown);
+            });
+            assert!(groups(&root).is_empty());
+            assert!(ledger_report(ledger.path()).halted);
+        }
+    }
+
+    // Only the kernel tests below set this non-secret test-harness variable.
+    // The application has no environment backdoor or arbitrary helper command.
+    #[test]
+    fn broker_owner_helper() {
+        use perveance::{bounded_worker::{BrokerMode, BrokerProgress}, worker_io::ProjectSnapshot};
+        let Some(path) = std::env::var_os("PERVEANCE_BROKER_KERNEL_HELPER") else { return; };
+        let path = PathBuf::from(path);
+        let phase = std::env::var("PERVEANCE_BROKER_HELPER_PHASE").unwrap().parse::<u8>().unwrap();
+        let mode = if phase == 1 { BrokerMode::HoldBeforeDispatch } else { BrokerMode::HoldInFlight };
+        let snapshot = ProjectSnapshot::from_project(&Project::new(1, 1).unwrap()).unwrap();
+        let progress = BrokerProgress::default();
+        let limits = Limits { wall_seconds: 4, ..Limits::default() };
+        let report = thread::scope(|scope| {
+            scope.spawn(|| {
+                wait_for(3, || (progress.phase() >= phase).then_some(()));
+                fs::write(path.join("phase.ready"), b"durable fixture phase reached").unwrap();
+            });
+            bounded_worker::run_broker_fixture(&snapshot, &delegated(), &path.join("ledger"), mode,
+                &limits, &AtomicBool::new(false), &progress)
+        }).unwrap();
+        fs::write(path.join("helper-result.json"), serde_json::to_vec(&report).unwrap()).unwrap();
+    }
+
+    fn broker_owner(path: &Path, phase: u8) -> ChildGuard {
+        ChildGuard(Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "linux::broker_owner_helper", "--nocapture", "--test-threads=1"])
+            .env("PERVEANCE_BROKER_KERNEL_HELPER", path).env("PERVEANCE_BROKER_HELPER_PHASE", phase.to_string())
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn().unwrap())
+    }
+    fn broker_parent() -> tempfile::TempDir {
+        let path = private_parent();
+        let ledger = path.path().join("ledger"); fs::create_dir(&ledger).unwrap();
+        fs::set_permissions(&ledger, fs::Permissions::from_mode(0o700)).unwrap(); one_call_ledger(&ledger);
+        path
+    }
+
+    #[test]
+    #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
+    fn killed_broker_owner_revokes_worker_but_never_releases_or_replays_the_call() {
+        use perveance::broker::CallState;
+        let root = delegated(); let parent = broker_parent();
+        let mut owner = broker_owner(parent.path(), 2);
+        wait_for(5, || parent.path().join("phase.ready").exists().then_some(()));
+        let group = groups(&root).into_iter().next().unwrap();
+        owner.0.kill().unwrap(); owner.0.wait().unwrap();
+        wait_for(5, || empty(&group).then_some(()));
+        assert_eq!(bounded_worker::recover(&root).unwrap().removed_cgroups, 1);
+        let report = ledger_report(&parent.path().join("ledger"));
+        assert_eq!((report.reserved_calls, report.reserved_cost_microusd), (1, 10));
+        assert!(report.halted);
+        assert_eq!(report.calls[0].state, CallState::ReservedUncertain);
+        assert!(groups(&root).is_empty());
+        assert_eq!(fs::read_dir(parent.path().join("ledger")).unwrap().count(), 1);
+    }
+
+    #[test]
+    #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
+    fn stopped_broker_cannot_dispatch_after_watchdog_kills_its_peer() {
+        let root = delegated(); let parent = broker_parent();
+        let mut owner = broker_owner(parent.path(), 1);
+        wait_for(5, || parent.path().join("phase.ready").exists().then_some(()));
+        let group = groups(&root).into_iter().next().unwrap();
+        assert_eq!(unsafe { libc::kill(owner.0.id() as libc::pid_t, libc::SIGSTOP) }, 0);
+        wait_for(7, || empty(&group).then_some(()));
+        assert!(owner.0.try_wait().unwrap().is_none());
+        assert_eq!(unsafe { libc::kill(owner.0.id() as libc::pid_t, libc::SIGCONT) }, 0);
+        let status = wait_for(5, || owner.0.try_wait().unwrap()); assert!(status.success());
+        let report: serde_json::Value = serde_json::from_slice(&fs::read(parent.path().join("helper-result.json")).unwrap()).unwrap();
+        assert_eq!(report["worker"]["outcome"], "timed_out");
+        assert_eq!(report["adapter_invocations"], 0);
+        assert_eq!(report["ledger"]["reserved_cost_microusd"], 10);
+        assert_eq!(report["ledger"]["halted"], true);
+        assert!(groups(&root).is_empty());
+    }
+
 }

@@ -125,3 +125,13 @@ No real key is accepted by this fixture CLI. This ledger does not cover the
 manual OpenRouter prototype or existing tasks/GUI/workers, and is not a real
 provider spending guarantee. See Plan/MODEL_BROKER.md in the source repository.
 Autonomy remains disabled.
+
+
+verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+PRIVATE_ONE_CALL_LEDGER_ROOT is a separate confined offline integration probe.
+It requires an already provisioned supported cgroup/bubblewrap backend and a
+healthy one-call fixture ledger. It accepts no real key and makes no provider
+call. Credentials/ledger mounts are absent; stdin is sealed and stdout is scoped
+IPC. Synthetic private probe files may remain after SIGKILL; cgroup recovery
+never resets accounting. See Plan/BROKER_WORKER.md. This is not a production
+broker, coding harness, raster task or autonomy permit.

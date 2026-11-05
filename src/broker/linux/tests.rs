@@ -385,3 +385,46 @@ fn settlement_sync_failure_through_real_broker_path_withholds_response_and_does_
         assert_eq!(b.report().reserved_calls, 1);
     }
 }
+
+
+#[test]
+fn admission_revocation_before_reservation_never_spends_or_invokes() {
+    let directory = private();
+    let ledger = Ledger::create(root(directory.path()), policy()).unwrap();
+    let mut b = Broker::new(ledger, credential(), FixtureTransport).unwrap();
+    let (reply, service) = b.process_guarded(&request(1), |_| false);
+    assert_eq!(reply.status, ReplyStatus::Revoked);
+    assert!(!service.provider_called && !service.outcome_recorded && reply.text.is_none());
+    assert_eq!(b.report().reserved_calls, 0);
+}
+
+#[test]
+fn revocation_after_reservation_retains_the_whole_bound_and_halts_new_calls() {
+    let directory = private();
+    let ledger = Ledger::create(root(directory.path()), policy()).unwrap();
+    let mut b = Broker::new(ledger, credential(), FixtureTransport).unwrap();
+    let (reply, service) = b.process_guarded(&request(1), |phase| phase != AdmissionPhase::BeforeDispatch);
+    assert_eq!(reply.status, ReplyStatus::Revoked);
+    assert!(!service.provider_called && service.outcome_recorded && reply.text.is_none());
+    assert_eq!(b.report().reserved_cost_microusd, 10);
+    assert!(b.report().halted);
+    drop(b);
+    let mut b = broker(directory.path());
+    assert_eq!(exchange(&mut b, &request(1)).status, ReplyStatus::OutcomeUnknown);
+    assert_eq!(exchange(&mut b, &request(2)).status, ReplyStatus::Halted);
+}
+
+#[test]
+fn revocation_before_reply_withholds_text_but_cannot_refund_or_repeat() {
+    let directory = private();
+    let ledger = Ledger::create(root(directory.path()), policy()).unwrap();
+    let mut b = Broker::new(ledger, credential(), FixtureTransport).unwrap();
+    let (reply, service) = b.process_guarded(&request(1), |phase| phase != AdmissionPhase::BeforeReply);
+    assert_eq!(reply.status, ReplyStatus::Revoked);
+    assert!(service.provider_called && service.outcome_recorded && reply.text.is_none());
+    assert_eq!(b.report().reserved_cost_microusd, 10);
+    assert_eq!(b.report().calls[0].state, CallState::Completed);
+    drop(b);
+    let mut b = broker(directory.path());
+    assert_eq!(exchange(&mut b, &request(1)).status, ReplyStatus::AlreadyFinished);
+}

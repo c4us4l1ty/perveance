@@ -124,3 +124,17 @@ there is no reset/refund/retry command. Root/file and provider trust limitations
 frame/billing semantics and the exact JSON schema are in
 [MODEL_BROKER.md](MODEL_BROKER.md). These fixtures use no real key or provider and
 are not wired to existing tasks, GUI, manual OpenRouter or autonomous workers.
+
+
+## Confined offline broker peer diagnostic
+
+`verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+PRIVATE_ONE_CALL_LEDGER_ROOT` connects an embedded fixed peer to the host broker.
+Use a healthy `broker-ledger-init ... 1 10 10` offline ledger and an already
+provisioned supported backend. It exercises immutable policy, deduplication,
+confinement and five framed exchanges; no real key is accepted or provider called.
+It does not install/execute capabilities or create a raster job. Library-only
+hold modes test interruption, not arbitrary agents/commands. Missing prerequisites
+fail without an unconfined fallback. Synthetic host probe files may remain on
+SIGKILL; never clear the ledger to retry an uncertain call. See
+[BROKER_WORKER.md](BROKER_WORKER.md) for scope and retention caveats.

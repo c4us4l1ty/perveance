@@ -157,3 +157,25 @@ separation. Broker-process hardening, credential stores, actual task/worker
 integration, paid-provider token/pricing/deadline/usage verification, compatible
 harness validation and independent review remain required. A positive declared
 cost alone cannot establish a real provider charge bound. Autonomy stays off.
+
+
+## First confined broker peer (offline synthetic fixtures)
+
+[BROKER_WORKER.md](BROKER_WORKER.md) connects the host broker to an actual fixed
+worker namespace/cgroup over one connected stdout socket, with sealed input on
+stdin and bounded summary on stderr. The launcher drops its worker-end parent
+handles after spawn; otherwise peer EOF could not revoke authority. No secret,
+ledger/source directory FD or host socket pathname is exposed as a mount.
+Fresh synthetic credential/sentinel files and host listeners provide real
+negative targets. These are not real credentials or general exfiltration proof.
+
+Guarded admission checks cancellation, monotonic scope expiry and peer EOF/
+half-close before reservation, after its sync before dispatch, and before text
+release. Revocation never refunds or retries. Pending owner death keeps the
+ledger halted; cgroup recovery never clears accounting. SIGSTOP/resume tests
+require the independent watchdog to kill the peer and deny stale dispatch.
+New Rust/kernel verification is pending; 47 local Python tests pass.
+Protected production roles, actual task/output/response recovery, a real provider
+with verified pricing/token/deadline bounds and independent review remain open.
+Only fixed offline code runs; autonomy stays disabled. Synthetic fixture dirs
+can remain on SIGKILL and have no automatic retention sweep.

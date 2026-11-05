@@ -180,3 +180,15 @@ provider's maximum charge; hidden retries, tokenization, pricing changes and
 unknown billing must be resolved before enabling any paid autonomous route.
 The Rust Transport trait is a trusted host-adapter seam, not an extension or
 worker escape hatch. Only the offline transport is shipped. Autonomy stays off.
+
+
+## Confined-peer continuation
+
+[BROKER_WORKER.md](BROKER_WORKER.md) now connects this core to the fixed cgroup/
+bubblewrap peer. The host-only `serve_guarded` admission callback checks scope
+before reserve, after synced reserve before dispatch, and after settlement before
+text. `revoked` is a new response status, not a refund. The standalone
+`serve_once` remains an unleased host-library/fixture entry; use the guarded entry
+for scope-aware supervision. The integration bounds a session to five exchanges,
+uses only fresh synthetic credentials and awaits its own eleven-test kernel CI.
+It is not the missing production task/provider/hardened broker gate.

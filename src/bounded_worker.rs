@@ -152,3 +152,53 @@ pub fn run(_project: &Project, _trusted_parent: &Path, _delegated_root: &Path, _
 pub fn recover(_delegated_root: &Path) -> Result<RecoveryReport, String> {
     Err("bounded worker recovery requires Linux".into())
 }
+
+
+/// Fixed offline broker/worker integration fixtures, never an arbitrary executor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrokerMode { Inspect, HoldBeforeDispatch, HoldInFlight }
+impl BrokerMode {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "inspect" => Ok(Self::Inspect), "hold-before-dispatch" => Ok(Self::HoldBeforeDispatch),
+            "hold-in-flight" => Ok(Self::HoldInFlight), _ => Err("unknown fixed broker-worker mode".into()),
+        }
+    }
+    #[cfg(target_os = "linux")]
+    fn argument(self) -> &'static str {
+        match self { Self::Inspect => "inspect", Self::HoldBeforeDispatch => "hold-before-dispatch",
+            Self::HoldInFlight => "hold-in-flight" }
+    }
+}
+
+/// In-memory diagnostic observation, not a durable job event or dispatch permit.
+#[derive(Default)]
+pub struct BrokerProgress { state: std::sync::atomic::AtomicU8 }
+impl BrokerProgress {
+    /// 0 = no reservation observed, 1 = reservation synced, 2 = adapter entered.
+    pub fn phase(&self) -> u8 { self.state.load(std::sync::atomic::Ordering::SeqCst) }
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrokerWorkerReport {
+    pub worker: Report,
+    pub ledger: crate::broker::LedgerReport,
+    pub exchanges: Vec<crate::broker::ServeReport>,
+    pub adapter_invocations: u64,
+    pub channel_error: bool,
+    pub namespace_checks_verified: bool,
+    pub synthetic_fixture_only: bool,
+    pub provider_network_used: bool,
+    pub autonomous_execution: bool,
+}
+
+/// Host broker outside the worker namespaces/cgroup; peer gets sealed stdin and
+/// one connected duplex stdout socket, not credentials or ledger descriptors.
+/// Uses fresh synthetic credentials/host sentinels and fixed code only. The
+/// ledger must have the offline route, one call and a sufficient positive bound.
+#[cfg(target_os = "linux")]
+pub fn run_broker_fixture(snapshot: &crate::worker_io::ProjectSnapshot, delegated_root: &Path,
+                          ledger_root: &Path, mode: BrokerMode, limits: &Limits, cancelled: &AtomicBool,
+                          progress: &BrokerProgress) -> Result<BrokerWorkerReport, String> {
+    linux::brokered::run(snapshot, delegated_root, ledger_root, mode, limits, cancelled, progress)
+}

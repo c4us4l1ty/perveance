@@ -427,6 +427,25 @@ separation, real route/harness/token/pricing verification and independent review
 remain open. Do not put credentials in chat, artwork, requests, env or arguments.
 **Generated-code autonomy stays disabled.**
 
+### Confined offline broker-worker diagnostic
+
+`verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+PRIVATE_ONE_CALL_LEDGER_ROOT` now connects the fixed namespace/cgroup peer to
+the host broker. Initialize a healthy one-call offline ledger with
+`broker-ledger-init /absolute/ledger 1 10 10`; the delegated backend must already
+be provisioned. The peer gets sealed project stdin, one connected duplex stdout
+socket and bounded stderr, not keys or ledger/source mounts. Five fixed exchanges
+test denial of overrides, deduplication, conflicts and exhausted budgets.
+
+Trusted admission checks cancellation, monotonic scope expiry and peer liveness
+before reserve, after sync before dispatch and before text. Interrupted or
+uncertain calls keep the full reservation; recovery never resets accounting.
+The fixed probe uses fresh synthetic host credentials/sentinels/listeners only;
+its private temporary fixture directory can remain after SIGKILL. See
+[BROKER_WORKER.md](Plan/BROKER_WORKER.md) for retention and proof limits. No real
+provider, generated code, production broker approval or task/GUI wiring is added.
+Autonomy remains disabled.
+
 ### Isolation feasibility diagnostic
 
 The optional bubblewrap diagnostic creates its own temporary sentinel, two workspaces, local TCP listener and Unix socket, and runs only fixed test code. The first workspace contains a fixed input file and no host socket; it checks workspace access, synthetic host sentinel access (including through a symlink and `/proc` root links), the host socket's original path, host IPv4 loopback and removal of a synthetic environment variable. It then runs a negative control with a deliberately exposed host Unix socket in the second workspace and expects the worker to reach it. The clean socket check demonstrates that the fixture omitted the socket, **not** that bubblewrap blocks sockets in arbitrary workspaces. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled. The probe does not copy real project inputs or validate the Rust staging implementation. A separate opt-in fixed-worker integration test exercises an actual staged synthetic project on the selected CI runner; it is not a production worker launcher.

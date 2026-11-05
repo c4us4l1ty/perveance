@@ -93,6 +93,11 @@ production-sandbox certification, and do not authorize generated-code execution.
   the seven fixed-worker tests also passed regression
   ([run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)).
   Offline fixtures are not paid-provider or protected broker-isolation proof.
+- [x] Connect the host offline broker to a confined fixed-code peer through
+  sealed stdin/duplex stdout only, with leased admission and no secret/ledger
+  mounts. See [BROKER_WORKER.md](BROKER_WORKER.md); no real provider is enabled.
+- [ ] Validate the four new broker/kernel cases (eleven total), revocation tests
+  and CLI integration; existing seven-test evidence predates this connection.
 - [ ] Complete protected broker/worker role separation, actual task integration,
   response recovery and verified provider billing/token/deadline controls. No
   keys in worker files/env/args; do not treat a declared bound as billing proof.

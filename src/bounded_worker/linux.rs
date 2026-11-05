@@ -13,6 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) mod brokered;
+
 const PREFIX: &str = "perveance-worker-";
 const CONTROL_LIMIT: u64 = 4096;
 const OUTPUT_LIMIT: u64 = 4096;
@@ -378,7 +380,8 @@ impl Drop for WorkerChild<'_, '_> {
     }
 }
 
-fn command(snapshot: &ProjectSnapshot, limits: &Limits, mode: Mode, stdout: &File, stderr: &File) -> Result<Command, String> {
+fn command(snapshot: &ProjectSnapshot, limits: &Limits, mode: Mode, stdout: &File, stderr: &File,
+           broker: Option<&mut brokered::Channel<'_>>) -> Result<Command, String> {
     let mut command = Command::new("/usr/bin/bwrap");
     command.args(["--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup",
         "--disable-userns", "--new-session", "--die-with-parent", "--cap-drop", "ALL", "--clearenv", "--setenv", "PATH", "/usr/bin:/bin"]);
@@ -394,10 +397,12 @@ fn command(snapshot: &ProjectSnapshot, limits: &Limits, mode: Mode, stdout: &Fil
     }
     command.args(["--symlink", "/proc/self/fd", "/dev/fd", "--size", &(limits.scratch_mib * 1024 * 1024).to_string(), "--tmpfs", "/work",
         "--symlink", "/work", "/tmp", "--symlink", "/work", "/dev/shm", "--dir", "/input",
-        "--remount-ro", "/", "--chdir", "/work", "/usr/bin/python3", "-I", "-c", DIAGNOSTIC, mode.argument()])
+        "--remount-ro", "/", "--chdir", "/work", "/usr/bin/python3", "-I", "-c"])
         .env_clear().stdin(Stdio::from(snapshot.stdin_file()?))
         .stdout(Stdio::from(stdout.try_clone().map_err(|_| fail("cannot duplicate diagnostic output"))?))
         .stderr(Stdio::from(stderr.try_clone().map_err(|_| fail("cannot duplicate diagnostic output"))?));
+    if let Some(channel) = broker { channel.configure(&mut command)?; }
+    else { command.args([DIAGNOSTIC, mode.argument()]); }
     Ok(command)
 }
 
@@ -449,6 +454,11 @@ pub(super) fn run(project: &Project, trusted_parent: &Path, delegated_root: &Pat
 
 pub(super) fn run_snapshot(snapshot: &ProjectSnapshot, delegated_root: &Path, mode: Mode,
                           limits: &Limits, cancelled: &AtomicBool) -> Result<Report, String> {
+    run_inner(snapshot, delegated_root, mode, limits, cancelled, None)
+}
+
+fn run_inner(snapshot: &ProjectSnapshot, delegated_root: &Path, mode: Mode,
+             limits: &Limits, cancelled: &AtomicBool, mut broker: Option<brokered::Channel<'_>>) -> Result<Report, String> {
     limits.validate()?;
     if cancelled.load(Ordering::SeqCst) { return Ok(Report::cancelled(limits)); }
     let project = snapshot.project();
@@ -458,12 +468,16 @@ pub(super) fn run_snapshot(snapshot: &ProjectSnapshot, delegated_root: &Path, mo
     let group = Group::create(&root, limits)?;
     let result = (|| -> Result<Outcome, String> {
         let mut stdout = anonymous_file()?;
-        let stderr = anonymous_file()?;
+        let mut stderr = anonymous_file()?;
         let mut watchdog = Watchdog::start(&group, limits)?;
         let join = open_at(&group.directory, "cgroup.procs", libc::O_WRONLY)?;
-        let mut command = command(snapshot, limits, mode, &stdout, &stderr)?;
+        let mut command = command(snapshot, limits, mode, &stdout, &stderr, broker.as_mut())?;
         hygiene(&mut command, Some(join.as_raw_fd()), None);
         let child = command.spawn().map_err(|_| fail("cannot attach/start fixed diagnostic; no unconfined fallback"))?;
+        // Command can retain its Stdio source handles. The host MUST relinquish
+        // the worker socket end so peer EOF really revokes the broker lease.
+        drop(command);
+        if let Some(channel) = &broker { channel.ready.store(true, Ordering::SeqCst); }
         let mut guard = WorkerChild { child, group: &group, reaped: false };
         let mut forced = None;
         let status = loop {
@@ -477,13 +491,17 @@ pub(super) fn run_snapshot(snapshot: &ProjectSnapshot, delegated_root: &Path, mo
                     else if usage.process_limit_hits > 0 { forced = Some(Outcome::ProcessLimit); }
                 }
             }
-            if forced.is_some() { group.kill()?; }
+            if forced.is_some() {
+                if let Some(channel) = &broker { channel.revoked.store(true, Ordering::SeqCst); }
+                group.kill()?;
+            }
             if let Some(status) = guard.child.try_wait().map_err(|_| fail("cannot wait for fixed diagnostic"))? {
                 guard.reaped = true;
                 break status;
             }
             thread::sleep(Duration::from_millis(10));
         };
+        if let Some(channel) = &broker { channel.revoked.store(true, Ordering::SeqCst); }
         let final_reason = watchdog.finish()?;
         group.empty()?;
         let usage = group.usage()?;
@@ -492,7 +510,8 @@ pub(super) fn run_snapshot(snapshot: &ProjectSnapshot, delegated_root: &Path, mo
         if usage.process_limit_hits > 0 { return Ok(Outcome::ProcessLimit); }
         if output_large(&stdout, &stderr)? { return Ok(Outcome::OutputLimit); }
         if !status.success() { return Ok(Outcome::Failed); }
-        verify_output(&mut stdout, project, mode, limits)
+        if broker.is_some() { brokered::verify(&mut stderr, project) }
+        else { verify_output(&mut stdout, project, mode, limits) }
     })();
     // No filesystem staging exists. A failed cgroup cleanup must still prevent
     // a completed-work report; sealed input/log descriptors close on unwind.
