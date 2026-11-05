@@ -131,6 +131,20 @@ impl CapturedCandidate {
         if !self.audit_static().static_profile_passed {return Err(crate::extension_protocol::Error::StaticProfileRequired);}
         crate::extension_protocol::PreparedCall::prepare(&self.manifest, &self.manifest_bytes, document, intent, scope)
     }
+    /// Experimental in-process interpreter diagnostic for one prepared call.
+    /// It is not verification, mutation, installation, activation or publication.
+    pub fn invoke(&self, document: &crate::document::Document, intent: &crate::extension_protocol::Intent)
+        -> Result<crate::capability_runtime::RuntimeReport, crate::extension_protocol::Error> {
+        self.invoke_in_scope(document, intent, "00000000000000000000000000000000")
+    }
+    pub(crate) fn invoke_in_scope(&self, document: &crate::document::Document,
+        intent: &crate::extension_protocol::Intent, scope: &str)
+        -> Result<crate::capability_runtime::RuntimeReport, crate::extension_protocol::Error> {
+        if !self.audit_static().static_profile_passed { return Err(crate::extension_protocol::Error::StaticProfileRequired); }
+        let call = crate::extension_protocol::PreparedCall::prepare(
+            &self.manifest, &self.manifest_bytes, document, intent, scope)?;
+        Ok(crate::capability_runtime::invoke(&self.manifest, &self.artifact, &call))
+    }
     #[cfg(target_os = "linux")]
     pub fn capture(root: &crate::worker_io::PrivateDirectory, manifest_name: &str, artifact_name: &str) -> Result<Self, String> {
         let manifest = root.read_private(manifest_name, MAX_MANIFEST_BYTES)?;
@@ -169,6 +183,11 @@ pub struct ModuleAudit {
 pub struct ProtocolInspection {
     pub registry_scope: String, pub slot: String, pub storage_integrity_checked: bool,
     pub call: crate::extension_protocol::CallReport, pub reply: Option<crate::extension_protocol::ReplyReport>,
+}
+#[derive(Debug, Serialize)]
+pub struct RuntimeInspection {
+    pub registry_scope: String, pub slot: String, pub storage_integrity_checked: bool,
+    pub report: crate::capability_runtime::RuntimeReport,
 }
 #[derive(Debug, Serialize)]
 pub struct DocumentBinding {

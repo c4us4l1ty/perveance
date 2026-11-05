@@ -1,8 +1,10 @@
 //! Small, deliberately limited pixel-art prototype shared by the GUI and CLI.
-//! It does not execute AI-generated code or implement a sandbox.
+//! It executes quarantined candidate modules only through a bounded, metered
+//! interpreter diagnostic; it does not implement an OS sandbox or activation.
 
 pub mod bounded_worker;
 pub mod broker;
+pub mod capability_runtime;
 pub mod document;
 pub mod extension_protocol;
 pub mod fixed_worker;

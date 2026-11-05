@@ -153,6 +153,15 @@ impl Registry {
         Ok(ProtocolInspection { registry_scope:self.header.scope.clone(),slot:slot.into(),storage_integrity_checked:true,
             call:call.report(),reply:reply.map(|bytes|call.inspect_reply(bytes)) })
     }
+    /// Experimental metered interpreter diagnostic on exact frozen bytes. It
+    /// never mutates storage, activates, renders or publishes candidate output.
+    pub fn invoke_capability(&self, slot: &str, document: &Document, intent: &crate::extension_protocol::Intent)
+        -> Result<RuntimeInspection, String> {
+        let candidate = self.selected_candidate(slot)?;
+        let report = candidate.invoke_in_scope(document, intent, &self.header.scope).map_err(|error| error.to_string())?;
+        Ok(RuntimeInspection { registry_scope: self.header.scope.clone(), slot: slot.into(),
+            storage_integrity_checked: true, report })
+    }
     pub fn quarantine(&mut self, candidate: &CapturedCandidate) -> Result<Quarantine, String> {
         let mut inventory = self.inventory()?;
         if inventory.interrupted!=0 { return Err(fail("interrupted private stages block admission; retain data for operator review, never auto-clean or replay")); }
