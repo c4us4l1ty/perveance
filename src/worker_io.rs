@@ -27,6 +27,17 @@ pub struct FilePublication {
     pub autonomous_execution: bool,
 }
 
+/// One atomically committed directory of fixed host-selected private files.
+/// This is storage integrity/publication metadata, never execution authority.
+#[derive(Debug, Serialize)]
+pub struct DirectoryPublication {
+    pub directory: String,
+    pub artifacts: Vec<Artifact>,
+    pub committed: bool,
+    pub parent_directory_synced: bool,
+    pub autonomous_execution: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Publication {
     pub bundle: String,

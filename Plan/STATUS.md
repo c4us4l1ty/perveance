@@ -260,3 +260,18 @@
   provider or autonomy is enabled. PR25 is stacked on still-open PR24; main is
   unchanged. See [DOCUMENT.md](DOCUMENT.md); original build-and-reuse acceptance
   remains open.
+
+
+- On the next continuation, reconciled restored saved files with PR25's exact
+  verified `a0b0e0f` tree before modifying code (no content discarded or branch
+  switch). Continued on `arena/019f4bdd-perveance`; PR24 and PR25 remain open.
+  Added a quarantine-only registry foundation: strict bounded manifest/export/
+  operation/runtime/provenance declarations; captured SHA-256/length/wasm-header
+  binding; one immutable ID/version slot; exact duplicate/conflict handling;
+  private locked 32-entry/32-MiB store; atomic three-member publication; header/
+  receipt/scope/corruption checks and retained interrupted stages. Exact document
+  reference diagnostics cannot make content available or renderable. Fourteen
+  registry and three publisher/enumeration Rust tests plus debug/downloaded-CLI
+  lifecycle coverage are implemented; **new Rust/real-CLI CI pending**. No
+  independent behavior/provenance verification, install, runtime, activation,
+  provider or autonomy is enabled. See [REGISTRY.md](REGISTRY.md).

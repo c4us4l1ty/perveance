@@ -163,3 +163,18 @@ UNAVAILABLE-data preservation/refusal fixture; it is not a vector plugin. GUI,
 bridge, provider and both job formats remain v1-only and reject v2. No registry,
 extension execution or autonomy is supplied. See Plan/DOCUMENT.md in the source
 repository for schema/limits and verification status.
+
+
+Quarantine registry (storage only, not a plugin installation)
+------------------------------------------------------------
+registry-init/inspect/quarantine/resolve-document use private Linux descriptor
+roots. Run an operation without arguments for exact usage. Entries have strict
+bounded declarations and captured artifact hashes under immutable ID/version
+slots. A wasm header/hash match is NOT a section/import/export/ABI/behavior or
+provenance test. Every entry stays unverified, uninstalled, inactive, unavailable;
+no verify/install/activate/run command exists. Document export still refuses any
+capability layer. Interrupted stages block admission and require retained-data
+operator review, never automatic reset/sweep. Parent-sync=false means an already
+visible package with uncertain crash durability. See Plan/REGISTRY.md in the
+source repository for limits, failure behavior and verification status. No code,
+provider or autonomy is enabled by quarantine storage.

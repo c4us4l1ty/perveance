@@ -172,3 +172,26 @@ vector feature. At `8593268`, all-target Rust plus real debug/downloaded-CLI
 lifecycle and native/bridge/recovery regressions passed
 ([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/42030894898));
 see DOCUMENT.md for kernel evidence and explicit remaining gates.
+
+
+## Immutable quarantine registry (no installed/runtime capability)
+
+Linux commands:
+
+```text
+registry-init PRIVATE_EMPTY_ROOT
+registry-inspect PRIVATE_ROOT
+registry-quarantine PRIVATE_REGISTRY_ROOT PRIVATE_INPUT_ROOT RELATIVE_MANIFEST RELATIVE_ARTIFACT
+registry-resolve-document PRIVATE_REGISTRY_ROOT PRIVATE_DOCUMENT_ROOT RELATIVE_DOCUMENT
+```
+
+These use caller-authorized private FD roots, strict bounded declarations and
+actual captured byte hashes. Duplicate identical packages are revalidated, not
+rewritten; changed pins/manifests cannot rebind an ID/version. Exact-reference
+states distinguish missing, pin mismatch, incompatible document version and
+quarantined/no-runtime. Every result remains unavailable: there is no verify,
+install, activate or run operation. `ok` is command completion, not trust or
+availability. Check interrupted-stage and publication-sync flags; retain uncertain
+data, never auto-reset/repair/sweep. Runtime requests and candidate provenance
+are unverified declarations. Document render/edit behavior is unchanged. See
+[REGISTRY.md](REGISTRY.md); new Rust/debug/downloaded-CLI CI is pending.

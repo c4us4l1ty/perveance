@@ -8,6 +8,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 - An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
 - A Linux-only persistent job backend for revision-bound raster proposals: private snapshots, status, cooperative cancellation, verified project/PNG outputs and explicit interrupted-run recovery. It is not wired to the GUI/provider and does not run generated code.
 - An offline [data-only v2 document foundation](Plan/DOCUMENT.md): stable layer/object IDs, bounded byte-preserving unavailable-capability payloads, revision-bound native edits and explicit export refusal instead of missing content. This is CLI/library-only, not working plugins or a vector capability.
+- A new [quarantine-only capability registry](Plan/REGISTRY.md): immutable version/pin bindings, private captured artifact storage and exact document-reference diagnostics. Stored bytes remain unverified, unavailable and non-executable; this does not install a plugin.
 - A headless CLI backed by the shared Rust raster engine. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -70,6 +71,21 @@ Python bridge, prompt adapter and both job backends remain **v1-only** and rejec
 v2. The bundled `opaque-document-v2.json` is a preservation/refusal fixture, not
 an installed plugin. Registry, verified extension editing/rendering, activation
 and the original missing-vector build/reuse acceptance remain unimplemented.
+
+### Quarantine-only capability storage
+
+The separate Linux `registry-init`, `registry-inspect`, `registry-quarantine` and
+`registry-resolve-document` commands store bounded captured wasm-envelope bytes
+under immutable ID/version slots. Exact manifest/artifact duplicates are
+revalidated without rewriting; conflicting version pins are refused. Private
+storage is locked and quota-bounded, with atomic no-overwrite package publication
+and explicit interrupted-stage retention. See [contract and limits](Plan/REGISTRY.md).
+
+This is **not verification, installation or execution**: hashes/header checks do
+not validate wasm behavior, imports, exports, payload semantics or provenance.
+All entries remain unavailable; document export still refuses capability layers.
+There is no activation/run command, real provider call or autonomy. New registry
+Rust/real-binary CI is pending; the prior v2 document foundation remains verified.
 
 ### Headless batch editing
 

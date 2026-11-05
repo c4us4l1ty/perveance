@@ -159,3 +159,22 @@ passed ([42030894898](https://github.com/c4us4l1ty/perveance/actions/runs/420308
 including injected failures/concurrency/held-root cases. All fourteen mandatory
 worker kernel cases separately passed ([42030894888](https://github.com/c4us4l1ty/perveance/actions/runs/42030894888));
 this is not production certification or generated-code authority.
+
+
+## Fixed-member quarantine publication and bounded enumeration
+
+The [quarantine registry](REGISTRY.md) adds a crate-private bounded fixed-member
+publication helper: up to eight host-selected basenames, bounded total bytes,
+0600 members in a random 0700 stage, member/directory sync, stage identity check,
+atomic no-replace directory rename and parent sync receipt. The existing raster
+bundle still selects exactly its project/PNG members; it does not accept a
+candidate's arbitrary filenames or gain a module runner. Normal failure cleanup
+is confined to the held stage's fixed names; replacement host data is retained.
+
+Directory inventory uses a fresh open-file description of the held directory,
+fixed-size getdents64 buffers and a strict entry-count bound. It follows/activates
+no child entries, checks directory modification metadata and does not share seek
+offsets across repeated/concurrent callers. Callers validate each listed member
+by the existing descriptor API. New tests cover failure boundaries, uncertain
+commit, directory swaps, actual held-root rename and concurrent enumeration.
+New Rust/real-CLI verification pending; no worker receives a registry FD.

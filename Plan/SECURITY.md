@@ -236,3 +236,26 @@ all fourteen mandatory delegated kernel cases passed with host policy unchanged
 The ordinary optional namespace probe remains unavailable. Independent capability
 verification, confined extension validation/edit/render, protected registry
 activation, migrations and the genuine vector experiment remain open.
+
+
+## Quarantine-only capability storage continuation
+
+[REGISTRY.md](REGISTRY.md) adds bounded host-owned immutable storage, not
+activation authority. Manifests request no host permissions/commands/dependencies
+and cannot provide self-verification fields. Captured artifact size/digest and
+wasm-v1 envelope are checked; sections/imports/exports/ABI/behavior/payload schemas
+and candidate provenance are NOT verified. Runtime declarations are bounded data,
+not enforced quotas. Every entry is unverified/uninstalled/inactive/unavailable.
+A host capture receipt is purpose-tagged quarantine storage, never an approval.
+
+Storage uses private held directory FDs, fixed host-selected members, a lifetime
+exclusive flock, immutable ID/version bindings and compiled storage caps. New
+fixed-member directory publication syncs members/stage, checks directory identity,
+commits atomic no-replace and honestly reports parent-sync uncertainty. Orphan
+stages block new admission and are retained, not replayed/deleted or accepted as
+packages. Any corrupt/mismatched record blocks operations rather than falling
+back. Exact diagnostics never dispatch code or change document rendering refusal.
+Same-UID/privileged host tampering, forged/rolled-back storage, filesystem failure,
+whole-host quotas and protected production role separation remain open. New
+Rust/adversarial/actual-binary CI evidence is pending; worker authorization and
+all original self-extension acceptance gates remain closed.

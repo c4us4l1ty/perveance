@@ -9,6 +9,7 @@ pub mod file_browser;
 pub mod provider;
 pub mod recovery;
 pub mod region;
+pub mod registry;
 pub mod supervisor;
 pub mod tasks;
 pub mod workspace;
