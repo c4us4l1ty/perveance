@@ -99,7 +99,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
     match args {
         [command] if command == "capabilities" => Ok(json!({"api_version": 1, "prototype": true, "autonomous_execution": false,
             "autonomy_status": {"state": "disabled", "reason": "No verified supervisor or sandbox is implemented", "diagnostic": "tools/isolation_probe.py", "diagnostic_can_enable_execution": false},
-            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "verify-fixed-worker", "inspect-autonomy-request", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
+            "operations": ["new", "new-from-png", "inspect", "inspect-palette", "verify-project-staging", "verify-fixed-worker", "inspect-autonomy-request", "task-create", "task-inspect", "task-run", "task-cancel", "task-recover", "sample", "read-region", "prompt-openrouter", "paint", "apply", "apply-proposal", "import-png", "export-png", "export-png-scaled"],
             "batch_operations": ["add_layer", "duplicate_layer", "clear_layer", "clear_region", "copy_region", "replace_color", "flip_layer", "translate_layer", "resize_canvas", "set_visibility", "rename_layer", "move_layer", "remove_layer", "pixel", "line", "brush_line", "rectangle", "rectangle_outline", "ellipse", "fill"],
             "limits": {"canvas_dimension": 256, "png_export_scale": perveance::MAX_EXPORT_SCALE, "brush_size": perveance::MAX_BRUSH_SIZE, "layers": 32, "region_pixels": MAX_REGION_PIXELS, "region_edit_pixels": perveance::MAX_DIMENSION * perveance::MAX_DIMENSION, "batch_operations": 1024, "batch_bytes": 262144, "proposal_bytes": perveance::MAX_PROPOSAL_BYTES, "png_bytes": perveance::MAX_PNG_BYTES},
             "batch_examples": {
@@ -125,6 +125,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
                 "fill": {"op": "fill", "layer": 0, "x": 0, "y": 0, "color": [255, 0, 0, 255]}
             },
             "experimental_prompt_openrouter": {"key_input": "stdin only; pipe or redirected input, not a terminal", "prompt_input": "UTF-8 file", "max_prompt_bytes": provider::MAX_PROMPT_BYTES, "visible_composite_opt_in": "--include-composite", "max_composite_pixels": provider::MAX_COMPOSITE_CONTEXT_PIXELS, "model_compatibility": "unverified", "network": "fixed OpenRouter HTTPS endpoint", "cost": "may incur charges; no spend cap", "execution": "data-only typed edits on new layers; no generated code"},
+            "persistent_raster_tasks": {"version": perveance::tasks::TASK_VERSION, "platform": "linux", "kind": "revision-bound typed raster proposal", "states": ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"], "max_events": perveance::tasks::MAX_EVENTS, "storage": "explicit private trusted directory; full project snapshots including hidden data", "cancellation": "cooperative stage boundaries; not a process kill or hard deadline", "autonomous_execution": false, "network_used": false, "resource_quotas_enforced": false},
             "autonomy_intake": {"operation": "inspect-autonomy-request", "version": perveance::supervisor::INTAKE_VERSION, "default_maximum": perveance::supervisor::IntakePolicy::default().maximum, "task_created": false, "budgets_enforced": false, "autonomous_execution": false},
             "fixed_worker_diagnostic": {"operation": "verify-fixed-worker", "platform": "linux", "fixed_code_only": true, "autonomous_execution": false, "security_boundary": false, "resource_enforcement": "experimental output cap and best-effort wall timeout only"},
             "project_staging": {"operation": "verify-project-staging", "platform": "linux", "contents": "one validated project snapshot", "persistent": false, "autonomous_execution": false, "security_boundary": false},
@@ -150,6 +151,22 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.import_png_layer(Path::new(png_path))?;
             project.save_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "layer": project.layers.len() - 1}))
+        }
+        [command, input, proposal, root] if command == "task-create" => {
+            let project = Project::load(Path::new(input)).map_err(|_| "invalid task source project")?;
+            let proposal = EditProposal::load(Path::new(proposal)).map_err(|_| "invalid task source proposal")?;
+            let report = perveance::tasks::create(Path::new(root), &project, &proposal)?;
+            Ok(json!({"ok": true, "task": report}))
+        }
+        [command, root, id] if matches!(command.as_str(), "task-inspect" | "task-run" | "task-cancel" | "task-recover") => {
+            let report = match command.as_str() {
+                "task-inspect" => perveance::tasks::inspect(Path::new(root), id),
+                "task-run" => perveance::tasks::run(Path::new(root), id),
+                "task-cancel" => perveance::tasks::cancel(Path::new(root), id),
+                "task-recover" => perveance::tasks::recover(Path::new(root), id),
+                _ => unreachable!(),
+            }?;
+            Ok(json!({"ok": true, "task": report}))
         }
         [command, input, request] if command == "inspect-autonomy-request" => {
             inspect_autonomy_request(input, request, None)
@@ -249,7 +266,7 @@ fn run(args: &[String]) -> Result<serde_json::Value, String> {
             project.export_png_new(Path::new(output))?;
             Ok(json!({"ok": true, "output": output, "width": project.width, "height": project.height}))
         }
-        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | verify-fixed-worker INPUT TRUSTED_PARENT | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
+        _ => Err("usage: capabilities | new WIDTH HEIGHT OUTPUT | new-from-png PNG OUTPUT | import-png INPUT PNG OUTPUT | inspect INPUT | inspect-palette INPUT | verify-project-staging INPUT TRUSTED_PARENT | verify-fixed-worker INPUT TRUSTED_PARENT | inspect-autonomy-request INPUT REQUEST_JSON [TRUSTED_POLICY_JSON] | task-create PROJECT PROPOSAL_JSON PRIVATE_TASK_ROOT | task-inspect PRIVATE_TASK_ROOT ID | task-run PRIVATE_TASK_ROOT ID | task-cancel PRIVATE_TASK_ROOT ID | task-recover PRIVATE_TASK_ROOT ID | sample INPUT X Y composite | sample INPUT X Y layer LAYER | read-region INPUT X Y WIDTH HEIGHT composite | read-region INPUT X Y WIDTH HEIGHT layer LAYER | prompt-openrouter INPUT OUTPUT MODEL PROMPT_FILE [--include-composite] < KEY_STDIN | paint INPUT OUTPUT LAYER X Y R G B A | apply INPUT OUTPUT OPERATIONS_JSON | apply-proposal INPUT OUTPUT PROPOSAL_JSON | export-png INPUT OUTPUT | export-png-scaled INPUT OUTPUT SCALE".into()),
     }
 }
 

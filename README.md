@@ -1,11 +1,12 @@
 # Perveance
 
-An early Rust prototype for an AI-first art studio. The long-term vision and security model are documented in [Plan/README.md](Plan/README.md); the current usable-editor milestone is in [Plan/PIXEL_MVP.md](Plan/PIXEL_MVP.md).
+An early Rust prototype for an AI-first art studio. The long-term vision and security model are documented in [Plan/README.md](Plan/README.md); the current usable-editor milestone is in [Plan/PIXEL_MVP.md](Plan/PIXEL_MVP.md). See [what remains to complete the product](Plan/COMPLETION.md) for the critical path beyond the pixel editor.
 
 ## Current prototype
 
 - A native Linux desktop window with a pixel canvas, pencil, eraser, fill, line, rectangle, ellipse, composite-eyedropper and rectangular region-editing tools, zoom/grid, layer management, bounded undo/redo, and a limited save/open and PNG export flow.
 - An experimental, opt-in OpenRouter prompt-to-pixels adapter in the GUI and CLI, restricted to creating and painting new raster layers. Live provider/model compatibility has not yet been verified.
+- A Linux-only persistent job backend for revision-bound raster proposals: private snapshots, status, cooperative cancellation, verified project/PNG outputs and explicit interrupted-run recovery. It is not wired to the GUI/provider and does not run generated code.
 - A headless CLI backed by the same simple project model. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -68,6 +69,34 @@ The prototype CLI can apply a JSON array of up to 1,024 typed operations in one 
 ```
 
 Layer duplicates are inserted immediately above their source and retain its visibility and exact pixel bytes. `flip_layer` mirrors a full layer across the canvas (`"axis":"horizontal"` or `"axis":"vertical"`); `clear_layer` resets all its pixels to transparent black. These edits are undoable in the GUI. Layer indices can change after a duplicate or reorder, so later batch operations use the resulting ordering.
+
+### Persistent raster-proposal tasks (Linux)
+
+The Rust CLI can snapshot an existing project plus a valid version-1 [edit proposal](#revision-checked-agent-handoff) into a private local job, then run only the existing compiled raster operations. No model, network, shell, plugin or generated code is invoked. This is a task-lifecycle foundation, **not** autonomous capability development, a sandbox or a replacement for the separate always-blocked autonomy intake inspection.
+
+```sh
+# Use a dedicated existing directory, owned by you and accessible only to you.
+mkdir -m 700 raster-tasks
+perveance-cli task-create project.json proposal.json raster-tasks
+# Copy task.id from the JSON response in place of TASK_ID below.
+perveance-cli task-inspect raster-tasks TASK_ID
+perveance-cli task-run raster-tasks TASK_ID
+perveance-cli task-inspect raster-tasks TASK_ID
+# For a queued or running task:
+perveance-cli task-cancel raster-tasks TASK_ID
+# After an interrupted runner, and only when its cooperative lock is free:
+perveance-cli task-recover raster-tasks TASK_ID
+```
+
+Submission validates the proposal's revision, preflights the edits in memory and saves private copies of the full project and proposal. It starts no background worker and writes no result artwork. Later changes to the original files or unsaved GUI artwork are not detected: a job operates only on its captured snapshot and never updates those originals. The independent Python bridge does not implement task commands.
+
+Each generated task ID names a private subdirectory with immutable input/manifest files and at most **three** small, versioned state events. The normal states are `queued → running → succeeded` or `failed` / `cancelled`. An exclusive advisory Linux file lock serializes cooperating runners. Queued cancellation is terminal; active cancellation writes a durable request and is checked between model/apply and file-output stages. It is **not a process kill**, does not interrupt a synchronous raster operation/write, and has no hard deadline. A late request can lose to completion; check the returned state, not just `cancel_requested`.
+
+A `running` record does not prove a worker is still alive. `task-recover` first obtains the same exclusive lock, then marks an abandoned running job `interrupted`; it refuses an active locked runner. It **never replays** the proposal or publishes partial output. Failed, cancelled and interrupted jobs cannot be rerun; submit a new job instead. Repeating `task-run` on an already successful job only re-verifies and returns its existing result. Malformed, gapped, oversized or incompatible journals are rejected rather than silently repaired.
+
+Success exposes `output.perveance.json` and `output.png` inside the task directory. Completion verifies the expected project revision, SHA-256/size of both files, and exact PNG/composite pixel agreement. Inspecting a successful job rechecks the artifacts; later corruption is an error, not a reason to overwrite them. `ok: true` means a command succeeded; artwork is ready only when `task.state` is `succeeded` and `artifacts_verified` is true. Output files are create-new. A failure after the first write may leave unpublished files, which are retained for inspection.
+
+**Storage and trust:** jobs retain entire snapshots, including hidden pixels, transparent RGB and layer names, until you manually remove them. Reports omit that raw content. Individual metadata files are limited to 4 KiB; projects retain Rust's 40 MiB/256×256/32-layer limit and proposals its 256 KiB/1,024-operation limit. There is **no global retention limit or total storage/CPU/memory/process quota**. Keep backups and manage disk use. Source input paths and directory ancestors must be trusted: normal initial project/proposal loading follows symlinks and may block on special files. Within the task directory, consumed files must be private, owned regular files with one link; final-component symlinks and special files are rejected. This is not race-resistant path brokerage, authentication against a malicious same-user process, or a security boundary for generated code. It requires a filesystem supporting the staged no-clobber writes, advisory locks and directory syncing. Files and directories are synced in order, but crash/power-loss durability is not guaranteed. The task format is experimental, with no automatic migration. GUI/provider integration and the secure autonomous worker pipeline remain future work.
 
 ### Tool shortcuts
 

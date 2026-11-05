@@ -7,6 +7,7 @@ pub mod provider;
 pub mod recovery;
 pub mod region;
 pub mod supervisor;
+pub mod tasks;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};

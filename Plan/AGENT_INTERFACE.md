@@ -60,3 +60,19 @@ Use revision-bound proposals when editing a known snapshot; the existing
 create-new and file-locking limitations still apply. The GUI's selection and
 internal copy buffer are session-local and are not exposed to headless agents.
 The OpenRouter adapter does not permit these new operations.
+
+## Persistent data-only raster jobs
+
+The Linux Rust CLI adds `task-create PROJECT PROPOSAL PRIVATE_ROOT`, then
+`task-inspect`, `task-run`, `task-cancel` and `task-recover` with `PRIVATE_ROOT ID`.
+Creation captures a full validated project/proposal snapshot; no later disk or
+GUI changes are observed. Jobs run only existing typed raster edits and deliver
+new editable project/PNG files after verification. Three bounded append-only
+events and a cooperative lock track queued/running/terminal states across CLI
+processes. Cancellation is cooperative at stage boundaries, not a worker kill.
+Recovery refuses an active lock and marks an abandoned running job interrupted
+without replaying it or publishing partial outputs. See README for schemas,
+retention, trust and failure semantics. The Python bridge, GUI and provider
+adapter do not yet expose these jobs. The separate autonomy request inspection
+remains blocked; this is not a provider/harness, broker, sandbox, OS quota
+implementation, or permission to execute generated code.
