@@ -134,7 +134,16 @@
   real-kernel tests for quotas, detached descendants, supervisor SIGKILL/SIGSTOP,
   watchdog loss and recovery on a disposable delegated Ubuntu 26.04 service.
   All 41 local Python tests pass, including nine watchdog protocol tests; these
-  use ordinary fixture files and do not prove kernel enforcement. Rust/kernel CI
-  is pending. This is not connected to raster jobs/providers, safe input
+  use ordinary fixture files and do not prove kernel enforcement.
+  [Feasibility run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272)
+  passed all six real-kernel tests at `b7be7f2`, including actual CPU throttling,
+  on kernel 7.0.0-1019-azure / bubblewrap 0.11.1 without relaxing AppArmor. The
+  first run correctly rejected insufficiently private test staging; fixtures
+  were corrected without weakening backend policy.
+  [Rust run 41993520371](https://github.com/c4us4l1ty/perveance/actions/runs/41993520371)
+  passed the complete Rust/native-GUI/bridge/recovery and downloaded-bundle
+  regression suite for that implementation commit. Follow-up documentation-only
+  checks are tracked in [PR #23](https://github.com/c4us4l1ty/perveance/pull/23/checks).
+  This is not connected to raster jobs/providers, safe input
   brokerage, generated execution or activation; autonomy remains disabled.
   See [LINUX_WORKER.md](LINUX_WORKER.md) for concrete limits and open gates.

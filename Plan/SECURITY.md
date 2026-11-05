@@ -88,9 +88,10 @@ tmpfs and whole-cgroup kill. An independent fixed Python watchdog monitors wall
 and aggregate CPU usage and observes supervisor lease EOF; the supervisor fails
 closed on watchdog loss. Detached descendants and interrupted supervision have
 explicit kernel integration tests configured on a delegated Ubuntu 26.04 service.
-Rust compilation and existing Rust/GUI tests passed the first run; the corrected
-private kernel fixtures await CI validation. Local protocol tests
-against ordinary files are not kernel-isolation evidence.
+[Feasibility run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272)
+passed all six real-kernel quota/lifecycle tests at `b7be7f2` without relaxing host
+AppArmor policy. Local protocol tests against ordinary files are not themselves
+kernel-isolation evidence; this fixed-workload pass is not a production gate.
 
 This accepts embedded diagnostics only and cannot open any autonomy gate. It
 retains trusted staging/ancestor/system-tool assumptions, sampled-budget

@@ -119,15 +119,25 @@ they explicitly report `autonomous_execution:false` and
   limits, unknown modes and unsupported roots without staging/launch fallback.
 - Six opt-in Rust integration tests on the delegated CI service require actual
   memory, process, scratch and CPU-budget limits; read back kernel rate/other
-  limits and require actual CPU throttling counters; verify descriptor hygiene/read-only input and project preservation;
+  limits and require actual CPU throttling counters; verify descriptor hygiene,
+  read-only input and project preservation;
   cancel detached descendants; kill/freeze the supervisor; kill the watchdog;
   and recover only owned managed groups. Missing prerequisites fail the selected
   CI job instead of passing/skipping the requirement.
 
-The first CI run compiled the Rust changes and passed existing Rust/GUI tests,
-but the new kernel suite rejected its non-private temporary staging fixtures.
-Fixtures now explicitly request mode 0700; the backend requirement was not
-weakened. **The corrected kernel suite is pending CI validation.** Even a pass does not close trusted race-resistant input/output brokerage,
+[Feasibility run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272)
+passed all six real-kernel tests for commit `b7be7f2` on Ubuntu 26.04, kernel
+`7.0.0-1019-azure`, bubblewrap `0.11.1`, with the host's AppArmor user-namespace
+restriction still enabled. CPU burn required actual throttling counters, not
+just configured values. The first run correctly refused non-private staging
+fixtures; tests were corrected to request mode 0700 without weakening policy.
+[Rust run 41993520371](https://github.com/c4us4l1ty/perveance/actions/runs/41993520371)
+also passed the full Rust suite, native-GUI workflows, bridge/recovery checks and
+downloaded Linux-bundle verification for the same implementation commit.
+Subsequent documentation-only checks are visible in
+[PR #23](https://github.com/c4us4l1ty/perveance/pull/23/checks).
+
+This pass does not close trusted race-resistant input/output brokerage,
 broader malicious-code/syscall/secret/network threats, durable task integration,
 credential brokerage, real harness compatibility, independent verification,
 activation/rollback or production security review. Arbitrary code stays disabled.
