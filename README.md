@@ -103,6 +103,22 @@ cases also passed ([matrix 42060281533](https://github.com/c4us4l1ty/perveance/a
 No local Rust execution, portable host approval or original capability-growth
 acceptance is claimed.
 
+`registry-inspect-protocol PRIVATE_REGISTRY_ROOT EXACT_SLOT PRIVATE_DOCUMENT_ROOT
+RELATIVE_DOCUMENT PRIVATE_INTENT_ROOT RELATIVE_INTENT [PRIVATE_REPLY_ROOT
+RELATIVE_REPLY]` adds a read-only **data-only wire diagnostic** on the same frozen
+slot. It builds a strict bounded request scoped to the selected layer and inspects
+only a supplied hypothetical reply: edit replies stay an in-memory proposal and
+render replies are only checked for exact canvas/RGBA shape and hashed. No WASM is
+instantiated/called, no payload/behavior is verified, no document or registry byte
+changes, and no PNG/activation/provider/autonomy is enabled. Request hashes and
+scopes are not authentication or replay protection. Exact source `b1febc0` passed
+all-target Rust (21 new cases), real debug/downloaded-release lifecycles
+([42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375)) and
+the mandatory twelve + two kernel cases
+([42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)).
+See [EXTENSION_PROTOCOL.md](Plan/EXTENSION_PROTOCOL.md) for the wire layout and
+remaining verification/runtime gaps; original creative build/reuse remains open.
+
 ### Headless batch editing
 
 The prototype CLI can apply a JSON array of up to 1,024 typed operations in one all-or-nothing in-memory transaction. Pass it as `perveance-cli apply INPUT OUTPUT OPERATIONS_JSON`; `OUTPUT` must not exist. Supported operations are `add_layer`, `duplicate_layer`, `clear_layer`, `clear_region`, `copy_region`, `replace_color`, `flip_layer`, `translate_layer`, `resize_canvas`, `set_visibility`, `rename_layer`, `move_layer`, `remove_layer`, `pixel`, `line` (inclusive integer endpoints), `brush_line`, `rectangle` (filled; width and height), `rectangle_outline`, `ellipse` (filled or outlined) and `fill` (four-connected, on the selected layer). Layers are numbered from zero, bottom to top. For example:

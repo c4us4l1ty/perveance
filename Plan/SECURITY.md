@@ -22,6 +22,34 @@ Default worker egress is denied. A separately controlled provider broker permits
 
 Windows/macOS sandbox implementations need their own threat analysis and adversarial tests. Do not claim Linux guarantees transfer automatically. Preview, headless, CI and packaged-app environments each require verification. Running Perveance inside another sandbox, such as Arena, does not prove nested isolation is available.
 
+## Data-only extension wire diagnostics
+
+The version-1 extension frame is a **prospective host-side contract**, not a
+runtime boundary. Preparing one requires the static profile to pass and binds the
+exact frozen manifest/artifact pin, captured document revision/canvas and the
+selected capability layer's ordered opaque object bytes. Other layers' pixels,
+names and paths are excluded, but selecting a layer intentionally shares its
+opaque data; this is not DLP, permission to contact a provider, or protection
+against a provider retaining input. Intent/request/reply lengths, counts, reserved
+bytes, tags and end-of-frame are strictly bounded; unknown fields/statuses and
+duplicate targets are refused. Edit replies only produce a private in-memory
+projection and are never committed; render replies are only shape/length/hash
+checked and never displayed, composited or published. The bundled CLI reveals
+digests/counts rather than request/reply/opaque bytes, yet the library deliberately
+returns private request bytes for future host use.
+
+Every execution/behavior/provenance/install/activation/availability gate remains
+false. Request SHA-256 and registry context scope prevent accidental
+cross-association only; they are **not** MACs, signatures, authentication, nonce/
+freshness, replay protection or protected role separation. A same-UID or
+privileged process can forge or roll back registry files, intents and replies.
+Packed pointer/length helpers validate caller-supplied memory slices and declared
+limits; they do not own stable WASM memory, meter fuel/CPU/wall or implement a
+sandbox. No module is instantiated or called, and there is no deallocation/reuse,
+permit token, provider route or autonomy. Confinement, independent semantic/
+behavioral/provenance verification, trusted activation state, durable replay/
+cancellation semantics and genuine capability growth remain unimplemented.
+
 ## Activation, provenance and recovery
 
 - Validate manifest, ABI/API, integrity, dependency policy and required platform; run supervisor-owned baseline and candidate-specific tests. Schema migrations have pre/post fixtures and backup/restore checks.

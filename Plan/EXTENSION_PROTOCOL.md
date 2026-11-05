@@ -1,6 +1,6 @@
 # Data-only extension call/reply protocol — no execution or activation
 
-**2026-11-05 — implementation increment; exact-head execution CI pending.**
+**2026-11-05 — verified at exact source `b1febc0`; see evidence below.**
 This continues the [static WASM signature diagnostic](MODULE_AUDIT.md) with a
 concrete version-1 byte contract and host-side **hypothetical reply** inspection.
 No module is instantiated/called, no opaque document is edited, and no candidate
@@ -225,17 +225,37 @@ permitted-call token, migration, automatic replay, provider or autonomy route.
 
 ## Verification and remaining gates
 
-New portable/Linux Rust cases cover all kinds, canonical/digest/context binding,
-opaque scoping, intent/pin/schema/ID preconditions, truncation/mutation/length/
-flag/status/count attacks, transactional projection/global caps, exact RGBA shape,
-packed-memory boundaries, redaction, read-only registry selection and orphan
-refusal. Real debug and uploaded-then-downloaded release executables must pass
-`tools/test_extension_protocol_lifecycle.py` with **hand-authored** reply fixtures.
-Fixtures are not executed module behavior or original vector acceptance.
+Twenty-one new Rust cases (twenty portable, one Linux-only isolated registry case)
+cover all kinds, canonical/digest/context binding, opaque scoping, intent/pin/
+schema/ID preconditions, truncation/mutation/length/flag/status/count attacks,
+transactional projection/global frame caps, exact RGBA shape, packed-memory
+boundaries, redaction, readonly registry selection and interrupted-store refusal.
+The existing document, registry and static-audit cases also continue to pass;
+the locked all-target step still fails on any single case failure.
 
-Exact-head execution CI is pending; no local Rust toolchain is available. Local
-50 Python tests (1.789s), Python compile/shell syntax/diff checks passed. Existing
-static-inspector/source evidence does not cover this new protocol increment.
+The real debug and uploaded-then-downloaded release executables also run
+`tools/test_extension_protocol_lifecycle.py`, which quarantines the hand-built
+stub, binds the selected layer, and inspects **hand-authored** reply fixtures for
+all three kinds plus stale revision, unknown intent field, scope/format attacks,
+wrong kind/digest/status, malformed and truncated frames, precondition/duplicate
+target/limit failures, exact-canvas RGBA, repeated inspection, source changes,
+and interrupted stages. Those fixtures are not executed module behavior, useful
+edits, semantic rendering or original vector acceptance.
+
+Exact source `b1febc0` passed:
+[Rust CI 42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375),
+job `127386732699` succeeded in **6m12s**: locked `--all-targets` tests including
+these 21 new cases, the new real debug and downloaded-release protocol lifecycle,
+and all existing document/registry/static/native/package/downloaded regressions.
+[Matrix 42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)
+passed all three jobs; delegated26 job `127386702285` passed exact **twelve + two**
+kernel cases, with kernel `7.0.0-1019-azure`, bwrap `0.11.1` and AppArmor
+restriction `1` unchanged; the ordinary optional namespace probe remained
+unavailable. Two earlier commits `a0bb48a`/`a99dacb` exposed a binary-private read
+and a serde test typing error; both were fixed without relaxing `--locked` or any
+authority gate. There is no local Rust toolchain; local 50 Python tests,
+compile/shell/diff checks and fixture encoding checks passed. This evidence does
+not extend to any future runtime, semantic or activation work.
 
 Still required: confined engine/worker integration under protected production
 roles, independent semantic/behavior/provenance verification, authenticated

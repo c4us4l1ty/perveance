@@ -126,6 +126,16 @@ production-sandbox certification, and do not authorize generated-code execution.
   contract before attempting the vector experiment. V2 does not yet execute or
   semantically validate any capability. Do not preinstall vectors and call
   their use self-extension.
+- [x] Verify the [data-only wire diagnostic](EXTENSION_PROTOCOL.md): strict
+  intent/frame encoding, exact frozen pin and captured-revision binding, scoped
+  opaque object projection, transactional edit proposals, exact-canvas RGBA shape,
+  packed-memory boundary checks, and all-false authority gates. Exact source
+  `b1febc0` passed all-target/21 new cases, real debug and downloaded-release
+  lifecycles ([42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375))
+  and mandatory twelve + two kernel cases ([42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)).
+  This closes framing/host-inspection diagnostics only: no module was called, no
+  payload/schema was semantically verified, and no edit/render/install/activation
+  occurred. The unchecked generic contract below remains fully open.
 - [x] Verify [immutable quarantine storage](REGISTRY.md): bounded manifests and
   captured artifacts, exact ID/version/pin lookup, duplicate/conflict handling,
   private fixed-member atomic publication, storage budgets and interruption

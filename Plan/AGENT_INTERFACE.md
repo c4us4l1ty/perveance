@@ -184,6 +184,7 @@ registry-inspect PRIVATE_ROOT
 registry-quarantine PRIVATE_REGISTRY_ROOT PRIVATE_INPUT_ROOT RELATIVE_MANIFEST RELATIVE_ARTIFACT
 registry-resolve-document PRIVATE_REGISTRY_ROOT PRIVATE_DOCUMENT_ROOT RELATIVE_DOCUMENT
 registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT
+registry-inspect-protocol PRIVATE_REGISTRY_ROOT EXACT_SLOT PRIVATE_DOCUMENT_ROOT RELATIVE_DOCUMENT PRIVATE_INTENT_ROOT RELATIVE_INTENT [PRIVATE_REPLY_ROOT RELATIVE_REPLY]
 ```
 
 These use caller-authorized private FD roots, strict bounded declarations and
@@ -212,3 +213,21 @@ report semantics and host-parser resource limitations. Exact source `3f6639b`
 passed all-target/debug/downloaded/native CI ([42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542));
 all fourteen required kernel cases passed ([42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)).
 No runtime/behavior/provider or portable host approval follows.
+
+`registry-inspect-protocol` is also read-only and nonauthorizing. It requires the
+same complete inventory and exact static-profile-passing frozen slot, then emits a
+redacted call summary (scope, exact pin, captured revision, request digest and
+counts) instead of request bytes. With an optional bounded reply it reports
+`wire_accepted`, a fixed `issue`, the candidate's claimed status and, for edits/
+rendering, only projection counts/layer hash or RGBA shape/hash. `ok:true` can
+therefore contain `wire_accepted:false`; acceptance is framing/scope/shape, not
+semantic verification, a successful operation or execution permission. Stale
+revisions, undeclared operations/schemas, foreign or colliding IDs, oversized
+frames and duplicate edit targets are refused; nothing is persisted or replayed.
+No module is instantiated/called, no document/registry byte changes, and every
+authority/availability gate stays false. Hand-authored fixtures show only host
+parsing. See [EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md). Exact source `b1febc0`
+passed all-target/21 new Rust cases and real debug/downloaded lifecycles
+([42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375)),
+and the mandatory twelve + two kernel cases
+([42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)).

@@ -308,3 +308,33 @@
   independent behavior/provenance verification or portable host approval.
   Protected behavioral verification, runtime/wire ABI and original creative
   build/reuse remain open. PR24/25 are still open and main is unchanged.
+
+- Continued with the bounded **data-only extension call/reply diagnostic** on the
+  same fixed branch (PR24/25 and main unchanged). A strict version-1 intent and
+  canonical request frame bind the exact static-profile-passing frozen manifest/
+  artifact pin to the captured document revision and canvas; only the selected
+  capability layer's ordered opaque objects/IDs enter the frame, plus declared
+  edit arguments and caller-offered new IDs. Replies are inspected as **hypo-
+  thetical** bounded frames: candidate status claims, transactional edit
+  proposals over a private projection, and exact-canvas RGBA shape/hash only.
+  Packed pointer/length memory helpers check supplied slices, not a runtime.
+  No WASM engine/instantiation/execution exists, no payload/behavior/provenance
+  is verified, no document/registry byte is mutated, and no PNG/activation/
+  provider/autonomy path is enabled; request digests and context scopes are not
+  MACs, authentication or replay protection. Added `registry-inspect-protocol`
+  (read-only, complete-inventory exact-slot) and 21 new Rust cases (20 portable,
+  1 Linux), plus real debug and uploaded-then-downloaded lifecycle checks with
+  hand-authored fixtures. Exact source `b1febc0` passed
+  [Rust42067792375](https://github.com/c4us4l1ty/perveance/actions/runs/42067792375),
+  job `127386732699`, **6m12s**, including all-target/21 new cases, both new CLI
+  lifecycles and existing document/registry/static/native/package/downloaded
+  regressions. [Matrix42067792369](https://github.com/c4us4l1ty/perveance/actions/runs/42067792369)
+  passed all three jobs; delegated26 job `127386702285` passed exact twelve + two
+  kernel cases, kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor restriction
+  `1` unchanged; the optional namespace probe remained unavailable. Earlier
+  attempts `a0bb48a`/`a99dacb` failed on a binary-private capture call and a test
+  type error, fixed without relaxing `--locked` or gates. Local 50 Python tests
+  and compile/shell/diff checks passed; no local Rust exists. See
+  [EXTENSION_PROTOCOL.md](EXTENSION_PROTOCOL.md). This is still **not** the
+  protected verification/runtime/activation contract, editable capability art or
+  original exact-reuse acceptance; those and release/signing remain open.

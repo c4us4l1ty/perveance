@@ -179,6 +179,20 @@ visible package with uncertain crash durability. See Plan/REGISTRY.md in the
 source repository for limits, failure behavior and verification status. No code,
 provider or autonomy is enabled by quarantine storage.
 
+Data-only protocol inspection (diagnostic only, never an invocation)
+--------------------------------------------------------------------
+registry-inspect-protocol PRIVATE_REGISTRY_ROOT EXACT_SLOT PRIVATE_DOCUMENT_ROOT
+DOCUMENT PRIVATE_INTENT_ROOT INTENT [PRIVATE_REPLY_ROOT REPLY] revalidates the
+complete registry/exact frozen slot, requires a passing static profile, then builds
+a bounded request scoped to the selected capability layer and captured revision.
+Without REPLY it prints only a redacted call summary. With REPLY it inspects a
+strict bounded frame as a candidate claim: edit changes remain an in-memory
+proposal and RGBA success is shape/hashed only. ok=true does not imply
+wire_accepted=true. Nothing is instantiated or executed, no document/registry byte
+is changed, no PNG is produced, and every authority/availability flag is false.
+Hashes/scopes are not authentication or replay protection; hand-authored replies
+prove only host parsing. See Plan/EXTENSION_PROTOCOL.md in the source repository.
+
 Static WASM inspection (diagnostic only, not a runtime)
 ------------------------------------------------------
 registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT rechecks the complete
