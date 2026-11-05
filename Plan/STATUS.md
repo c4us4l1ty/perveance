@@ -124,3 +124,17 @@
 - Continued the dependable pixel-art milestone with rectangular raw-layer region selection and internal-buffer copy/cut/paste/clear. Added bounded `copy_region` / `clear_region` operations for Rust batches/proposals and the limited Python bridge, overlap snapshots, no-clipping replacement semantics, model/CLI/GUI and cross-implementation tests, and a native X11 save/undo/redo/dialog-isolation test. [Rust CI run 41900776563](https://github.com/c4us4l1ty/perveance/actions/runs/41900776563) passed Rust, cross-implementation, native region-editing and existing X11 workflows plus downloaded-bundle verification; 32 local Python tests also passed. The buffer is session-only, never uses the OS clipboard and does not change the v1 project format; this is not a painting mask or floating transform. OpenRouter permissions and disabled arbitrary-code autonomy are unchanged.
 
 - Audited the gap between the working raster prototype and the original AI-first product in [COMPLETION.md](COMPLETION.md). The remaining critical path is secure worker quotas/broker/harness, generic document/render contracts, capability registry/verification/rollback and the genuine build-once/reuse demonstration, plus release hardening. Added a Linux-only persistent data-only raster task backend and CLI with private revision-bound snapshots, bounded append-only state, cooperative locking/cancellation, verified project/PNG output, and explicit no-replay interrupted-run recovery. Added fault/cancellation/concurrency/privacy/parser, cross-process and forced CLI termination tests plus downloaded-bundle task verification. [Rust CI run 41986111833](https://github.com/c4us4l1ty/perveance/actions/runs/41986111833) passed the full Rust suite, forced CLI termination/recovery, existing native X11 tests and downloaded-bundle task verification for commit `3dd9ae0`; all 32 local Python tests passed. [Matrix run 41986111831](https://github.com/c4us4l1ty/perveance/actions/runs/41986111831) passed its configured fixed diagnostics, not a production sandbox gate. GUI/provider wiring, OS quotas and arbitrary-code autonomy remain unimplemented.
+
+
+- Continued the security critical path with a separate fixed-code Linux
+  cgroup-v2 backend: read-back kernel memory/swap/pids/CPU-rate limits before
+  descriptor-based child attachment, size-limited scratch, an independent
+  lease/deadline/aggregate-CPU watchdog, whole-cgroup descendant kill and explicit
+  narrowly scoped recovery. Added fail-closed Rust/CLI tests and six opt-in
+  real-kernel tests for quotas, detached descendants, supervisor SIGKILL/SIGSTOP,
+  watchdog loss and recovery on a disposable delegated Ubuntu 26.04 service.
+  All 41 local Python tests pass, including nine watchdog protocol tests; these
+  use ordinary fixture files and do not prove kernel enforcement. Rust/kernel CI
+  is pending. This is not connected to raster jobs/providers, safe input
+  brokerage, generated execution or activation; autonomy remains disabled.
+  See [LINUX_WORKER.md](LINUX_WORKER.md) for concrete limits and open gates.

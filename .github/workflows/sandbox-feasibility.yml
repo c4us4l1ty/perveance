@@ -85,3 +85,29 @@ jobs:
             python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-fixed-cli.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
             exit 1
           fi
+      - name: Build resource-enforced fixed diagnostic tests
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          cargo test --locked --test bounded_worker --no-run --message-format=json > /tmp/perveance-bounded-build.json
+          python3 -c 'import json; rows=[json.loads(x) for x in open("/tmp/perveance-bounded-build.json")]; bins=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="bounded_worker" and r.get("executable")]; assert len(bins)==1; open("/tmp/perveance-bounded-test-bin","w").write(bins[0])'
+      - name: Require real cgroup quotas and whole-tree cleanup on the delegated CI backend
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          # Privilege is used only to provision one disposable systemd service.
+          # The application, tests, watchdog and bwrap all run as the runner user.
+          # No host policy changes, writable host mounts, or privileged fallback.
+          unit="perveance-bounded-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test_bin=$(cat /tmp/perveance-bounded-test-bin)
+          if sudo systemd-run --unit="$unit" --wait --pipe --collect --service-type=exec \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$GITHUB_WORKSPACE" \
+            --property=Delegate=yes --property=DelegateSubgroup=supervisor \
+            --property=ProtectControlGroups=no --property=KillMode=control-group \
+            --property=RuntimeMaxSec=180 --property=MemoryMax=768M --property=TasksMax=128 \
+            /bin/bash "$GITHUB_WORKSPACE/tools/test_bounded_worker.sh" "$test_bin" > /tmp/perveance-bounded-kernel.log 2>&1; then
+            cat /tmp/perveance-bounded-kernel.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(); assert "6 passed; 0 failed" in s; print("::notice::Six real cgroup-v2 tests passed: quotas, detached-descendant cancellation, supervisor SIGKILL/SIGSTOP, watchdog failure and explicit recovery; fixed code only, autonomy disabled")'
+          else
+            cat /tmp/perveance-bounded-kernel.log
+            python3 -c 'from pathlib import Path; s=Path("/tmp/perveance-bounded-kernel.log").read_text(errors="replace")[-2500:]; print("::error::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi

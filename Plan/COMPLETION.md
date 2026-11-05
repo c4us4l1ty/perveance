@@ -35,7 +35,7 @@ production-sandbox certification, and do not authorize generated-code execution.
 | Prompt-to-pixels | Opt-in typed OpenRouter prototype | Real model-route compatibility, cancellation/progress, secure credential handling and explicit billing controls. It is not a coding harness. |
 | Durable task orchestration | Implemented and CI-tested Linux raster-proposal CLI/library backend | Integrate the GUI/provider and later verified worker pipeline. Existing offline tasks do not authorize code, make model calls or enforce OS quotas. |
 | Foundation decision | Working composed Rust raster engine; scoped Graphite research/headless-check evidence | Record the reversible foundation decision and remaining Graphite rendering/integration tradeoffs. A successful headless check is not a desktop integration spike. |
-| Linux isolation | Fixed-code bubblewrap/staging/FD/lifecycle diagnostics | Enforce and adversarially verify CPU, memory, processes, total disk, wall time, descendant cleanup, trusted input brokerage and denial of secret/network/registry access on the actual supported backend. |
+| Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md), pending kernel CI | Validate real quotas/descendant cleanup, then integrate and adversarially verify the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
 | Model broker and coding harness | Missing | Broker owns credentials and durable reservations; worker has scoped calls but no provider key or general network. Prove one real harness/provider pair. |
 | Extensible document/render contract | Missing; v1 is a strict raster format | Stable IDs, bounded versioned capability payloads, typed editing/render mediation, preservation of unavailable payloads and explicit failure when rendering cannot be correct. |
 | Capability registry/lifecycle | Missing | Immutable versioned artifacts, compatibility/provenance, independent verification, install/stage/activate, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
@@ -67,8 +67,12 @@ production-sandbox certification, and do not authorize generated-code execution.
 
 - [ ] Choose the concrete supported Linux backend/version/prerequisites; a
   developer's CI probe must never automatically approve an end user's host.
-- [ ] Implement actual quotas and descendant cancellation/cleanup; test each
-  denial/failure case independently, including interrupted supervision.
+- [x] Implement a fixed-code cgroup-v2 quota/independent-watchdog component,
+  descriptor-based attachment, bounded scratch and explicit cgroup recovery.
+- [ ] Validate its six real-kernel tests on the delegated CI service; see
+  [LINUX_WORKER.md](LINUX_WORKER.md). Ordinary-file protocol tests are not proof.
+- [ ] Integrate and adversarially verify quotas/descendant cleanup in the actual
+  builder/runtime pipeline, including interruption, watchdog loss and retention.
 - [ ] Add race-resistant, minimal input/output mediation and isolated roles for
   fetch, build, runtime and provider calls. No host sockets or inherited secrets.
 - [ ] Build the credential broker with durable call/cost reservations, bounded

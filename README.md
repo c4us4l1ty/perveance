@@ -333,6 +333,33 @@ On a compatible Linux host, `perveance-cli verify-fixed-worker PROJECT TRUSTED_P
 
 The experimental runner limits each child output file to 8 KiB, treats more than 4 KiB on stdout or stderr as failure, and uses a best-effort 10-second timeout. Its library also exposes fixed test modes for cancellation, timeout and flooding; none are arbitrary executors. Before exec it marks descriptors above stderr close-on-exec using Linux `close_range`; if that syscall is unavailable or blocked, startup fails. A CI test uses one deliberately inheritable synthetic host-file descriptor; this is not a complete descriptor audit. It signals and reaps the immediate bubblewrap process, but does **not** provide a proven descendant-kill guarantee, a cgroup, total-disk/CPU/memory/process quotas or crash recovery. It binds system directories read-only and assumes path-based trusted staging. A diagnostic pass is not authorization, a production sandbox, or an autonomy gate. Outputs and error details are not returned; temporary cleanup can fail or be interrupted by a crash. The separate OpenRouter command is unaffected.
 
+### Resource-enforced fixed-worker backend
+
+A separate Linux diagnostic now requires a **real, private delegated cgroup-v2
+root**. It applies and reads back memory/swap, process-count and CPU-rate limits
+before attaching the worker at exec, uses one size-limited scratch tmpfs, and
+runs an independent watchdog for sampled aggregate CPU/wall budgets. Whole-cgroup
+kill includes detached descendants; lease EOF covers supervisor exit. Normal
+completion requires verified emptiness and cgroup removal. There is no
+unconfined fallback and no generated-code/command input.
+
+With an already provisioned delegated root and a separate private staging
+parent, run **without sudo**:
+
+```sh
+perveance-cli verify-bounded-worker PROJECT PRIVATE_PARENT DELEGATED_CGROUP_ROOT
+perveance-cli recover-bounded-workers DELEGATED_CGROUP_ROOT
+```
+
+Recovery explicitly kills/removes only this backend's exactly named cgroups,
+refuses a cooperating live supervisor, and never deletes abandoned artwork
+snapshots. A diagnostic pass is **not** production security certification. CPU
+budget/deadline sampling can overshoot; global disk, staging retention, trusted
+I/O brokerage and simultaneous supervisor/watchdog loss remain limitations.
+The existing raster jobs and OpenRouter adapter are not wired to these limits.
+See [the backend contract and CI requirements](Plan/LINUX_WORKER.md) before use.
+**Arbitrary-code autonomy remains disabled.**
+
 ### Isolation feasibility diagnostic
 
 The optional bubblewrap diagnostic creates its own temporary sentinel, two workspaces, local TCP listener and Unix socket, and runs only fixed test code. The first workspace contains a fixed input file and no host socket; it checks workspace access, synthetic host sentinel access (including through a symlink and `/proc` root links), the host socket's original path, host IPv4 loopback and removal of a synthetic environment variable. It then runs a negative control with a deliberately exposed host Unix socket in the second workspace and expects the worker to reach it. The clean socket check demonstrates that the fixture omitted the socket, **not** that bubblewrap blocks sockets in arbitrary workspaces. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled. The probe does not copy real project inputs or validate the Rust staging implementation. A separate opt-in fixed-worker integration test exercises an actual staged synthetic project on the selected CI runner; it is not a production worker launcher.

@@ -79,3 +79,22 @@ global disk/retention quota, hard deadline, OS resource enforcement, provider
 budget integration, protected activation, or arbitrary worker execution. Inputs
 and outputs retain hidden artwork until explicitly removed. All existing
 security gates still apply before an autonomous builder can be enabled.
+
+## Resource-enforced fixed-worker increment
+
+A separate [cgroup-v2 development backend](LINUX_WORKER.md) applies kernel memory,
+swap, process and CPU-rate limits before worker exec, a size-limited scratch
+tmpfs and whole-cgroup kill. An independent fixed Python watchdog monitors wall
+and aggregate CPU usage and observes supervisor lease EOF; the supervisor fails
+closed on watchdog loss. Detached descendants and interrupted supervision have
+explicit kernel integration tests configured on a delegated Ubuntu 26.04 service.
+The new Rust/kernel tests await their first CI result; local protocol tests
+against ordinary files are not kernel-isolation evidence.
+
+This accepts embedded diagnostics only and cannot open any autonomy gate. It
+retains trusted staging/ancestor/system-tool assumptions, sampled-budget
+overshoot, limited recovery (cgroups only), and no simultaneous-watchdog-loss or
+real-time guarantee. No broker, arbitrary build/runtime, safe activation or
+production security approval is introduced. Data-only raster jobs retain their
+existing separate cooperative/non-quota semantics. The complete adversarial
+suite and independent review remain required.

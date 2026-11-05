@@ -78,6 +78,13 @@ hidden artwork and partial outputs, remain until you remove them. There is no
 global retention/disk quota, OS resource enforcement, or GUI/provider wiring.
 Use trusted private local paths and see the repository README for full limits.
 
+Separate developer-only verify-bounded-worker/recover-bounded-workers commands
+require an explicitly provisioned private delegated cgroup-v2 root, compatible
+unprivileged bubblewrap and system Python. Never run the application with sudo.
+These run fixed diagnostics only, not generated code; they do not apply quotas
+to raster jobs or OpenRouter. See Plan/LINUX_WORKER.md in the source repository.
+Autonomous execution stays disabled.
+
 OpenRouter integration is experimental and not live-validated. Paid requests
 can incur charges, including when a request fails, and there is no spend cap.
 Do not put credentials in chat, project files, or command-line arguments.

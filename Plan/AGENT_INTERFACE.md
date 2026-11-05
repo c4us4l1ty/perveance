@@ -76,3 +76,15 @@ retention, trust and failure semantics. The Python bridge, GUI and provider
 adapter do not yet expose these jobs. The separate autonomy request inspection
 remains blocked; this is not a provider/harness, broker, sandbox, OS quota
 implementation, or permission to execute generated code.
+
+
+## Bounded worker diagnostics (not agent execution)
+
+`verify-bounded-worker PROJECT PRIVATE_PARENT DELEGATED_CGROUP_ROOT [FIXED_MODE]`
+and `recover-bounded-workers DELEGATED_CGROUP_ROOT` expose a separate Linux
+cgroup-v2 fixed-code backend. They require explicit trusted provisioning, never
+run arbitrary commands and cannot authorize a creative task or extension.
+Reports declare disabled autonomy and an unverified full security boundary.
+Expected quota/failure modes can return CLI `ok`; that means only the fixed test
+behaved as requested, not that artwork succeeded. These limits do not apply to
+the existing raster-job/provider paths. See [LINUX_WORKER.md](LINUX_WORKER.md).
