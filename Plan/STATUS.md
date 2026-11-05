@@ -351,7 +351,8 @@
   fixtures produce `allocation_rejected`, `reply_rejected` (wrong request
   binding), `out_of_fuel`, `trapped` and an allocator-trap `trapped`, are
   byte-identical on repeat and still execute the frozen slot after the source
-  file is overwritten. Code head `65ed259` passed
+  file is overwritten. A trap inside the allocator is reported as `trapped` with
+  `code_executed` set, because guest instructions ran before the trap. Code head `65ed259` passed
   [Rust CI 42082892683](https://github.com/c4us4l1ty/perveance/actions/runs/42082892683),
   job `127440290196`, including the downloaded-bundle lifecycle, and
   [matrix 42082892730](https://github.com/c4us4l1ty/perveance/actions/runs/42082892730)
