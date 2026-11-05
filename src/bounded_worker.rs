@@ -77,6 +77,8 @@ pub enum Outcome { Completed, Cancelled, TimedOut, CpuBudget, MemoryLimit, Proce
 #[derive(Clone, Debug, Serialize)]
 pub struct Usage {
     pub cpu_microseconds: u64,
+    pub cpu_throttled_periods: u64,
+    pub cpu_throttled_microseconds: u64,
     pub memory_peak_bytes: u64,
     pub oom_kills: u64,
     pub process_limit_hits: u64,

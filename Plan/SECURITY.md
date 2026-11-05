@@ -88,7 +88,8 @@ tmpfs and whole-cgroup kill. An independent fixed Python watchdog monitors wall
 and aggregate CPU usage and observes supervisor lease EOF; the supervisor fails
 closed on watchdog loss. Detached descendants and interrupted supervision have
 explicit kernel integration tests configured on a delegated Ubuntu 26.04 service.
-The new Rust/kernel tests await their first CI result; local protocol tests
+Rust compilation and existing Rust/GUI tests passed the first run; the corrected
+private kernel fixtures await CI validation. Local protocol tests
 against ordinary files are not kernel-isolation evidence.
 
 This accepts embedded diagnostics only and cannot open any autonomy gate. It

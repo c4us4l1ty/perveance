@@ -190,8 +190,13 @@ impl<'a> Group<'a> {
     fn kill(&self) -> Result<(), String> { write_control(&self.directory, "cgroup.kill", "1") }
 
     fn usage(&self) -> Result<Usage, String> {
+        let cpu = read_control(&self.directory, "cpu.stat")?;
+        let fields = counters(&cpu)?;
+        let cpu_value = |key| fields.get(key).copied().ok_or_else(|| fail("required CPU counter missing"));
         Ok(Usage {
-            cpu_microseconds: counter(&self.directory, "cpu.stat", "usage_usec")?,
+            cpu_microseconds: cpu_value("usage_usec")?,
+            cpu_throttled_periods: cpu_value("nr_throttled")?,
+            cpu_throttled_microseconds: cpu_value("throttled_usec")?,
             memory_peak_bytes: read_control(&self.directory, "memory.peak")?.trim().parse().map_err(|_| fail("invalid memory peak counter"))?,
             oom_kills: counter(&self.directory, "memory.events", "oom_kill")?,
             process_limit_hits: counter(&self.directory, "pids.events", "max")?,

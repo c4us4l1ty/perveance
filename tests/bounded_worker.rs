@@ -26,14 +26,18 @@ fn diagnostic_limits_and_modes_are_closed_and_bounded() {
 mod linux {
     use super::*;
     use perveance::{bounded_worker::{self, Outcome}, Project};
-    use std::{fs, os::unix::fs::symlink, path::{Path, PathBuf}, process::{Child, Command, Stdio},
+    use std::{fs, os::unix::fs::{symlink, PermissionsExt}, path::{Path, PathBuf}, process::{Child, Command, Stdio},
         sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time::{Duration, Instant}};
+
+    fn private_parent() -> tempfile::TempDir {
+        tempfile::Builder::new().permissions(fs::Permissions::from_mode(0o700)).tempdir().unwrap()
+    }
 
     fn cli() -> Command { Command::new(env!("CARGO_BIN_EXE_perveance-cli")) }
 
     #[test]
     fn cancellation_and_bad_limits_cannot_create_staging_or_groups() {
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_parent();
         let missing = parent.path().join("not-a-delegation");
         let project = Project::new(1, 1).unwrap();
         let cancel = AtomicBool::new(true);
@@ -48,8 +52,8 @@ mod linux {
 
     #[test]
     fn ordinary_files_and_symlinks_never_attest_kernel_enforcement() {
-        let root = tempfile::tempdir().unwrap();
-        let stage = tempfile::tempdir().unwrap();
+        let root = private_parent();
+        let stage = private_parent();
         for (name, data) in [("cgroup.type", "domain"), ("cgroup.subtree_control", "cpu memory pids"), ("cgroup.procs", "")] {
             fs::write(root.path().join(name), data).unwrap();
         }
@@ -74,7 +78,7 @@ mod linux {
         assert_eq!(value["bounded_worker_diagnostic"]["security_boundary_verified"], false);
         assert_eq!(value["autonomy_intake"]["budgets_enforced"], false);
         assert_eq!(value["persistent_raster_tasks"]["resource_quotas_enforced"], false);
-        let root = tempfile::tempdir().unwrap();
+        let root = private_parent();
         let input = root.path().join("input.json");
         Project::new(1, 1).unwrap().save_new(&input).unwrap();
         let output = cli().arg("verify-bounded-worker").arg(&input).arg(root.path()).arg(root.path()).output().unwrap();
@@ -135,7 +139,7 @@ mod linux {
         let input = parent.join("input.json");
         Project::new(1, 1).unwrap().save_new(&input).unwrap();
         ChildGuard(cli().arg("verify-bounded-worker").arg(input).arg(parent).arg(root).arg("fork-tree")
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap())
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn().unwrap())
     }
 
     #[test]
@@ -144,7 +148,7 @@ mod linux {
         use std::{fs::File, os::fd::AsRawFd};
         let root = delegated();
         assert!(groups(&root).is_empty());
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_parent();
         let mut project = Project::new(2, 3).unwrap();
         project.rename_layer(0, "private-artwork-name").unwrap();
         project.layers[0].visible = false;
@@ -157,7 +161,7 @@ mod linux {
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
         assert!(flags >= 0);
         assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) }, 0);
-        let limits = Limits { wall_seconds: 8, cpu_seconds: 1, cpu_percent: 100, scratch_mib: 1, ..Limits::default() };
+        let limits = Limits { wall_seconds: 8, cpu_seconds: 1, cpu_percent: 50, scratch_mib: 1, ..Limits::default() };
         let no = AtomicBool::new(false);
         for (mode, expected) in [
             (Mode::Inspect, Outcome::Completed), (Mode::Fail, Outcome::Failed),
@@ -173,7 +177,10 @@ mod linux {
             assert!(usage.memory_peak_bytes > 0 && usage.cpu_microseconds > 0);
             if mode == Mode::MemoryFlood { assert!(usage.oom_kills > 0); }
             if mode == Mode::PidFlood { assert!(usage.process_limit_hits > 0); }
-            if mode == Mode::CpuBurn { assert!(usage.cpu_microseconds >= 1_000_000); }
+            if mode == Mode::CpuBurn {
+                assert!(usage.cpu_microseconds >= 1_000_000);
+                assert!(usage.cpu_throttled_periods > 0 && usage.cpu_throttled_microseconds > 0, "CPU rate must actually throttle");
+            }
             assert!(!serde_json::to_string(&report).unwrap().contains("private-artwork-name"));
             assert!(groups(&root).is_empty(), "cgroup leak after {mode:?}");
             assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0, "staging leak after {mode:?}");
@@ -187,7 +194,7 @@ mod linux {
     #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
     fn cancellation_kills_detached_descendants_and_locks_out_recovery() {
         let root = delegated();
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_parent();
         let cancel = Arc::new(AtomicBool::new(false));
         struct CancelOnDrop(Arc<AtomicBool>);
         impl Drop for CancelOnDrop { fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); } }
@@ -214,7 +221,7 @@ mod linux {
     #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
     fn supervisor_sigkill_leaves_no_live_descendants_and_explicit_recovery_removes_group() {
         let root = delegated();
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_parent();
         let mut supervisor = spawn_tree(parent.path(), &root);
         let group = live_tree(&root);
         supervisor.0.kill().unwrap();
@@ -233,7 +240,7 @@ mod linux {
     #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
     fn wall_watchdog_survives_a_stopped_supervisor() {
         let root = delegated();
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_parent();
         let mut supervisor = spawn_tree(parent.path(), &root);
         let group = live_tree(&root);
         assert_eq!(unsafe { libc::kill(supervisor.0.id() as libc::pid_t, libc::SIGSTOP) }, 0);
@@ -248,7 +255,7 @@ mod linux {
     #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
     fn recovery_is_explicit_and_never_removes_foreign_cgroups() {
         let root = delegated();
-        let stage = tempfile::tempdir().unwrap();
+        let stage = private_parent();
         let stale = root.join(format!("perveance-worker-{}", "0".repeat(32)));
         let foreign = root.join("foreign-do-not-touch");
         let malformed = root.join("perveance-worker-not-a-managed-id");
@@ -268,7 +275,7 @@ mod linux {
     #[ignore = "requires unprivileged bubblewrap and a real delegated cgroup-v2 root"]
     fn watchdog_loss_fails_closed_in_the_live_supervisor() {
         let root = delegated();
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_parent();
         let mut supervisor = spawn_tree(parent.path(), &root);
         let _group = live_tree(&root);
         let children = fs::read_to_string(format!("/proc/{0}/task/{0}/children", supervisor.0.id())).unwrap();
