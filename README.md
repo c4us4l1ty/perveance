@@ -84,8 +84,10 @@ and explicit interrupted-stage retention. See [contract and limits](Plan/REGISTR
 This is **not verification, installation or execution**: hashes/header checks do
 not validate wasm behavior, imports, exports, payload semantics or provenance.
 All entries remain unavailable; document export still refuses capability layers.
-There is no activation/run command, real provider call or autonomy. New registry
-Rust/real-binary CI is pending; the prior v2 document foundation remains verified.
+There is no activation/run command, real provider call or autonomy. Registry
+Rust/debug/downloaded-binary lifecycle and native regressions passed in
+[Rust CI 42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060);
+see REGISTRY.md for mandatory kernel evidence and remaining gates.
 
 ### Headless batch editing
 

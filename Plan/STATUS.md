@@ -272,6 +272,12 @@
   receipt/scope/corruption checks and retained interrupted stages. Exact document
   reference diagnostics cannot make content available or renderable. Fourteen
   registry and three publisher/enumeration Rust tests plus debug/downloaded-CLI
-  lifecycle coverage are implemented; **new Rust/real-CLI CI pending**. No
-  independent behavior/provenance verification, install, runtime, activation,
-  provider or autonomy is enabled. See [REGISTRY.md](REGISTRY.md).
+  lifecycles passed at `9955839` ([Rust42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060),
+  4m57s), including all-target/native X11/bridge/recovery and downloaded bundle
+  checks. [Matrix42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)
+  passed all three jobs and exact twelve + two required kernel cases on delegated
+  Ubuntu26, kernel `7.0.0-1017-azure`, bwrap `0.11.1`, AppArmor restriction `1`
+  unchanged. The ordinary optional namespace probe remained unavailable. All 50
+  local Python tests and static checks passed. No independent behavior/provenance
+  verification, install, runtime, activation, provider or autonomy is enabled.
+  See [REGISTRY.md](REGISTRY.md); original acceptance remains open.

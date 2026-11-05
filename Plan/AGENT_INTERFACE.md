@@ -194,4 +194,7 @@ install, activate or run operation. `ok` is command completion, not trust or
 availability. Check interrupted-stage and publication-sync flags; retain uncertain
 data, never auto-reset/repair/sweep. Runtime requests and candidate provenance
 are unverified declarations. Document render/edit behavior is unchanged. See
-[REGISTRY.md](REGISTRY.md); new Rust/debug/downloaded-CLI CI is pending.
+[REGISTRY.md](REGISTRY.md). At `9955839`, all-target Rust plus real debug and
+uploaded-then-downloaded CLI lifecycles and native regressions passed
+([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
+mandatory kernel evidence and all remaining execution gates are in REGISTRY.md.

@@ -1,6 +1,6 @@
 # Immutable capability quarantine registry — storage, NOT activation
 
-**2026-11-05 — implemented for review; new Rust/CLI CI evidence pending.**
+**2026-11-05 — verified storage foundation at `9955839b7bd73b36c33e88a35662da0b9e415b17`.**
 This continues the verified [v2 document foundation](DOCUMENT.md) on the same
 fixed session branch and open PR25. PR24/main are not merged or modified by this
 increment. It is a host-owned offline storage/diagnostic component, not a plugin
@@ -189,7 +189,23 @@ Cases include immutable versions, exact pins/deduplication, frozen capture,
 limits across reopen, real lock contention/readers, malformed/self-approval
 inputs, path/link/extra-member/corruption/scope denial, orphan retention and
 continued document rendering refusal. Existing fourteen mandatory worker kernel
-cases remain required. **New Rust/actual-CLI CI pending.**
+cases remain required.
+
+At `9955839`, [Rust CI 42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060)
+passed in **4m57s** (job `127317915507`): all-target Rust including the seventeen
+new registry/publisher cases, real debug-CLI registry and document lifecycles,
+native X11/bridge/recovery regressions, packaging/upload/download and the actual
+downloaded-release CLI registry/document lifecycles. All 50 local Python tests,
+Python compile, shell syntax and diff checks passed. No local Rust toolchain was
+available; Rust execution evidence is actual CI, not a claimed local run.
+
+[Matrix 42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)
+passed all three jobs. Delegated Ubuntu26 job `127317915167` passed the exact
+**twelve worker + two durable-task kernel cases** in 1m34s, kernel
+`7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor userns restriction `1` unchanged.
+The ordinary runner's optional namespace probe still could not start. This is
+fixed offline CI evidence, not independent capability verification, production
+role certification, portable end-user host approval or real-desktop validation.
 
 Still required: protected independent wasm/ABI/import/behavior/payload tests and
 attested build provenance; a confined resource-enforced extension validate/edit/

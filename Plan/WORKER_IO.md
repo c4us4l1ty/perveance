@@ -177,4 +177,7 @@ no child entries, checks directory modification metadata and does not share seek
 offsets across repeated/concurrent callers. Callers validate each listed member
 by the existing descriptor API. New tests cover failure boundaries, uncertain
 commit, directory swaps, actual held-root rename and concurrent enumeration.
-New Rust/real-CLI verification pending; no worker receives a registry FD.
+At `9955839`, all-target/publisher/registry, real debug/downloaded-CLI and native
+regressions passed ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
+all fourteen mandatory worker kernel cases also passed ([42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)).
+No worker receives a registry FD and no module gains execution authority.

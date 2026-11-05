@@ -256,6 +256,11 @@ stages block new admission and are retained, not replayed/deleted or accepted as
 packages. Any corrupt/mismatched record blocks operations rather than falling
 back. Exact diagnostics never dispatch code or change document rendering refusal.
 Same-UID/privileged host tampering, forged/rolled-back storage, filesystem failure,
-whole-host quotas and protected production role separation remain open. New
-Rust/adversarial/actual-binary CI evidence is pending; worker authorization and
-all original self-extension acceptance gates remain closed.
+whole-host quotas and protected production role separation remain open. At
+`9955839`, all-target Rust, real debug/downloaded-CLI registry/document lifecycles
+and native regressions passed ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
+all fourteen mandatory delegated worker kernel cases passed with policy unchanged
+([42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)).
+The ordinary optional namespace probe remains unavailable. Storage tests are not
+behavior verification or portable host approval; worker authorization and all
+original self-extension acceptance gates remain closed.
