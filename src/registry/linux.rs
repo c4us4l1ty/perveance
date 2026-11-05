@@ -134,13 +134,24 @@ impl Registry {
             mode: "quarantine_only_no_execution", code_loaded: false, provider_network_used: false, autonomous_execution: false }
     }
     pub fn inspect(&self) -> Result<Report, String> { Ok(self.report(self.inventory()?)) }
-    /// Read-only, exact frozen bytes; no receipt, approval, runtime or fallback.
-    pub fn audit_module(&self, slot: &str) -> Result<ModuleAudit, String> {
+    fn selected_candidate(&self, slot: &str) -> Result<CapturedCandidate, String> {
         if !hex(slot,64) {return Err(fail("invalid exact quarantine slot"));}
         let (inventory,candidate)=self.inventory_for(Some(slot))?;
-        if inventory.interrupted!=0 {return Err(fail("interrupted private stages block module audit; retain storage for operator review"));}
-        let candidate=candidate.ok_or_else(||fail("exact quarantine slot missing; no version fallback"))?;
+        if inventory.interrupted!=0 {return Err(fail("interrupted private stages block module diagnostics; retain storage for operator review"));}
+        candidate.ok_or_else(||fail("exact quarantine slot missing; no version fallback"))
+    }
+    /// Read-only, exact frozen bytes; no receipt, approval, runtime or fallback.
+    pub fn audit_module(&self, slot: &str) -> Result<ModuleAudit, String> {
+        let candidate=self.selected_candidate(slot)?;
         Ok(ModuleAudit { registry_scope:self.header.scope.clone(),slot:slot.into(),storage_integrity_checked:true,audit:candidate.audit_static() })
+    }
+    /// Inspect a hypothetical exchange, never call code or apply/publish output.
+    pub fn inspect_protocol(&self, slot: &str, document: &Document, intent: &crate::extension_protocol::Intent,
+        reply: Option<&[u8]>) -> Result<ProtocolInspection, String> {
+        let candidate=self.selected_candidate(slot)?;
+        let call=candidate.prepare_call_in_scope(document,intent,&self.header.scope).map_err(|e|e.to_string())?;
+        Ok(ProtocolInspection { registry_scope:self.header.scope.clone(),slot:slot.into(),storage_integrity_checked:true,
+            call:call.report(),reply:reply.map(|bytes|call.inspect_reply(bytes)) })
     }
     pub fn quarantine(&mut self, candidate: &CapturedCandidate) -> Result<Quarantine, String> {
         let mut inventory = self.inventory()?;

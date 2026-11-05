@@ -4,6 +4,7 @@
 pub mod bounded_worker;
 pub mod broker;
 pub mod document;
+pub mod extension_protocol;
 pub mod fixed_worker;
 pub mod file_browser;
 pub mod module_audit;

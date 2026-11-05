@@ -121,6 +121,16 @@ impl CapturedCandidate {
     pub fn audit_static(&self) -> crate::module_audit::Report {
         crate::module_audit::inspect(&self.manifest, &self.manifest_bytes, &self.artifact)
     }
+    /// Construct data-only frames after static checks; still no execution permit.
+    pub fn prepare_call(&self, document: &crate::document::Document, intent: &crate::extension_protocol::Intent)
+        -> Result<crate::extension_protocol::PreparedCall, crate::extension_protocol::Error> {
+        self.prepare_call_in_scope(document,intent,"00000000000000000000000000000000")
+    }
+    pub(crate) fn prepare_call_in_scope(&self, document: &crate::document::Document, intent: &crate::extension_protocol::Intent,
+        scope: &str) -> Result<crate::extension_protocol::PreparedCall, crate::extension_protocol::Error> {
+        if !self.audit_static().static_profile_passed {return Err(crate::extension_protocol::Error::StaticProfileRequired);}
+        crate::extension_protocol::PreparedCall::prepare(&self.manifest, &self.manifest_bytes, document, intent, scope)
+    }
     #[cfg(target_os = "linux")]
     pub fn capture(root: &crate::worker_io::PrivateDirectory, manifest_name: &str, artifact_name: &str) -> Result<Self, String> {
         let manifest = root.read_private(manifest_name, MAX_MANIFEST_BYTES)?;
@@ -154,6 +164,11 @@ pub struct Report {
 pub struct ModuleAudit {
     pub registry_scope: String, pub slot: String, pub storage_integrity_checked: bool,
     pub audit: crate::module_audit::Report,
+}
+#[derive(Debug, Serialize)]
+pub struct ProtocolInspection {
+    pub registry_scope: String, pub slot: String, pub storage_integrity_checked: bool,
+    pub call: crate::extension_protocol::CallReport, pub reply: Option<crate::extension_protocol::ReplyReport>,
 }
 #[derive(Debug, Serialize)]
 pub struct DocumentBinding {
