@@ -41,7 +41,7 @@ fn text(name: &str) -> Vec<u8> {
     out
 }
 #[derive(Clone, Copy)]
-enum Fixture { ZeroAllocator, Reply, Loop, Trap }
+enum Fixture { ZeroAllocator, Reply, Loop, Trap, AllocatorTrap }
 fn reply_bytes() -> Vec<u8> {
     let mut out = b"PVEXRP01".to_vec();
     out.extend([1, 0, 0, 0]);
@@ -52,6 +52,7 @@ fn reply_bytes() -> Vec<u8> {
 fn module(fixture: Fixture) -> Vec<u8> {
     let allocator: Vec<u8> = match fixture {
         Fixture::ZeroAllocator => vec![0x41, 0x00, 0x0b],
+        Fixture::AllocatorTrap => vec![0x00, 0x0b],
         _ => vec![0x41, 0x80, 0x04, 0x0b],
     };
     let entry: Vec<u8> = match fixture {
@@ -63,7 +64,7 @@ fn module(fixture: Fixture) -> Vec<u8> {
         }
         Fixture::Loop => vec![0x03, 0x40, 0x0c, 0x00, 0x0b, 0x00, 0x0b],
         Fixture::Trap => vec![0x00, 0x0b],
-        Fixture::ZeroAllocator => vec![0x42, 0x00, 0x0b],
+        Fixture::ZeroAllocator | Fixture::AllocatorTrap => vec![0x42, 0x00, 0x0b],
     };
     let mut out = b"\0asm\x01\0\0\0".to_vec();
     out.extend(section(1, &[0x02, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7e, 0x60, 0x01, 0x7f, 0x01, 0x7f]));
@@ -151,6 +152,15 @@ fn zero_allocator_is_refused_after_real_instantiation_and_execution() {
     assert_eq!(report.engine, "wasmi-2.0.0");
     assert!(report.gates.engine_compiled && report.gates.module_instantiated && report.gates.code_executed);
     assert_eq!(report.instance_memory_bytes, Some(65536));
+    assert!(report.reply.is_none());
+    no_authority(&report);
+}
+
+#[test]
+fn an_allocator_trap_after_instantiation_is_a_contained_trap_not_authority() {
+    let (report, _) = invoke(Fixture::AllocatorTrap);
+    assert_eq!(report.outcome, Outcome::Trapped);
+    assert!(report.gates.engine_compiled && report.gates.module_instantiated && report.gates.code_executed);
     assert!(report.reply.is_none());
     no_authority(&report);
 }

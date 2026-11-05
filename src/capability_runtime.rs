@@ -179,6 +179,8 @@ fn execute(engine: &wasmi::Engine, manifest: &Manifest, artifact: &[u8], call: &
     let pointer = match allocator.call(&mut store, request_length) {
         Ok(pointer) => pointer,
         Err(error) => {
+            // Guest instructions ran before the trap; record that honestly.
+            run.executed = true;
             run.fuel_remaining = store.get_fuel().ok();
             return Run { outcome: trap_outcome(&error), ..run };
         }
