@@ -18,7 +18,7 @@ impl Module{
         (3,vec![4,1,0,0,0]),(5,vec![1,1,1,1]),(7,exports(exported())),(10,bodies(stubs()))]}}
     fn set(&mut self,id:u8,bytes:Vec<u8>){
         self.sections.retain(|(n,_)|*n!=id);self.sections.push((id,bytes));
-        self.sections.sort_by_key(|(n,_)|match n{0=>255,12=>9,_=>*n});
+        self.sections.sort_by_key(|(n,_)|match n{0=>255,13=>6,6=>7,7=>8,8=>9,9=>10,12=>11,10=>12,11=>13,_=>*n});
     }
     fn bytes(&self)->Vec<u8>{let mut b=b"\0asm\x01\0\0\0".to_vec();for(id,data)in &self.sections{b.push(*id);b.extend(uint(data.len()as u32));b.extend(data);}b}
 }
