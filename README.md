@@ -333,6 +333,119 @@ On a compatible Linux host, `perveance-cli verify-fixed-worker PROJECT TRUSTED_P
 
 The experimental runner limits each child output file to 8 KiB, treats more than 4 KiB on stdout or stderr as failure, and uses a best-effort 10-second timeout. Its library also exposes fixed test modes for cancellation, timeout and flooding; none are arbitrary executors. Before exec it marks descriptors above stderr close-on-exec using Linux `close_range`; if that syscall is unavailable or blocked, startup fails. A CI test uses one deliberately inheritable synthetic host-file descriptor; this is not a complete descriptor audit. It signals and reaps the immediate bubblewrap process, but does **not** provide a proven descendant-kill guarantee, a cgroup, total-disk/CPU/memory/process quotas or crash recovery. It binds system directories read-only and assumes path-based trusted staging. A diagnostic pass is not authorization, a production sandbox, or an autonomy gate. Outputs and error details are not returned; temporary cleanup can fail or be interrupted by a crash. The separate OpenRouter command is unaffected.
 
+### Resource-enforced fixed-worker backend
+
+A separate Linux diagnostic now requires a **real, private delegated cgroup-v2
+root**. It applies and reads back memory/swap, process-count and CPU-rate limits
+before attaching the worker at exec, uses a sealed stdin project and one
+size-limited scratch tmpfs, and runs an independent watchdog for sampled aggregate CPU/wall budgets. Whole-cgroup
+kill includes detached descendants; lease EOF covers supervisor exit. Normal
+completion requires verified emptiness and cgroup removal. There is no
+unconfined fallback and no generated-code/command input.
+
+With an already provisioned delegated root and a separate private parent
+(the legacy argument, no longer used for staging), run **without sudo** using a
+trusted source path:
+
+```sh
+perveance-cli verify-bounded-worker PROJECT PRIVATE_PARENT DELEGATED_CGROUP_ROOT
+perveance-cli recover-bounded-workers DELEGATED_CGROUP_ROOT
+```
+
+Recovery explicitly kills/removes only this backend's exactly named cgroups,
+refuses a cooperating live supervisor, and never deletes artwork. This backend
+now uses anonymous input/logs instead of disk artwork staging. A diagnostic
+pass is **not** production security certification. CPU budget/deadline sampling
+can overshoot; global disk, legacy retention, complete role-separated I/O
+mediation and simultaneous supervisor/watchdog loss remain limitations.
+The existing raster jobs and OpenRouter adapter are not wired to these limits.
+See [the backend contract and CI requirements](Plan/LINUX_WORKER.md) before use.
+**Arbitrary-code autonomy remains disabled.**
+
+### Descriptor-mediated input and raster bundle publication
+
+On Linux, private directory capabilities now constrain relative reads with
+`openat2`: no traversal, symlinks, magic links or mount crossing beneath the
+chosen root. Regular-file ownership/privacy/link/size checks precede reading.
+Projects become kernel-sealed anonymous snapshots; fixed workers receive stdin,
+not source pathnames or host directories. Use the preferred diagnostic:
+
+```sh
+perveance-cli verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+```
+
+A separate useful offline operation needs no worker, cgroup or provider:
+
+```sh
+perveance-cli publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT BUNDLE_NAME
+```
+
+It renders the validated raster project and installs editable
+`output.perveance.json` plus `output.png` as one new bundle directory. Private
+roots must be absolute, owned, mode 0700 and free of symlink components; source
+files must be owned/private with one link. Publication uses no-replace rename:
+existing names are never overwritten. Check `parent_directory_synced`: false
+means the bundle **is already committed** but final sync failed; inspect that
+same name, do not blindly retry/delete. This is not guaranteed power-loss
+durability or a quota-enforced host operation. Library-only candidate artifact
+validation also requires exact trusted project/composite equality and normalizes
+metadata before publication. See [WORKER_IO.md](Plan/WORKER_IO.md) for limits,
+required syscalls, recovery caveats and remaining gates. Autonomy stays disabled.
+
+### Scoped model broker and durable budgets (offline only)
+
+A Linux broker component now holds a private credential and immutable trusted
+route/budget policy behind a connected Unix socket. Requests cannot select a
+key, endpoint, model, price or refund. A lifetime exclusive lock and bounded
+append journal sync each full call/cost reservation **before** dispatch and
+settlement **before** delivering text. Reservations are never refunded; stable
+IDs are never redispatched, including after crashes or lost replies. Unknown
+outcomes or billing breaches halt new calls. No automatic reset or replay exists.
+
+Only a constant offline transport with a synthetic server-side key is shipped:
+
+```sh
+mkdir -m 700 broker-ledger broker-requests
+# Put a private (0600) JSON request in broker-requests/call.json; schema below.
+perveance-cli broker-ledger-init /absolute/broker-ledger 2 20 10
+perveance-cli broker-fixture-call /absolute/broker-ledger /absolute/broker-requests call.json
+perveance-cli broker-ledger-inspect /absolute/broker-ledger
+```
+
+A request is `{"version":1,"id":"00000000000000000000000000000001","prompt":"offline fixture request","max_output_tokens":10}`.
+Use fresh stable opaque IDs for different intended calls. `ok:true` means the
+exchange was processed; inspect `fixture.reply.status` and `ledger.halted`.
+An identical retry returns `already_finished`, without cached completion text
+or another dispatch. Frame/byte/token limits, no-refund/uncertainty semantics,
+credential loading, durability caveats and the test scope are documented in
+[MODEL_BROKER.md](Plan/MODEL_BROKER.md).
+
+This does **not** enable a paid provider, guarantee real billing bounds, isolate
+a production broker, or connect existing tasks/GUI/workers. The manual
+OpenRouter prototype remains separate and has no spend cap. Protected role
+separation, real route/harness/token/pricing verification and independent review
+remain open. Do not put credentials in chat, artwork, requests, env or arguments.
+**Generated-code autonomy stays disabled.**
+
+### Confined offline broker-worker diagnostic
+
+`verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+PRIVATE_ONE_CALL_LEDGER_ROOT` now connects the fixed namespace/cgroup peer to
+the host broker. Initialize a healthy one-call offline ledger with
+`broker-ledger-init /absolute/ledger 1 10 10`; the delegated backend must already
+be provisioned. The peer gets sealed project stdin, one connected duplex stdout
+socket and bounded stderr, not keys or ledger/source mounts. Five fixed exchanges
+test denial of overrides, deduplication, conflicts and exhausted budgets.
+
+Trusted admission checks cancellation, monotonic scope expiry and peer liveness
+before reserve, after sync before dispatch and before text. Interrupted or
+uncertain calls keep the full reservation; recovery never resets accounting.
+The fixed probe uses fresh synthetic host credentials/sentinels/listeners only;
+its private temporary fixture directory can remain after SIGKILL. See
+[BROKER_WORKER.md](Plan/BROKER_WORKER.md) for retention and proof limits. No real
+provider, generated code, production broker approval or task/GUI wiring is added.
+Autonomy remains disabled.
+
 ### Isolation feasibility diagnostic
 
 The optional bubblewrap diagnostic creates its own temporary sentinel, two workspaces, local TCP listener and Unix socket, and runs only fixed test code. The first workspace contains a fixed input file and no host socket; it checks workspace access, synthetic host sentinel access (including through a symlink and `/proc` root links), the host socket's original path, host IPv4 loopback and removal of a synthetic environment variable. It then runs a negative control with a deliberately exposed host Unix socket in the second workspace and expects the worker to reach it. The clean socket check demonstrates that the fixture omitted the socket, **not** that bubblewrap blocks sockets in arbitrary workspaces. It prints JSON with `passed`, `failed`, or `unavailable`; all outcomes leave autonomous execution disabled. The probe does not copy real project inputs or validate the Rust staging implementation. A separate opt-in fixed-worker integration test exercises an actual staged synthetic project on the selected CI runner; it is not a production worker launcher.

@@ -76,3 +76,65 @@ retention, trust and failure semantics. The Python bridge, GUI and provider
 adapter do not yet expose these jobs. The separate autonomy request inspection
 remains blocked; this is not a provider/harness, broker, sandbox, OS quota
 implementation, or permission to execute generated code.
+
+
+## Bounded worker diagnostics (not agent execution)
+
+`verify-bounded-worker PROJECT PRIVATE_PARENT DELEGATED_CGROUP_ROOT [FIXED_MODE]`
+and `recover-bounded-workers DELEGATED_CGROUP_ROOT` expose a separate Linux
+cgroup-v2 fixed-code backend. They require explicit trusted provisioning, never
+run arbitrary commands and cannot authorize a creative task or extension.
+Reports declare disabled autonomy and an unverified full security boundary.
+Expected quota/failure modes can return CLI `ok`; that means only the fixed test
+behaved as requested, not that artwork succeeded. These limits do not apply to
+the existing raster-job/provider paths. See [LINUX_WORKER.md](LINUX_WORKER.md).
+
+
+## Descriptor-mediated fixed input and offline publication
+
+Linux `verify-mediated-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT CGROUP_ROOT`
+uses confined relative reads and sealed stdin for the fixed-code worker; it does
+not mount a source path/directory or grant agent execution. The old
+`verify-bounded-worker` initial source loading still assumes trusted paths.
+
+`publish-raster-bundle PRIVATE_INPUT_ROOT RELATIVE_PROJECT PRIVATE_OUTPUT_ROOT
+BUNDLE_NAME` uses the trusted renderer in-process and atomically installs a new
+editable-project/PNG directory without replacing an occupied name. It is not a
+quota-enforced job or a model call. A true `committed` with false
+`parent_directory_synced` means artwork was installed but durability is uncertain:
+inspect that same bundle name instead of blindly retrying/deleting it. See
+[WORKER_IO.md](WORKER_IO.md). Existing task/provider/GUI/bridge paths are separate.
+
+
+## Offline model-broker and budget fixture
+
+On Linux, `broker-ledger-init PRIVATE_ROOT MAX_CALLS MAX_COST_MICROUSD
+PER_CALL_UPPER_MICROUSD` creates a new immutable offline-fixture budget domain.
+`broker-fixture-call PRIVATE_LEDGER_ROOT PRIVATE_REQUEST_ROOT RELATIVE_REQUEST`
+exercises one strict framed exchange using a synthetic key held only by the
+server. `broker-ledger-inspect PRIVATE_ROOT` exposes bounded metadata, never raw
+prompts, credentials, responses or request hashes. It takes the same exclusive
+lock as a live broker and may fail busy.
+
+Check `fixture.reply.status`, not only CLI `ok`: an exchange may be processed
+but denied, already finished or uncertain. Reusing an ID never dispatches again
+or returns cached text; changing its payload is a conflict. Full reservations
+are permanent, even on failure. Uncertain/incomplete calls halt new requests;
+there is no reset/refund/retry command. Root/file and provider trust limitations,
+frame/billing semantics and the exact JSON schema are in
+[MODEL_BROKER.md](MODEL_BROKER.md). These fixtures use no real key or provider and
+are not wired to existing tasks, GUI, manual OpenRouter or autonomous workers.
+
+
+## Confined offline broker peer diagnostic
+
+`verify-broker-worker PRIVATE_INPUT_ROOT RELATIVE_PROJECT DELEGATED_CGROUP_ROOT
+PRIVATE_ONE_CALL_LEDGER_ROOT` connects an embedded fixed peer to the host broker.
+Use a healthy `broker-ledger-init ... 1 10 10` offline ledger and an already
+provisioned supported backend. It exercises immutable policy, deduplication,
+confinement and five framed exchanges; no real key is accepted or provider called.
+It does not install/execute capabilities or create a raster job. Library-only
+hold modes test interruption, not arbitrary agents/commands. Missing prerequisites
+fail without an unconfined fallback. Synthetic host probe files may remain on
+SIGKILL; never clear the ledger to retry an uncertain call. See
+[BROKER_WORKER.md](BROKER_WORKER.md) for scope and retention caveats.

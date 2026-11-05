@@ -1,6 +1,8 @@
 //! Small, deliberately limited pixel-art prototype shared by the GUI and CLI.
 //! It does not execute AI-generated code or implement a sandbox.
 
+pub mod bounded_worker;
+pub mod broker;
 pub mod fixed_worker;
 pub mod file_browser;
 pub mod provider;
@@ -9,6 +11,7 @@ pub mod region;
 pub mod supervisor;
 pub mod tasks;
 pub mod workspace;
+pub mod worker_io;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -706,6 +709,11 @@ impl Project {
     /// Create a PNG using integer nearest-neighbor enlargement of the visible
     /// composite. Scale is bounded; artwork and its editable dimensions are unchanged.
     pub fn export_png_scaled_new(&self, path: &Path, scale: u32) -> Result<(), String> {
+        write_new(path, &self.png_bytes(scale)?)
+    }
+
+    /// Shared bounded encoder, also used by descriptor-scoped publication.
+    pub(crate) fn png_bytes(&self, scale: u32) -> Result<Vec<u8>, String> {
         if scale == 0 || scale > MAX_EXPORT_SCALE {
             return Err(format!("PNG export scale must be between 1 and {MAX_EXPORT_SCALE}"));
         }
@@ -731,7 +739,7 @@ impl Project {
             writer.write_image_data(&pixels).map_err(|e| format!("PNG pixels: {e}"))?;
             writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
         }
-        write_new(path, &bytes)
+        Ok(bytes)
     }
 }
 
@@ -746,6 +754,10 @@ fn decode_png(path: &Path) -> Result<DecodedPng, String> {
     let file = File::open(path).map_err(|e| format!("open PNG: {e}"))?;
     let mut bytes = Vec::new();
     BufReader::new(file).take(MAX_PNG_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("read PNG: {e}"))?;
+    decode_png_bytes(&bytes)
+}
+
+fn decode_png_bytes(bytes: &[u8]) -> Result<DecodedPng, String> {
     if bytes.len() as u64 > MAX_PNG_BYTES { return Err("PNG exceeds input size limit".into()); }
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_limits(png::Limits { bytes: 8 * 1024 * 1024 });

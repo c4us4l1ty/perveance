@@ -47,9 +47,9 @@ The prototype can stage one already-validated raster project into a private Linu
 
 ## Experimental task intake (not a gate implementation)
 
-The data-only intake inspection checks a versioned request against budget ceilings provided by the trusted caller and a project snapshot fingerprint. It unconditionally returns blocked for all valid requests: user-provided JSON cannot enable execution or assert that a gate passed. Ceilings are declarations, not resource limits; the standalone OpenRouter prototype is not subject to them. There is no job, supervisor process, enforced isolation, resource meter, broker or verifier. Normal path loading assumes trusted regular files and follows symlinks; this interface is not safe input brokerage.
+The data-only intake inspection checks a versioned request against budget ceilings provided by the trusted caller and a project snapshot fingerprint. It unconditionally returns blocked for all valid requests: user-provided JSON cannot enable execution or assert that a gate passed. Ceilings are declarations, not resource limits; the standalone OpenRouter prototype is not subject to them. This interface creates no job, supervisor process, enforced isolation, resource meter, broker call or verifier result. Normal path loading assumes trusted regular files and follows symlinks; this interface is not safe input brokerage.
 
-An experimental in-memory model-call reservation counter rejects unknown/zero cost bounds, over-budget calls and integer overflow, and does not refund reservations. It is not wired to the provider, survives no restart, depends on a trustworthy bound supplied by trusted code, and cannot guarantee provider charges. It is not an authorization or a credential broker. A future broker must own synchronization, durable accounting, provider-specific billing controls and all other security gates; otherwise calls remain disabled in the autonomous pipeline.
+An experimental in-memory model-call reservation counter rejects unknown/zero cost bounds, over-budget calls and integer overflow, and does not refund reservations. It is not wired to the provider, survives no restart, depends on a trustworthy bound supplied by trusted code, and cannot guarantee provider charges. It is not an authorization or a credential broker. The separate broker increment below owns synchronization and durable accounting, but real provider-specific billing controls and all other security gates remain open; calls stay disabled in the autonomous pipeline.
 
 ## Fixed worker lifecycle experiment
 
@@ -79,3 +79,109 @@ global disk/retention quota, hard deadline, OS resource enforcement, provider
 budget integration, protected activation, or arbitrary worker execution. Inputs
 and outputs retain hidden artwork until explicitly removed. All existing
 security gates still apply before an autonomous builder can be enabled.
+
+## Resource-enforced fixed-worker increment
+
+A separate [cgroup-v2 development backend](LINUX_WORKER.md) applies kernel memory,
+swap, process and CPU-rate limits before worker exec, a size-limited scratch
+tmpfs and whole-cgroup kill. An independent fixed Python watchdog monitors wall
+and aggregate CPU usage and observes supervisor lease EOF; the supervisor fails
+closed on watchdog loss. Detached descendants and interrupted supervision have
+explicit kernel integration tests configured on a delegated Ubuntu 26.04 service.
+[Feasibility run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272)
+passed all six real-kernel quota/lifecycle tests at `b7be7f2` without relaxing host
+AppArmor policy. Local protocol tests against ordinary files are not themselves
+kernel-isolation evidence; this fixed-workload pass is not a production gate.
+
+This accepts embedded diagnostics only and cannot open any autonomy gate. It
+retains trusted root-object/filesystem/system-tool assumptions, sampled-budget
+overshoot, limited recovery (cgroups only), and no simultaneous-watchdog-loss or
+real-time guarantee. No broker, arbitrary build/runtime, safe activation or
+production security approval is introduced. Data-only raster jobs retain their
+existing separate cooperative/non-quota semantics. The complete adversarial
+suite and independent review remain required.
+
+
+## Descriptor-scoped raster I/O component
+
+[WORKER_IO.md](WORKER_IO.md) specifies a new Linux capability-based component.
+Required `openat2` resolution prevents symlink/traversal/magic-link/mount escape
+beneath authorized private roots; inode/type/privacy/link/size checks precede
+readable opens. Captured projects are canonical sealed memfds, supplied to the
+fixed worker through stdin without source mounts, source paths or directory FDs.
+Its logs are anonymous, not disk staging files.
+
+Candidate artifact capture requires full project equality with trusted expected
+artwork and bounded PNG/composite equality, then re-encodes canonical data.
+Publication installs a new private two-file bundle with no-replace rename and
+reports post-commit sync uncertainty without deleting artwork or inviting a
+blind retry. This is not authenticated storage, document CAS, guaranteed crash
+recovery, safe activation or protection against a malicious same-user host.
+At `36963cc`, [Rust run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225)
+passed all 18 new I/O tests plus full regression/downloaded-bundle checks;
+[run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)
+passed all seven real workers on the delegated Ubuntu 26.04 service without
+relaxing host AppArmor policy. This evidence is scoped to that fixed workload
+and selected host, not a production or arbitrary-code isolation approval.
+Protected role separation/output transport, provider/broker integration and the
+complete independent adversarial security gate remain open; autonomy is disabled.
+
+
+## Scoped broker and durable budget component (offline only)
+
+[MODEL_BROKER.md](MODEL_BROKER.md) describes host-owned credentials and immutable
+route/call/cost policy behind a connected Unix-socket capability. The bounded
+strict request schema cannot select a key, URL, model, cost or refund. Debug and
+errors redact raw prompts/credentials; literal key echo in responses is withheld.
+Only the constant offline transport is shipped; the old manual OpenRouter
+prototype is unchanged and does not use this ledger.
+
+An exclusively locked, descriptor-rooted append journal syncs the full call/cost
+reservation before invoking the trusted adapter and syncs settlement before
+releasing completion text. Actual usage never refunds a reservation. Stable IDs
+are never redispatched, including after restart or lost replies. Pending or
+unknown outcomes, rejected responses and billing breaches halt new calls;
+partial/corrupt records fail closed without repair, refund or replay. Hashes are
+not authentication; host-account/filesystem compromise, rollback or copied
+ledgers and guaranteed power-loss durability remain outside the contract.
+
+New tests include real cooperating subprocesses, SIGKILL after fake dispatch,
+strict/fragmented/dripping IPC and injected write/sync failures. All 14 unit
+and eight integration cases passed at `258cc80` in
+[Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176),
+including full GUI/recovery and downloaded-CLI regression.
+[Run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)
+kept all seven fixed-worker kernel tests green without relaxing AppArmor.
+Neither protocol tests nor a fixed unsandboxed peer prove protected role
+separation. Broker-process hardening, credential stores, actual task/worker
+integration, paid-provider token/pricing/deadline/usage verification, compatible
+harness validation and independent review remain required. A positive declared
+cost alone cannot establish a real provider charge bound. Autonomy stays off.
+
+
+## First confined broker peer (offline synthetic fixtures)
+
+[BROKER_WORKER.md](BROKER_WORKER.md) connects the host broker to an actual fixed
+worker namespace/cgroup over one connected stdout socket, with sealed input on
+stdin and bounded summary on stderr. The launcher drops its worker-end parent
+handles after spawn; otherwise peer EOF could not revoke authority. No secret,
+ledger/source directory FD or host socket pathname is exposed as a mount.
+Fresh synthetic credential/sentinel files and host listeners provide real
+negative targets. These are not real credentials or general exfiltration proof.
+
+Guarded admission checks cancellation, monotonic scope expiry and peer EOF/
+half-close before reservation, after its sync before dispatch, and before text
+release. Revocation never refunds or retries. Pending owner death keeps the
+ledger halted; cgroup recovery never clears accounting. SIGSTOP/resume tests
+require the independent watchdog to kill the peer and deny stale dispatch.
+At `cf1fc2c`, all eleven delegated kernel tests passed ([matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633));
+all-target Rust/native GUI/downloaded-bundle regression also passed
+([42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)).
+48 local Python tests pass. The supported host kept its AppArmor userns
+restriction at 1; the separate ordinary runner's optional namespace probe still
+could not start. These are implementation-specific fixed-code results, not a
+portable production sandbox attestation.
+Protected production roles, actual task/output/response recovery, a real provider
+with verified pricing/token/deadline bounds and independent review remain open.
+Only fixed offline code runs; autonomy stays disabled. Synthetic fixture dirs
+can remain on SIGKILL and have no automatic retention sweep.

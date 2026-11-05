@@ -35,8 +35,8 @@ production-sandbox certification, and do not authorize generated-code execution.
 | Prompt-to-pixels | Opt-in typed OpenRouter prototype | Real model-route compatibility, cancellation/progress, secure credential handling and explicit billing controls. It is not a coding harness. |
 | Durable task orchestration | Implemented and CI-tested Linux raster-proposal CLI/library backend | Integrate the GUI/provider and later verified worker pipeline. Existing offline tasks do not authorize code, make model calls or enforce OS quotas. |
 | Foundation decision | Working composed Rust raster engine; scoped Graphite research/headless-check evidence | Record the reversible foundation decision and remaining Graphite rendering/integration tradeoffs. A successful headless check is not a desktop integration spike. |
-| Linux isolation | Fixed-code bubblewrap/staging/FD/lifecycle diagnostics | Enforce and adversarially verify CPU, memory, processes, total disk, wall time, descendant cleanup, trusted input brokerage and denial of secret/network/registry access on the actual supported backend. |
-| Model broker and coding harness | Missing | Broker owns credentials and durable reservations; worker has scoped calls but no provider key or general network. Prove one real harness/provider pair. |
+| Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md) with seven passing real-kernel tests and [descriptor I/O](WORKER_IO.md) | Integrate and adversarially verify quotas/descendant cleanup in the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
+| Model broker and coding harness | New [offline broker/ledger component](MODEL_BROKER.md); real harness/route missing | Isolate the actual broker/worker roles and integrate durable calls into tasks; retain response recovery and conservative uncertainty behavior. Verify provider billing/token bounds and one real compatible harness; no paid autonomous route is enabled. |
 | Extensible document/render contract | Missing; v1 is a strict raster format | Stable IDs, bounded versioned capability payloads, typed editing/render mediation, preservation of unavailable payloads and explicit failure when rendering cannot be correct. |
 | Capability registry/lifecycle | Missing | Immutable versioned artifacts, compatibility/provenance, independent verification, install/stage/activate, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
 | Autonomous build/reuse | Missing and disabled | Genuine vector-absent baseline, independently verified build/activation, editable saved/reopened vector artwork plus PNG, then a distinct task reusing the same version without another build. |
@@ -67,12 +67,42 @@ production-sandbox certification, and do not authorize generated-code execution.
 
 - [ ] Choose the concrete supported Linux backend/version/prerequisites; a
   developer's CI probe must never automatically approve an end user's host.
-- [ ] Implement actual quotas and descendant cancellation/cleanup; test each
-  denial/failure case independently, including interrupted supervision.
-- [ ] Add race-resistant, minimal input/output mediation and isolated roles for
-  fetch, build, runtime and provider calls. No host sockets or inherited secrets.
-- [ ] Build the credential broker with durable call/cost reservations, bounded
-  requests and conservative billing behavior. No keys in worker files/env/args.
+- [x] Implement a fixed-code cgroup-v2 quota/independent-watchdog component,
+  descriptor-based attachment, bounded scratch and explicit cgroup recovery.
+- [x] Validate its six real-kernel tests on the delegated CI service
+  ([run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272),
+  `b7be7f2`); see [LINUX_WORKER.md](LINUX_WORKER.md). Protocol mocks are not proof.
+- [ ] Integrate and adversarially verify quotas/descendant cleanup in the actual
+  builder/runtime pipeline, including interruption, watchdog loss and retention.
+- [x] Implement [descriptor-scoped raster I/O](WORKER_IO.md): confined reads,
+  sealed stdin snapshots, trusted expected-artifact comparison and no-replace
+  project/PNG bundle publication. No worker receives a source directory FD.
+- [x] Validate this I/O increment at `36963cc`: 18 new Rust I/O tests/full
+  regression/downloaded Linux bundle ([run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225))
+  and seven real worker-kernel tests on the delegated service
+  ([run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)).
+- [ ] Complete role-separated input/output transport and minimal permissions for
+  fetch, build, runtime and provider calls. Existing task/GUI loaders are not
+  retroactively brokered. No host sockets or inherited secrets.
+- [x] Implement the scoped [broker/ledger component](MODEL_BROKER.md): host-owned
+  credentials, bounded connected-socket requests, immutable route/budget policy,
+  exclusive durable reservations before dispatch, no refunds/retries and halted
+  uncertain outcomes. Only an offline fixture transport is shipped.
+- [x] Validate the broker's 14 unit/eight integration cases and downloaded CLI
+  at `258cc80` ([Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176));
+  the seven fixed-worker tests also passed regression
+  ([run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)).
+  Offline fixtures are not paid-provider or protected broker-isolation proof.
+- [x] Connect the host offline broker to a confined fixed-code peer through
+  sealed stdin/duplex stdout only, with leased admission and no secret/ledger
+  mounts. See [BROKER_WORKER.md](BROKER_WORKER.md); no real provider is enabled.
+- [x] Validate the four new broker/kernel cases (eleven total), revocation tests
+  and CLI integration at `cf1fc2c`: [Rust/full bundle 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)
+  and [delegated matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633).
+  This verifies fixed offline code only, not the production role/task gates below.
+- [ ] Complete protected broker/worker role separation, actual task integration,
+  response recovery and verified provider billing/token/deadline controls. No
+  keys in worker files/env/args; do not treat a declared bound as billing proof.
 - [ ] Test a real compatible harness through that broker. If its auth/network
   needs cannot meet the contract, reject it rather than weakening isolation.
 

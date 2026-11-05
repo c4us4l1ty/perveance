@@ -124,3 +124,91 @@
 - Continued the dependable pixel-art milestone with rectangular raw-layer region selection and internal-buffer copy/cut/paste/clear. Added bounded `copy_region` / `clear_region` operations for Rust batches/proposals and the limited Python bridge, overlap snapshots, no-clipping replacement semantics, model/CLI/GUI and cross-implementation tests, and a native X11 save/undo/redo/dialog-isolation test. [Rust CI run 41900776563](https://github.com/c4us4l1ty/perveance/actions/runs/41900776563) passed Rust, cross-implementation, native region-editing and existing X11 workflows plus downloaded-bundle verification; 32 local Python tests also passed. The buffer is session-only, never uses the OS clipboard and does not change the v1 project format; this is not a painting mask or floating transform. OpenRouter permissions and disabled arbitrary-code autonomy are unchanged.
 
 - Audited the gap between the working raster prototype and the original AI-first product in [COMPLETION.md](COMPLETION.md). The remaining critical path is secure worker quotas/broker/harness, generic document/render contracts, capability registry/verification/rollback and the genuine build-once/reuse demonstration, plus release hardening. Added a Linux-only persistent data-only raster task backend and CLI with private revision-bound snapshots, bounded append-only state, cooperative locking/cancellation, verified project/PNG output, and explicit no-replay interrupted-run recovery. Added fault/cancellation/concurrency/privacy/parser, cross-process and forced CLI termination tests plus downloaded-bundle task verification. [Rust CI run 41986111833](https://github.com/c4us4l1ty/perveance/actions/runs/41986111833) passed the full Rust suite, forced CLI termination/recovery, existing native X11 tests and downloaded-bundle task verification for commit `3dd9ae0`; all 32 local Python tests passed. [Matrix run 41986111831](https://github.com/c4us4l1ty/perveance/actions/runs/41986111831) passed its configured fixed diagnostics, not a production sandbox gate. GUI/provider wiring, OS quotas and arbitrary-code autonomy remain unimplemented.
+
+
+- Continued the security critical path with a separate fixed-code Linux
+  cgroup-v2 backend: read-back kernel memory/swap/pids/CPU-rate limits before
+  descriptor-based child attachment, size-limited scratch, an independent
+  lease/deadline/aggregate-CPU watchdog, whole-cgroup descendant kill and explicit
+  narrowly scoped recovery. Added fail-closed Rust/CLI tests and six opt-in
+  real-kernel tests for quotas, detached descendants, supervisor SIGKILL/SIGSTOP,
+  watchdog loss and recovery on a disposable delegated Ubuntu 26.04 service.
+  All 41 local Python tests pass, including nine watchdog protocol tests; these
+  use ordinary fixture files and do not prove kernel enforcement.
+  [Feasibility run 41993520272](https://github.com/c4us4l1ty/perveance/actions/runs/41993520272)
+  passed all six real-kernel tests at `b7be7f2`, including actual CPU throttling,
+  on kernel 7.0.0-1019-azure / bubblewrap 0.11.1 without relaxing AppArmor. The
+  first run correctly rejected insufficiently private test staging; fixtures
+  were corrected without weakening backend policy.
+  [Rust run 41993520371](https://github.com/c4us4l1ty/perveance/actions/runs/41993520371)
+  passed the complete Rust/native-GUI/bridge/recovery and downloaded-bundle
+  regression suite for that implementation commit. Follow-up documentation-only
+  checks are tracked in [PR #23](https://github.com/c4us4l1ty/perveance/pull/23/checks).
+  This is not connected to raster jobs/providers, safe input
+  brokerage, generated execution or activation; autonomy remains disabled.
+  See [LINUX_WORKER.md](LINUX_WORKER.md) for concrete limits and open gates.
+
+
+- Continued trusted I/O mediation with Linux directory capabilities and required
+  `openat2` resolution, pre-readable-open special-file/link/privacy/size checks,
+  sealed anonymous project snapshots and path-free fixed-worker stdin. Replaced
+  this backend's disk artwork/log staging with anonymous descriptors. Added
+  exact trusted expected-project/PNG candidate validation, canonical metadata
+  normalization, no-replace atomic bundle publication and explicit committed-but-
+  parent-sync-uncertain reporting. Exposed the mediated diagnostic and useful
+  offline raster-bundle CLI, with shared renderer/parser reuse. Added normal
+  Rust adversarial/fault/concurrency tests, a seventh delegated worker input test
+  and downloaded-binary publication verification. All 41 local Python tests
+  pass. At `36963cc`, [Rust run 42006495225](https://github.com/c4us4l1ty/perveance/actions/runs/42006495225)
+  passed all 18 new I/O tests and full native-GUI/bridge/recovery/downloaded-binary
+  regression, including publication/revision/hash/collision checks. All seven
+  real worker tests passed in [run 42006494788](https://github.com/c4us4l1ty/perveance/actions/runs/42006494788)
+  on the delegated Ubuntu 26.04 service, kernel `7.0.0-1017-azure`, bubblewrap
+  `0.11.1`, AppArmor user-namespace restriction still enabled. The ordinary Rust
+  runner's optional namespace probe could not start; this is selected-host
+  fixed-code evidence, not general host approval. Provider brokerage,
+  role-separated worker output transport, task integration and generated-code
+  autonomy remain absent. See [WORKER_IO.md](WORKER_IO.md).
+
+
+- Continued with a Linux scoped broker and durable call/cost ledger: host-owned
+  redacted credential type, connected-socket-only strict bounded requests,
+  immutable trusted route/budget policy, lifetime exclusive lock and synced
+  reservation-before-dispatch/settlement-before-reply journal. Stable IDs are
+  never retried; actual usage never refunds; unknown/rejected/over-bound outcomes
+  halt new calls. The only shipped transport is a constant offline synthetic-key
+  fixture, with CLI init/inspect/call commands and downloaded-binary checks.
+  Added 14 unit and eight integration test cases (including a subprocess helper)
+  for replay/faults/concurrency/IPC/real SIGKILL and unsafe credential/file input.
+  All 41 local Python tests pass. At `258cc80`, [Rust run 42011716176](https://github.com/c4us4l1ty/perveance/actions/runs/42011716176)
+  passed those cases and full native-GUI/bridge/recovery/downloaded-CLI regression,
+  including reservation/restart/dedup/exhaustion. [Run 42011716112](https://github.com/c4us4l1ty/perveance/actions/runs/42011716112)
+  passed all seven existing fixed-worker kernel tests on delegated Ubuntu 26.04,
+  kernel `7.0.0-1019-azure`, bubblewrap `0.11.1`, AppArmor userns restriction `1`.
+  The ordinary runner's optional namespace probe could not start; fixed peer
+  IPC tests are not protected broker-role evidence. No real credentials,
+  provider calls, task/worker integration or generated code are enabled.
+  See [MODEL_BROKER.md](MODEL_BROKER.md) for exact trust/limits.
+
+
+- Connected the host broker to the confined fixed-code cgroup/bubblewrap worker:
+  sealed project stdin, connected duplex stdout and bounded summary stderr;
+  no extra descriptors, secret/ledger/source mounts or real provider route.
+  Added fresh synthetic host credentials/listeners and direct/proc/symlink denial
+  checks, five bounded policy/dedup/conflict/exhaustion exchanges, and host-side
+  corroboration of the peer summary. Dropped retained Command Stdio handles so
+  peer EOF is meaningful. Guarded admission now checks scope before reserve,
+  after sync before dispatch and before text; aborts preserve full reservations.
+  Added before/inflight cancellation, broker SIGKILL and SIGSTOP/resume kernel
+  cases (eleven mandatory worker tests total), five Rust unit and three normal
+  integration/helper cases, plus seven Python negative/protocol/environment tests.
+  Initial CI caught the probe incorrectly rejecting bubblewrap's own PWD; it now
+  requires exactly `/work` and still rejects host variables. At `cf1fc2c`,
+  [matrix 42017625633](https://github.com/c4us4l1ty/perveance/actions/runs/42017625633)
+  passed all eleven real kernel cases on delegated Ubuntu 26.04, kernel
+  `7.0.0-1017-azure`, bubblewrap `0.11.1`, AppArmor restriction `1` (unchanged).
+  [Rust CI 42017625949](https://github.com/c4us4l1ty/perveance/actions/runs/42017625949)
+  passed in 6m16s including native desktop/bridge/recovery and downloaded-bundle
+  checks. All 48 local Python tests pass. The ordinary runner's optional probe
+  still could not start. This is not production role certification, real provider
+  integration or durable task/output transport. See [BROKER_WORKER.md](BROKER_WORKER.md).

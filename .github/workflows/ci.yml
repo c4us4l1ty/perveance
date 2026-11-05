@@ -258,6 +258,31 @@ jobs:
           "$bundle/bin/perveance-cli" task-inspect task-store "$task_id" > task-inspected.json
           "$bundle/bin/perveance-cli" sample "task-store/$task_id/output.perveance.json" 0 0 layer 0 > task-sample.json
           python3 -c 'import json; a=json.load(open("task-completed.json"))["task"]; b=json.load(open("task-inspected.json"))["task"]; assert a==b and a["state"]=="succeeded" and a["artifacts_verified"] and len(a["history"])==3 and not a["network_used"] and not a["autonomous_execution"]; assert json.load(open("task-sample.json"))["color"]==[11,22,33,44]; print("Downloaded CLI persistent raster-task round trip passed")'
+          # Descriptor-confined input and atomic two-artifact publication using
+          # the downloaded executable, with no worker/cgroup prerequisite.
+          mkdir -m 700 mediated-input mediated-output
+          cp potion.json mediated-input/source.json
+          chmod 600 mediated-input/source.json
+          "$bundle/bin/perveance-cli" publish-raster-bundle "$work/mediated-input" source.json "$work/mediated-output" result > publication.json
+          "$bundle/bin/perveance-cli" inspect mediated-output/result/output.perveance.json > publication-project.json
+          python3 -c 'import hashlib,json,pathlib; r=json.load(open("publication.json"))["publication"]; assert r["committed"] and r["parent_directory_synced"] and not r["autonomous_execution"]; assert r["revision"]==json.load(open("inspection.json"))["revision"]==json.load(open("publication-project.json"))["revision"]; root=pathlib.Path("mediated-output/result"); assert {p.name for p in root.iterdir()}=={"output.perveance.json","output.png"}; assert all(a["bytes"]==(root/a["file"]).stat().st_size and a["sha256"]==hashlib.sha256((root/a["file"]).read_bytes()).hexdigest() for a in r["artifacts"]); print("Downloaded CLI descriptor-mediated project/PNG publication passed")'
+          if "$bundle/bin/perveance-cli" publish-raster-bundle "$work/mediated-input" source.json "$work/mediated-output" result > /dev/null 2> publication-collision.json; then
+            echo "::error::Publication unexpectedly replaced an occupied name"
+            exit 1
+          fi
+          python3 -c 'import json,pathlib; assert json.load(open("publication-collision.json"))["ok"] is False; assert len(list(pathlib.Path("mediated-output").iterdir()))==1'
+          # Durable broker reservations through the downloaded executable. This
+          # is an offline synthetic-key fixture, never a paid provider test.
+          mkdir -m 700 broker-ledger broker-requests
+          "$bundle/bin/perveance-cli" broker-ledger-init "$work/broker-ledger" 1 10 10 > broker-initial.json
+          python3 -c 'import json; json.dump({"version":1,"id":"00000000000000000000000000000001","prompt":"offline downloaded-broker fixture","max_output_tokens":10},open("broker-requests/call.json","w"))'
+          chmod 600 broker-requests/call.json
+          "$bundle/bin/perveance-cli" broker-fixture-call "$work/broker-ledger" "$work/broker-requests" call.json > broker-first.json
+          "$bundle/bin/perveance-cli" broker-fixture-call "$work/broker-ledger" "$work/broker-requests" call.json > broker-duplicate.json
+          python3 -c 'import json; p="broker-requests/call.json"; r=json.load(open(p)); r["id"]="00000000000000000000000000000002"; json.dump(r,open(p,"w"))'
+          "$bundle/bin/perveance-cli" broker-fixture-call "$work/broker-ledger" "$work/broker-requests" call.json > broker-exhausted.json
+          "$bundle/bin/perveance-cli" broker-ledger-inspect "$work/broker-ledger" > broker-inspected.json
+          python3 -c 'import json,pathlib; a=json.load(open("broker-first.json"))["fixture"]; b=json.load(open("broker-duplicate.json"))["fixture"]; c=json.load(open("broker-exhausted.json"))["fixture"]; d=json.load(open("broker-inspected.json"))["ledger"]; assert a["reply"]["status"]=="completed" and a["service"]["provider_called"] and a["service"]["outcome_recorded"]; assert b["reply"]["status"]=="already_finished" and b["reply"]["text"] is None and not b["service"]["provider_called"]; assert c["reply"]["status"]=="budget_exhausted" and not c["service"]["provider_called"]; assert all(x["fixture_only"] and not x["network_used"] and not x["autonomous_execution"] for x in (a,b,c)); assert d["reserved_calls"]==1 and d["reserved_cost_microusd"]==10 and d["calls"][0]["actual_cost_microusd"]==5 and not d["halted"]; data=pathlib.Path("broker-ledger/model-budget.v1").read_bytes(); assert b"offline downloaded-broker fixture" not in data and b"synthetic-offline-broker-credential" not in data; print("Downloaded CLI offline broker reservation/restart/deduplication/exhaustion passed")'
           PERVEANCE_BIN="$bundle/bin/perveance" CLOSE_HELPER="$GITHUB_WORKSPACE/tools/send_x11_close.py" xvfb-run -a sh -c '
             set -eu
             export LIBGL_ALWAYS_SOFTWARE=1
