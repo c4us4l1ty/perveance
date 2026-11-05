@@ -273,8 +273,14 @@ Complete storage inventory/scope checks precede audit, using the same frozen
 selected bytes, with no unchecked re-read or persisted approval. Corruption,
 missing exact slots and retained interrupted stages block audit. Raw parser
 errors/module names/source are not echoed. Input/count/depth caps are **not**
-process CPU/RAM/wall enforcement; parsing is still host-side. Exact-head CI for
-this increment is pending, separate from prior storage evidence above.
+process CPU/RAM/wall enforcement; parsing is still host-side. Exact source
+`3f6639b` passed all-target Rust (20 new cases), real debug/downloaded static/
+document/registry lifecycles and native regressions ([42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)).
+All three matrix jobs and exact twelve + two kernel cases passed
+([42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)), delegated26
+kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor restriction `1` unchanged.
+The ordinary optional namespace probe remained unavailable. This is fixed
+component evidence, not security certification or portable host approval.
 
 A pass cannot prove behavior, schemas, pointer/output/allocator safety,
 termination, deterministic floats, provenance or runtime quota compliance.

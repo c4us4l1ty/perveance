@@ -9,7 +9,7 @@ An early Rust prototype for an AI-first art studio. The long-term vision and sec
 - A Linux-only persistent job backend for revision-bound raster proposals: private snapshots, status, cooperative cancellation, verified project/PNG outputs and explicit interrupted-run recovery. It is not wired to the GUI/provider and does not run generated code.
 - An offline [data-only v2 document foundation](Plan/DOCUMENT.md): stable layer/object IDs, bounded byte-preserving unavailable-capability payloads, revision-bound native edits and explicit export refusal instead of missing content. This is CLI/library-only, not working plugins or a vector capability.
 - A new [quarantine-only capability registry](Plan/REGISTRY.md): immutable version/pin bindings, private captured artifact storage and exact document-reference diagnostics. Stored bytes remain unverified, unavailable and non-executable; this does not install a plugin.
-- A [read-only static WASM diagnostic](Plan/MODULE_AUDIT.md): full module validation plus bounded import/export/memory/signature profile checks on exact stored bytes. A pass is not capability verification and never installs, activates, runs or makes a layer renderable; exact-head CI is pending.
+- A [read-only static WASM diagnostic](Plan/MODULE_AUDIT.md): full module validation plus bounded import/export/memory/signature profile checks on exact stored bytes. A pass is not capability verification and never installs, activates, runs or makes a layer renderable; debug/downloaded-release CI passed.
 - A headless CLI backed by the shared Rust raster engine. Run `cargo run --locked --bin perveance-cli -- capabilities` for the current operations and `cargo run --locked --bin perveance` for the GUI.
 - A new-file-only save/export policy: outputs cannot overwrite an existing file. Writes are staged in the target directory before installation. The simple JSON format is experimental and not yet a stable interchange format.
 
@@ -95,8 +95,13 @@ read-only structural and prospective ABI-signature diagnostic, with fixed
 redacted findings and no stored approval. It revalidates the complete registry
 and refuses corruption/interrupted storage. Even matching stubs or an infinite
 loop can pass; all capability/runtime/activation/availability flags stay false.
-See [MODULE_AUDIT.md](Plan/MODULE_AUDIT.md) for the exact policy, limits and pending
-new-increment verification; the storage CI above does not cover the new inspector.
+See [MODULE_AUDIT.md](Plan/MODULE_AUDIT.md) for the exact policy, limits and evidence.
+At `3f6639b`, [Rust CI 42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)
+passed all-target Rust (20 new cases), debug/downloaded-release static/document/
+registry lifecycles and native regressions; the mandatory twelve + two kernel
+cases also passed ([matrix 42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)).
+No local Rust execution, portable host approval or original capability-growth
+acceptance is claimed.
 
 ### Headless batch editing
 

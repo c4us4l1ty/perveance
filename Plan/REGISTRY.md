@@ -8,8 +8,10 @@ loader, independent verifier, installer, execution permit or vector capability.
 
 The next [static WASM diagnostic increment](MODULE_AUDIT.md) adds a separate
 read-only optional audit, not an admission/runtime change or persisted blessing.
-Its exact-head execution evidence is pending; the storage evidence below covers
-the prior verified foundation, not that new inspector.
+Its exact source `3f6639b` passed all-target/debug/downloaded/native regression CI
+([42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)) and
+all fourteen mandatory kernel cases ([42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533));
+see MODULE_AUDIT.md. The storage evidence below covers the prior foundation.
 
 ## Explicitly closed execution gates
 

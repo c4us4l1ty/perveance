@@ -38,7 +38,7 @@ production-sandbox certification, and do not authorize generated-code execution.
 | Linux isolation | Fixed-code bubblewrap/staging diagnostics plus a new [delegated cgroup-v2 quota/watchdog backend](LINUX_WORKER.md) with twelve passing worker integration + two task kernel cases and [descriptor I/O](WORKER_IO.md) | Integrate and adversarially verify quotas/descendant cleanup in the actual supported build/runtime pipeline, trusted input brokerage, secret/network/registry denial and crash/retention policies. |
 | Model broker and coding harness | New [offline broker/ledger component](MODEL_BROKER.md); real harness/route missing | Isolate the actual broker/worker roles and integrate durable calls into tasks; retain response recovery and conservative uncertainty behavior. Verify provider billing/token bounds and one real compatible harness; no paid autonomous route is enabled. |
 | Extensible document/render contract | Verified [data-only v2 foundation](DOCUMENT.md); legacy v1 stays strict raster | Complete the protected extension-specific validation, typed editing/render ABI, confined resource-bounded dispatch and migration/rollback contract. Opaque preservation/native edits are not a working extension. |
-| Capability registry/lifecycle | Verified [quarantine-only immutable storage](REGISTRY.md); [static WASM diagnostic](MODULE_AUDIT.md) implemented, exact-head CI pending; no active/installed capability | Protected independent module/ABI/behavior verification and provenance, confined execution, trusted install/stage/activate records, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
+| Capability registry/lifecycle | Verified [quarantine-only immutable storage](REGISTRY.md); verified [static WASM diagnostic](MODULE_AUDIT.md); no active/installed capability | Protected independent module/ABI/behavior verification and provenance, confined execution, trusted install/stage/activate records, crash-safe rollback and recoverable project migrations. Candidate code must not bless itself. |
 | Autonomous build/reuse | Missing and disabled | Genuine vector-absent baseline, independently verified build/activation, editable saved/reopened vector artwork plus PNG, then a distinct task reusing the same version without another build. |
 | Distribution | Unsigned x86-64 Linux evaluation artifact, tested after download | Runtime/desktop compatibility, full dependency/asset/license review, owner license choice, signing/provenance/update policy and release approval. |
 
@@ -132,11 +132,14 @@ production-sandbox certification, and do not authorize generated-code execution.
   refusal. At `9955839`, all-target/debug/downloaded-CLI/native regression passed
   ([42048502060](https://github.com/c4us4l1ty/perveance/actions/runs/42048502060));
   fourteen mandatory kernel cases also passed ([42048502059](https://github.com/c4us4l1ty/perveance/actions/runs/42048502059)).
-- [ ] Validate the new [static WASM diagnostic](MODULE_AUDIT.md) on the exact head:
-  full structural/body validation, bounded memory/export/signature profile,
-  frozen read-only exact-slot binding, negative fixtures and debug/downloaded
-  executable lifecycles. This is not independent capability verification or
-  activation authority; even useless stubs/infinite loops can pass.
+- [x] Verify the [static WASM diagnostic](MODULE_AUDIT.md): full structural/body
+  validation, bounded memory/export/signature profile, frozen read-only exact-slot
+  binding, negative fixtures and real debug/downloaded executable lifecycles.
+  Exact source `3f6639b` passed all-target/20 new cases/native regressions
+  ([42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)) and
+  mandatory twelve + two kernel cases ([42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)).
+  This is not independent capability verification or activation authority; even
+  useless stubs/infinite loops can pass. No local Rust/toolchain run is claimed.
 - [ ] Complete capability verification/provenance and lifecycle beyond quarantine.
   A captured SHA-256/header/storage receipt is not a wasm/ABI/behavior test or
   an install/activation permit. All registry entries remain unavailable.

@@ -208,4 +208,7 @@ A static pass still has every verification/runtime/install/activation/availabili
 flag false; it never changes capture receipts or document render/edit dispatch.
 No `latest` fallback, execution, persisted approval or interrupted-store recovery
 is available. See [MODULE_AUDIT.md](MODULE_AUDIT.md) for the versioned profile,
-report semantics, host-parser resource limitations and pending exact-head CI.
+report semantics and host-parser resource limitations. Exact source `3f6639b`
+passed all-target/debug/downloaded/native CI ([42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542));
+all fourteen required kernel cases passed ([42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)).
+No runtime/behavior/provider or portable host approval follows.

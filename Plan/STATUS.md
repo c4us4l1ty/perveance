@@ -292,7 +292,19 @@
   findings, not cached approvals. No code is instantiated/executed and every
   verification/runtime/install/activation/availability/autonomy flag stays false;
   capability-layer PNG refusal is unchanged. New Rust byte fixtures and real
-  debug/downloaded CLI lifecycle checks are implemented. Exact-head execution CI
-  is pending, with no local Rust toolchain; prior storage evidence is not new
-  inspector evidence. See [MODULE_AUDIT.md](MODULE_AUDIT.md). Protected behavioral
-  verification, runtime/wire ABI and original creative build/reuse remain open.
+  debug/downloaded CLI lifecycle checks passed at exact source `3f6639b`:
+  [Rust42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542),
+  job `127359693355`, **6m18s**, including all-target/20 new tests, actual debug
+  and downloaded-release static/document/registry lifecycles plus native X11/
+  bridge/recovery/package regressions. Initial weak-indexmap lock resolution and
+  canonical tag-fixture ordering issues were fixed; required `--locked` checks
+  were never relaxed and the temporary resolution diagnostic was removed.
+  [Matrix42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)
+  passed all three jobs; delegated26 job `127359692952` passed exact twelve + two
+  kernel cases in **1m16s**, kernel `7.0.0-1019-azure`, bwrap `0.11.1`, AppArmor
+  restriction `1` unchanged. The ordinary optional namespace probe remained
+  unavailable. Local 50 Python tests/compile/shell/diff checks passed; there is
+  no local Rust toolchain. See [MODULE_AUDIT.md](MODULE_AUDIT.md). This is not
+  independent behavior/provenance verification or portable host approval.
+  Protected behavioral verification, runtime/wire ABI and original creative
+  build/reuse remain open. PR24/25 are still open and main is unchanged.

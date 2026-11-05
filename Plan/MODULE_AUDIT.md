@@ -1,6 +1,6 @@
 # Static WASM diagnostic — not capability verification or activation
 
-**2026-11-05 — implementation increment; exact-head CI evidence pending.**
+**2026-11-05 — verified diagnostic source at `3f6639bce992fa0deaf7adf523ed1436b3d5e397`.**
 This continues [immutable quarantine storage](REGISTRY.md), not a new runtime.
 `registry-audit-module PRIVATE_REGISTRY_ROOT EXACT_SLOT` inspects the **actual
 frozen stored bytes**, not a candidate's success claims or a version fallback.
@@ -178,9 +178,32 @@ runs a separate real CLI lifecycle, required by CI for both the debug binary
 and the actual uploaded-then-downloaded release executable. No mock CLI,
 interpreter, dynamic plugin or candidate-supplied success test is substituted.
 
-Exact-head Rust/debug/downloaded/native/kernel execution evidence is pending;
-there is no local Rust toolchain. Existing quarantine evidence in REGISTRY.md
-covers the **prior** storage increment, not this new inspector.
+At exact source `3f6639b`, [Rust CI 42060281542](https://github.com/c4us4l1ty/perveance/actions/runs/42060281542)
+passed in **6m18s** (job `127359693355`): mandatory `cargo test --locked --all-targets`
+including **twenty new inspector cases** (18 portable, 2 Linux), real debug CLI
+static-audit/document/registry lifecycles, native X11/bridge/recovery regressions,
+release build/metadata/packaging/upload/download and all three lifecycles against
+the **actual downloaded release executable**. The dependency lock was resolved
+with Cargo (including the weak indexmap edge) and the temporary failing-build
+diagnostic removed; all required final builds still use `--locked`. A negative
+tag fixture's section ordering was corrected before this green run.
+
+[Matrix 42060281533](https://github.com/c4us4l1ty/perveance/actions/runs/42060281533)
+passed all three jobs. Delegated Ubuntu26 job `127359692952` passed the exact
+**twelve worker + two durable-task kernel cases** in **1m16s**, kernel
+`7.0.0-1019-azure`, bubblewrap `0.11.1`, AppArmor userns restriction `1` unchanged.
+The successful required step and its notice are guarded by distinct complete
+`test result: ok. 12 passed; 0 failed` and `test result: ok. 2 passed; 0 failed`
+prefixes in the unchanged workflow; the two-case check cannot match twelve.
+The ordinary runner's optional namespace probe still could not start. These
+are fixed offline CI observations, not end-user host/desktop approval, independent
+behavior verification, production role certification or real-provider evidence.
+
+Local 50 Python tests passed again (1.783s), Python compile/shell syntax/diff checks
+passed. There is **no local Rust toolchain**; Rust and real-binary execution
+claims above are actual exact-source CI, not a claimed local run. Prior storage
+evidence remains in REGISTRY.md. The subsequent evidence-only documentation
+head is also checked by the same required workflows; see the PR's latest status.
 
 Still missing: protected independent behavior/schema/provenance verification,
 a complete typed-edit/render wire ABI, confined fuel/memory/output/runtime
